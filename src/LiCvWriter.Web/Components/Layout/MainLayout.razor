@@ -1,0 +1,162 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using LiCvWriter.Application.Models
+@inject OperationStatusService Operations
+@inject WorkspaceSession Workspace
+
+<div class="shell">
+    <aside class="shell-sidebar">
+        <div class="brand-block">
+            <div class="brand-kicker">LI CV Writer</div>
+            <div class="brand-title">Local AI Resume Workbench</div>
+            <p class="brand-text">Set up the session, then work each target role inside a single tabbed job workbench with local Ollama models.</p>
+        </div>
+
+        <section class="sidebar-panel">
+            <div class="field-label">Navigation</div>
+            <NavMenu />
+        </section>
+
+        <section class="sidebar-panel">
+            <div class="field-label">Workspace</div>
+            <div class="sidebar-metric">@(Workspace.CandidateProfile?.Name.FullName ?? "No profile loaded")</div>
+            <div class="sidebar-text">Active tab: @Workspace.ActiveJobSet.Title</div>
+            <div class="sidebar-text">Target role: @(Workspace.JobPosting?.RoleTitle ?? "No target role yet")</div>
+            <div class="sidebar-text">Language: @Workspace.ActiveJobSet.OutputLanguage</div>
+            <div class="sidebar-text">LinkedIn data: @FormatLinkedInDataState(Workspace.LinkedInAuthorizationStatus)</div>
+            <div class="sidebar-text">LLM: @(Workspace.IsLlmReady ? Workspace.SelectedLlmModel : "Pending setup")</div>
+            <div class="sidebar-text">Ollama loaded: @FormatLoadedModels(Workspace.OllamaAvailability)</div>
+            <div class="sidebar-text">Thinking: @(Workspace.IsLlmReady ? FormatThinkingLevel(Workspace.SelectedThinkingLevel) : "Pending")</div>
+            <div class="sidebar-text">Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Stored" : "Not set")</div>
+            <div class="sidebar-text">Selected evidence: @Workspace.GetActiveSelectedEvidenceCount()</div>
+            <div class="sidebar-text">Tab status: @FormatProgressState(Workspace.ActiveJobSet.ProgressState)</div>
+            <div class="sidebar-text">@Workspace.ActiveJobSet.ProgressDetail</div>
+            <div class="sidebar-text">Drafts: @Workspace.GeneratedDocuments.Count</div>
+        </section>
+
+        <section class="sidebar-panel">
+            <div class="field-label">Activity</div>
+            <div class="sidebar-metric">@Operations.CurrentMessage</div>
+            <div class="status-chip @(Operations.IsBusy ? "status-pending" : "status-ok")">
+                @(Operations.IsBusy ? "App-level work is running." : "App-level status feed only. The UI stays interactive.")
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Operations.CurrentDetail))
+            {
+                <div class="sidebar-text">@Operations.CurrentDetail</div>
+            }
+
+            @if (Operations.CurrentLlmTelemetry is not null)
+            {
+                <dl class="key-value-grid compact-grid">
+                    <dt>Phase</dt>
+                    <dd>@Operations.CurrentLlmTelemetry.Message</dd>
+                    <dt>Elapsed</dt>
+                    <dd>@FormatDuration(Operations.CurrentLlmTelemetry.Elapsed)</dd>
+                    @if (Operations.CurrentLlmTelemetry.PromptTokens is not null)
+                    {
+                        <dt>Prompt</dt>
+                        <dd>@FormatTokenCount(Operations.CurrentLlmTelemetry.PromptTokens)</dd>
+                    }
+                    @if (Operations.CurrentLlmTelemetry.CompletionTokens is not null)
+                    {
+                        <dt>Completion</dt>
+                        <dd>@FormatTokenCount(Operations.CurrentLlmTelemetry.CompletionTokens)</dd>
+                    }
+                    @if (Operations.CurrentLlmTelemetry.HasEstimatedRemaining)
+                    {
+                        <dt>ETA</dt>
+                        <dd>@FormatDuration(Operations.CurrentLlmTelemetry.EstimatedRemaining)</dd>
+                    }
+                </dl>
+            }
+
+            <div class="button-row">
+                <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
+            </div>
+
+            <div class="activity-feed">
+                @foreach (var entry in Operations.Entries.Take(6))
+                {
+                    <article class="activity-entry activity-@entry.Level">
+                        <div class="activity-message">@entry.Message</div>
+                        @if (!string.IsNullOrWhiteSpace(entry.Detail))
+                        {
+                            <div class="activity-detail">@entry.Detail</div>
+                        }
+                        <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")</div>
+                    </article>
+                }
+            </div>
+        </section>
+    </aside>
+
+    <main class="shell-content">
+        <div class="content-frame">
+            @Body
+        </div>
+    </main>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Operations.Changed += HandleChanged;
+        Workspace.Changed += HandleChanged;
+    }
+
+    public void Dispose()
+    {
+        Operations.Changed -= HandleChanged;
+        Workspace.Changed -= HandleChanged;
+    }
+
+    private static string FormatThinkingLevel(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? "Pending"
+            : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static string FormatProgressState(JobSetProgressState progressState)
+        => progressState switch
+        {
+            JobSetProgressState.Done => "Done",
+            JobSetProgressState.Running => "Running",
+            JobSetProgressState.Failed => "Needs attention",
+            _ => "Not started"
+        };
+
+    private static string FormatLinkedInDataState(LinkedInAuthorizationStatus status)
+        => status.IsAuthorized
+            ? "Loaded"
+            : "Pending DMA import";
+
+    private static string FormatLoadedModels(OllamaModelAvailability? availability)
+    {
+        if (availability is null)
+        {
+            return "Unknown";
+        }
+
+        return availability.EffectiveRunningModels.Count == 0
+            ? "None reported"
+            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
+    }
+
+    private static string FormatDuration(TimeSpan? duration)
+    {
+        if (duration is null)
+        {
+            return "Pending";
+        }
+
+        var value = duration.Value;
+        return value.TotalMinutes >= 1
+            ? value.ToString(@"m\:ss")
+            : value.ToString(@"s\.f\s");
+    }
+
+    private static string FormatTokenCount(long? tokens)
+        => tokens?.ToString("N0") ?? "Pending";
+
+    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+}
+

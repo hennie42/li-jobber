@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>LiCvWriter.Infrastructure</RootNamespace>
+    <AssemblyName>LiCvWriter.Infrastructure</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Application\LiCvWriter.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+  </ItemGroup>
+</Project>
+

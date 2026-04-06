@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>LiCvWriter.Application</RootNamespace>
+    <AssemblyName>LiCvWriter.Application</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
+  </ItemGroup>
+</Project>

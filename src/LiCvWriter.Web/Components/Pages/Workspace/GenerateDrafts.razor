@@ -1,0 +1,21 @@
+@page "/workspace/generate-drafts"
+@inject NavigationManager Navigation
+
+<PageTitle>Redirecting</PageTitle>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Redirect</div>
+    <h1>Opening Job Workbench</h1>
+    <p class="muted-text">Draft generation now lives inside the merged Job Workbench page.</p>
+</section>
+
+@code {
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            Navigation.NavigateTo("/workspace/job-workbench", replace: true);
+        }
+    }
+}
+

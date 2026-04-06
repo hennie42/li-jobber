@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+.vscode/*.code-workspace
+TestResults/
+artifacts/
+outputs/
+.local/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+LI-export/

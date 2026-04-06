@@ -1,0 +1,793 @@
+@page "/"
+@implements IDisposable
+@using LiCvWriter.Application.Models
+@using LiCvWriter.Core.Profiles
+@inject ILlmClient LlmClient
+@inject ILinkedInExportImporter ExportImporter
+@inject IInsightsDiscoveryPdfImporter InsightsDiscoveryPdfImporter
+@inject LinkedInAuthOptions LinkedInOptions
+@inject InsightsDiscoveryApplicantDifferentiatorDraftingService InsightsDiscoveryDraftingService
+@inject OllamaOptions OllamaOptions
+@inject OperationStatusService Operations
+@inject WorkspaceSession Workspace
+
+<PageTitle>Start / Setup</PageTitle>
+
+<section class="hero-panel">
+    <div>
+        <div class="eyebrow">Start / Setup</div>
+        <h1>Configure the LLM session and load the profile before moving into the job workbench.</h1>
+        <p class="hero-copy">Keep setup on one page: choose the Ollama model for this session, load the LinkedIn DMA member snapshot, review the imported profile metadata, then optionally draft or save applicant differentiators before switching to the job workbench.</p>
+    </div>
+
+    <div class="status-grid">
+        <article class="status-card accent-sand">
+            <span class="status-label">Session LLM</span>
+            <strong>@(Workspace.IsLlmReady ? Workspace.SelectedLlmModel : "Not selected")</strong>
+            <span>@(Workspace.IsLlmReady ? $"Thinking: {FormatThinkingLevel(Workspace.SelectedThinkingLevel)}" : "Choose a model for this session")</span>
+        </article>
+        <article class="status-card accent-ink">
+            <span class="status-label">LinkedIn profile</span>
+            <strong>@(result?.Profile.Name.FullName ?? "Not loaded")</strong>
+            <span>@(result is null ? "Load the profile from the DMA member snapshot API." : result.SourceDescription)</span>
+        </article>
+        <article class="status-card accent-rust">
+            <span class="status-label">Next action</span>
+            <strong>@(Workspace.CandidateProfile is not null && Workspace.IsLlmReady ? "Open workbench" : "Complete setup")</strong>
+            <span>@GetWorkbenchReadinessMessage()</span>
+        </article>
+    </div>
+</section>
+
+<section class="content-grid">
+    <article class="card-panel stack-gap">
+        <div class="field-label">Step 1</div>
+        <h2>Check Ollama and set the session LLM</h2>
+        <p class="muted-text">Discover the locally available models, then store the chosen model and thinking level in session memory only.</p>
+        <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+            @(Workspace.IsLlmReady
+                ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
+                : "Ollama access or session LLM selection is still pending.")
+        </div>
+
+        <div class="button-row">
+            <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
+        </div>
+
+        @if (isStep1Expanded)
+        {
+            @if (availability is not null)
+            {
+                <dl class="key-value-grid compact-grid">
+                    <dt>Version</dt>
+                    <dd>@availability.Version</dd>
+                    <dt>Configured default</dt>
+                    <dd>@OllamaOptions.Model</dd>
+                    <dt>Available models</dt>
+                    <dd>@availability.AvailableModels.Count</dd>
+                    <dt>Loaded models</dt>
+                    <dd>@availability.EffectiveRunningModels.Count</dd>
+                    <dt>Session model loaded</dt>
+                    <dd>@FormatLoadedState(availability, selectedModel)</dd>
+                </dl>
+
+                <p class="muted-text">Loaded now: @FormatRunningModels(availability)</p>
+
+                @if (availability.AvailableModels.Count > 0)
+                {
+                    <label class="field-label" for="sessionModel">Session model</label>
+                    <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@(!Workspace.CanEditLlmSessionSettings || isCheckingOllama)">
+                        @foreach (var model in availability.AvailableModels.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@model">@model</option>
+                        }
+                    </select>
+
+                    <label class="field-label" for="thinkingLevel">Thinking level</label>
+                    <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@(!Workspace.CanEditLlmSessionSettings || isCheckingOllama)">
+                        @foreach (var level in ThinkingLevels)
+                        {
+                            <option value="@level">@FormatThinkingLevel(level)</option>
+                        }
+                    </select>
+
+                    <div class="button-row">
+                        <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="muted-text">Ollama responded, but no models were returned from the tags endpoint.</p>
+                }
+            }
+            else
+            {
+                <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
+            }
+
+            @if (!Workspace.CanEditLlmSessionSettings)
+            {
+                <p class="muted-text">The session model and thinking level are locked because LLM-backed work has already started in this session.</p>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(llmErrorMessage))
+            {
+                <div class="message error">@llmErrorMessage</div>
+            }
+        }
+        else
+        {
+            <p class="muted-text">Step 1 is collapsed. Click Check Ollama and load models to review or change the session LLM settings.</p>
+        }
+    </article>
+
+    <article class="card-panel stack-gap">
+        <div class="field-label">Step 2</div>
+        <h2>Load the LinkedIn DMA member snapshot</h2>
+        <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
+            @Workspace.LinkedInAuthorizationStatus.Message
+        </div>
+        <dl class="key-value-grid compact-grid">
+            <dt>Required scope</dt>
+            <dd>@LinkedInOptions.PortabilityScope</dd>
+            <dt>LinkedIn-Version</dt>
+            <dd>`YYYYMM` with automatic monthly fallback</dd>
+            <dt>Import mode</dt>
+            <dd>DMA member snapshot only</dd>
+        </dl>
+
+        <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
+        <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste the LinkedIn DMA portability access token with r_dma_portability_self_serve."></textarea>
+
+        <p class="muted-text">Paste the static DMA portability token obtained from LinkedIn and import the member snapshot directly. The token is only used for the in-app import request and is not persisted by the app.</p>
+
+        <div class="button-row">
+            <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">Load DMA member snapshot</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(profileWarningMessage))
+        {
+            <div class="message warning">@profileWarningMessage</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(profileErrorMessage))
+        {
+            <div class="message error">@profileErrorMessage</div>
+        }
+    </article>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Step 3</div>
+    <h2>Capture optional applicant differentiators</h2>
+    <p class="muted-text">Use concise, normalized notes about work style, communication, and positioning. You can either fill the fields manually or upload an Insights Discovery PDF to auto-draft them with the session LLM.</p>
+
+    <div class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
+        @(Workspace.ApplicantDifferentiatorProfile.HasContent
+            ? "Applicant differentiators are stored for this session and will be available when you run fit review or generate drafts."
+            : "Applicant differentiators are optional and stay idle until you explicitly run fit review or draft generation.")
+    </div>
+
+    @if (GetInsightsDraftTelemetry() is { } telemetry)
+    {
+        <div class="details-card stack-gap">
+            <div class="field-label">Live LLM progress</div>
+            <div class="sidebar-metric">@telemetry.Message</div>
+            @if (!string.IsNullOrWhiteSpace(telemetry.Detail))
+            {
+                <p class="muted-text">@telemetry.Detail</p>
+            }
+            <dl class="key-value-grid compact-grid">
+                <dt>Elapsed</dt>
+                <dd>@FormatDuration(telemetry.Elapsed)</dd>
+                @if (telemetry.PromptTokens is not null)
+                {
+                    <dt>Prompt</dt>
+                    <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
+                }
+                @if (telemetry.CompletionTokens is not null)
+                {
+                    <dt>Completion</dt>
+                    <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
+                }
+                @if (telemetry.HasEstimatedRemaining)
+                {
+                    <dt>ETA</dt>
+                    <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
+                }
+            </dl>
+            <div class="button-row">
+                <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
+            </div>
+        </div>
+    }
+
+    <div class="stack-gap">
+        <label class="field-label" for="insightsDiscoveryPdf">Insights Discovery PDF</label>
+        <InputFile id="insightsDiscoveryPdf" class="text-input" OnChange="HandleInsightsDiscoveryPdfSelectedAsync" accept=".pdf,application/pdf" disabled="@(!Workspace.IsLlmReady || IsInsightsDraftActive())" />
+        <p class="muted-text">Optional. The PDF is processed in memory, the session LLM runs immediately after upload, the fields below are replaced only on success, and neither the PDF nor the extracted source text is persisted by the app.</p>
+
+        <div class="status-chip @GetInsightsDraftStatusClass()">
+            @GetInsightsDraftStatusMessage()
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(GetInsightsDraftStatusDetail()))
+        {
+            <p class="muted-text">@GetInsightsDraftStatusDetail()</p>
+        }
+
+        @if (insightsPdfWarnings.Count > 0)
+        {
+            <div class="message warning">
+                <ul class="feature-list">
+                    @foreach (var warning in insightsPdfWarnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(insightsPdfErrorMessage))
+        {
+            <div class="message error">@insightsPdfErrorMessage</div>
+        }
+    </div>
+
+    <div class="content-grid applicant-profile-grid">
+        <div class="stack-gap">
+            <div>
+                <label class="field-label" for="workStyle">Work style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.WorkStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.WorkStyle.Usage</p>
+                <textarea id="workStyle" class="prompt-box compact-prompt" @bind="workStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="communicationStyle">Communication style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Usage</p>
+                <textarea id="communicationStyle" class="prompt-box compact-prompt" @bind="communicationStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="leadershipStyle">Leadership style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Usage</p>
+                <textarea id="leadershipStyle" class="prompt-box compact-prompt" @bind="leadershipStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="stakeholderStyle">Stakeholder style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Usage</p>
+                <textarea id="stakeholderStyle" class="prompt-box compact-prompt" @bind="stakeholderStyle"></textarea>
+            </div>
+        </div>
+
+        <div class="stack-gap">
+            <div>
+                <label class="field-label" for="motivators">Motivators</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Motivators.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Motivators.Usage</p>
+                <textarea id="motivators" class="prompt-box compact-prompt" @bind="motivators"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="targetNarrative">Target narrative</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.TargetNarrative.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.TargetNarrative.Usage</p>
+                <textarea id="targetNarrative" class="prompt-box compact-prompt" @bind="targetNarrative"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="watchouts">Watchouts</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Watchouts.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Watchouts.Usage</p>
+                <textarea id="watchouts" class="prompt-box compact-prompt" @bind="watchouts"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="aboutApplicantBasis">About applicant basis</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Usage</p>
+                <textarea id="aboutApplicantBasis" class="prompt-box compact-prompt" @bind="aboutApplicantBasis"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="button-row">
+        <button class="primary-button" @onclick="SaveApplicantDifferentiatorsAsync">Save applicant differentiators</button>
+        <button class="secondary-button" @onclick="ClearApplicantDifferentiatorsAsync" disabled="@(!Workspace.ApplicantDifferentiatorProfile.HasContent)">Clear differentiators</button>
+    </div>
+</section>
+
+<section class="content-grid">
+    <article class="card-panel stack-gap">
+        <div class="field-label">Flow</div>
+        <h2>Follow the workflow in this order</h2>
+        <ul class="feature-list">
+            <li>1. Check Ollama, then choose the session model and thinking level.</li>
+            <li>2. Paste the DMA portability token and load the LinkedIn member snapshot.</li>
+            <li>3. Review the imported profile metadata shown on this page.</li>
+            <li>4. Optionally upload an Insights Discovery PDF to auto-draft applicant differentiators, or fill them out manually if you want extra steering.</li>
+            <li>5. Open the job workbench and add or select the job tab you want to work in.</li>
+            <li>6. Analyze the target job and build company context in one run.</li>
+            <li>7. Run fit review, technology gap check, or draft generation only when you are ready for LLM-backed work.</li>
+        </ul>
+
+        <div class="status-chip @(Workspace.ImportResult is not null ? "status-ok" : "status-pending")">
+            @(Workspace.ImportResult is not null ? $"Profile ready from {Workspace.ImportResult.SourceDescription}." : "Profile import is still pending.")
+        </div>
+        <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+            @(Workspace.IsLlmReady ? "Session LLM is ready." : "Session LLM is still pending.")
+        </div>
+
+        <div class="button-row">
+            <a class="primary-button" href="/workspace/job-workbench">Open job workbench</a>
+        </div>
+    </article>
+
+    <article class="card-panel stack-gap">
+        <div class="field-label">Current status</div>
+        <h2>Setup summary</h2>
+        <div class="status-chip @(result is not null ? "status-ok" : "status-pending")">
+            @(result is not null ? $"Profile loaded from {result.SourceDescription}." : "No LinkedIn profile has been loaded yet.")
+        </div>
+        <p class="muted-text">Required LinkedIn scope: @LinkedInOptions.PortabilityScope</p>
+        <p class="muted-text">Current job tab: @Workspace.ActiveJobSet.Title</p>
+        <p class="muted-text">Job workbench status: @GetWorkbenchReadinessMessage()</p>
+    </article>
+</section>
+
+@if (result is not null)
+{
+    <section class="content-grid">
+        <article class="card-panel">
+            <h2>Profile snapshot</h2>
+            <dl class="key-value-grid">
+                <dt>Name</dt>
+                <dd>@result.Profile.Name.FullName</dd>
+                <dt>Headline</dt>
+                <dd>@result.Profile.Headline</dd>
+                <dt>Location</dt>
+                <dd>@result.Profile.Location</dd>
+                <dt>Industry</dt>
+                <dd>@result.Profile.Industry</dd>
+                <dt>Roles</dt>
+                <dd>@result.Profile.Experience.Count</dd>
+                <dt>Skills</dt>
+                <dd>@result.Profile.Skills.Count</dd>
+                <dt>Projects</dt>
+                <dd>@result.Profile.Projects.Count</dd>
+                <dt>Recommendations</dt>
+                <dd>@result.Profile.Recommendations.Count</dd>
+            </dl>
+        </article>
+
+        <article class="card-panel">
+            <h2>Warnings</h2>
+            @if (result.Warnings.Count == 0)
+            {
+                <p class="muted-text">No profile load warnings.</p>
+            }
+            else
+            {
+                <ul class="feature-list">
+                    @foreach (var warning in result.Warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            }
+        </article>
+    </section>
+
+    <section class="card-panel">
+        <h2>Recent experience</h2>
+        <div class="timeline-grid">
+            @foreach (var role in result.Profile.Experience.Take(4))
+            {
+                <article class="timeline-card">
+                    <div class="timeline-period">@role.Period.DisplayValue</div>
+                    <h3>@role.Title</h3>
+                    <p class="timeline-company">@role.CompanyName</p>
+                    @if (!string.IsNullOrWhiteSpace(role.Description))
+                    {
+                        <p>@role.Description</p>
+                    }
+                </article>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private static readonly string[] ThinkingLevels = ["low", "medium", "high"];
+    private const long MaxInsightsPdfSizeBytes = 10 * 1024 * 1024;
+    private const string InsightsDraftRequestMessage = "Drafting applicant differentiators from Insights Discovery PDF";
+    private const string InsightsExtractionMessage = "Extracting text from Insights Discovery PDF";
+    private const string InsightsDraftTelemetryMessage = "Drafting applicant differentiators";
+
+    private bool isCheckingOllama;
+    private bool isImportingProfile;
+    private bool isProcessingInsightsPdf;
+    private bool isStep1Expanded = true;
+    private string? llmErrorMessage;
+    private string? profileErrorMessage;
+    private string? profileWarningMessage;
+    private string? insightsPdfErrorMessage;
+    private string? insightsDraftStatusDetail;
+    private OllamaModelAvailability? availability;
+    private string selectedModel = string.Empty;
+    private string selectedThinkingLevel = "medium";
+    private string dmaAccessToken = string.Empty;
+    private string workStyle = string.Empty;
+    private string communicationStyle = string.Empty;
+    private string leadershipStyle = string.Empty;
+    private string stakeholderStyle = string.Empty;
+    private string motivators = string.Empty;
+    private string targetNarrative = string.Empty;
+    private string watchouts = string.Empty;
+    private string aboutApplicantBasis = string.Empty;
+    private IReadOnlyList<string> insightsPdfWarnings = Array.Empty<string>();
+    private LinkedInExportImportResult? result;
+
+    private bool CanSaveSessionLlmSettings => !isCheckingOllama
+        && Workspace.CanEditLlmSessionSettings
+        && availability is not null
+        && availability.AvailableModels.Count > 0
+        && !string.IsNullOrWhiteSpace(selectedModel);
+
+    protected override void OnInitialized()
+    {
+        Operations.Changed += HandleChanged;
+        availability = Workspace.OllamaAvailability;
+        selectedModel = Workspace.SelectedLlmModel;
+        selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+        result = Workspace.ImportResult;
+        SyncApplicantDifferentiatorInputs(Workspace.ApplicantDifferentiatorProfile);
+        if (result is not null)
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                $"LinkedIn profile ready from {result.SourceDescription}.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+        else
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                false,
+                "DMA member snapshot not loaded.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+    }
+
+    public void Dispose()
+    {
+        Operations.Changed -= HandleChanged;
+    }
+
+    private Task SaveApplicantDifferentiatorsAsync()
+    {
+        var differentiatorProfile = BuildApplicantDifferentiatorProfileFromInputs();
+
+        Workspace.SetApplicantDifferentiatorProfile(differentiatorProfile);
+        insightsPdfWarnings = Array.Empty<string>();
+        insightsPdfErrorMessage = null;
+        insightsDraftStatusDetail = differentiatorProfile.HasContent
+            ? "Current applicant differentiator field values are saved. A new Insights Discovery upload will replace them only after a successful extract-and-draft pass."
+            : null;
+        Operations.Success(
+            differentiatorProfile.HasContent ? "Applicant differentiators saved." : "Applicant differentiators cleared.",
+            differentiatorProfile.HasContent
+                ? "The notes are stored and will be applied the next time you run fit review or generate drafts."
+                : "The session no longer applies an applicant differentiator overlay.");
+        return Task.CompletedTask;
+    }
+
+    private Task ClearApplicantDifferentiatorsAsync()
+    {
+        SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile.Empty);
+        Workspace.SetApplicantDifferentiatorProfile(ApplicantDifferentiatorProfile.Empty);
+        insightsDraftStatusDetail = null;
+        insightsPdfWarnings = Array.Empty<string>();
+        insightsPdfErrorMessage = null;
+        Operations.Info("Applicant differentiators cleared.", "The cleared notes will take effect the next time you run fit review or generate drafts.");
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleInsightsDiscoveryPdfSelectedAsync(InputFileChangeEventArgs eventArgs)
+    {
+        insightsPdfErrorMessage = null;
+        insightsPdfWarnings = Array.Empty<string>();
+
+        var file = eventArgs.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (!Workspace.IsLlmReady)
+        {
+            insightsPdfErrorMessage = "Choose the session LLM settings before uploading an Insights Discovery PDF.";
+            return;
+        }
+
+        if (!string.Equals(Path.GetExtension(file.Name), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            insightsPdfErrorMessage = "Only PDF files are supported for Insights Discovery upload.";
+            return;
+        }
+
+        if (file.Size > MaxInsightsPdfSizeBytes)
+        {
+            insightsPdfErrorMessage = $"The uploaded PDF is too large. The current limit is {MaxInsightsPdfSizeBytes / (1024 * 1024)} MB.";
+            return;
+        }
+
+        isProcessingInsightsPdf = true;
+        var draftedProfile = ApplicantDifferentiatorProfile.Empty;
+
+        try
+        {
+            using var stream = file.OpenReadStream(MaxInsightsPdfSizeBytes);
+
+            await Operations.RunAsync(
+                InsightsDraftRequestMessage,
+                file.Name,
+                async () =>
+                {
+                    Operations.UpdateCurrent(InsightsExtractionMessage, file.Name);
+                    var importResult = await InsightsDiscoveryPdfImporter.ImportAsync(stream);
+                    insightsPdfWarnings = [.. importResult.Warnings];
+
+                    if (!importResult.HasText)
+                    {
+                        throw new InvalidOperationException("No readable text could be extracted from the uploaded PDF. It may be image-only or scanned.");
+                    }
+
+                    Workspace.MarkLlmWorkStarted();
+                    Operations.UpdateCurrent(
+                        "Drafting applicant differentiators",
+                        $"{importResult.PageCount} pages and {importResult.CharacterCount:N0} extracted characters.");
+
+                    draftedProfile = await InsightsDiscoveryDraftingService.DraftAsync(
+                        importResult.ExtractedText,
+                        Workspace.SelectedLlmModel,
+                        Workspace.SelectedThinkingLevel,
+                        Operations.UpdateCurrent);
+                });
+
+            SyncApplicantDifferentiatorInputs(draftedProfile);
+            Workspace.SetApplicantDifferentiatorProfile(draftedProfile);
+            insightsDraftStatusDetail = $"Latest draft source: {file.Name}. A new upload will replace the current field values only after a successful extract-and-draft pass.";
+        }
+        catch (Exception exception)
+        {
+            insightsPdfErrorMessage = exception.Message;
+        }
+        finally
+        {
+            isProcessingInsightsPdf = false;
+        }
+    }
+
+    private async Task CheckOllamaAsync()
+    {
+        llmErrorMessage = null;
+        isStep1Expanded = true;
+        isCheckingOllama = true;
+
+        try
+        {
+            availability = await Operations.RunAsync(
+                "Checking Ollama access",
+                OllamaOptions.BaseUrl,
+                () => LlmClient.VerifyModelAvailabilityAsync());
+
+            Workspace.SetOllamaAvailability(availability);
+            selectedModel = Workspace.SelectedLlmModel;
+            selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+            Operations.Success(
+                "Ollama is reachable.",
+                $"Discovered {availability.AvailableModels.Count} models; loaded now: {availability.EffectiveRunningModels.Count}.");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Ollama access check failed.", exception.Message);
+        }
+        finally
+        {
+            isCheckingOllama = false;
+        }
+    }
+
+    private Task UseSessionLlmSettingsAsync()
+    {
+        llmErrorMessage = null;
+
+        try
+        {
+            Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
+            isStep1Expanded = false;
+            Operations.Success(
+                "Session LLM settings updated.",
+                $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Session LLM settings were not updated.", exception.Message);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadDmaMemberSnapshotAsync()
+    {
+        profileErrorMessage = null;
+        profileWarningMessage = null;
+
+        try
+        {
+            isImportingProfile = true;
+            var imported = await Operations.RunAsync(
+                "Importing LinkedIn DMA member snapshot",
+                LinkedInOptions.PortabilityScope,
+                () => ExportImporter.ImportMemberSnapshotAsync(dmaAccessToken));
+
+            result = imported;
+            Workspace.SetImportResult(Workspace.ExportPath, imported);
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                "LinkedIn DMA member snapshot imported with the provided portability token.",
+                DateTimeOffset.UtcNow,
+                null,
+                LinkedInOptions.PortabilityScope));
+            dmaAccessToken = string.Empty;
+            Operations.Success("LinkedIn DMA member snapshot loaded.", $"{result.SourceDescription}: {result.Profile.Name.FullName}. Review the profile details below, then continue in the job workbench when ready.");
+        }
+        catch (Exception exception)
+        {
+            profileErrorMessage = exception.Message;
+            Operations.Error("LinkedIn DMA member snapshot could not be loaded.", exception.Message);
+        }
+        finally
+        {
+            isImportingProfile = false;
+        }
+    }
+
+    private void SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile differentiatorProfile)
+    {
+        workStyle = differentiatorProfile.WorkStyle ?? string.Empty;
+        communicationStyle = differentiatorProfile.CommunicationStyle ?? string.Empty;
+        leadershipStyle = differentiatorProfile.LeadershipStyle ?? string.Empty;
+        stakeholderStyle = differentiatorProfile.StakeholderStyle ?? string.Empty;
+        motivators = differentiatorProfile.Motivators ?? string.Empty;
+        targetNarrative = differentiatorProfile.TargetNarrative ?? string.Empty;
+        watchouts = differentiatorProfile.Watchouts ?? string.Empty;
+        aboutApplicantBasis = differentiatorProfile.AboutApplicantBasis ?? string.Empty;
+    }
+
+    private ApplicantDifferentiatorProfile BuildApplicantDifferentiatorProfileFromInputs()
+        => new()
+        {
+            WorkStyle = NullIfWhiteSpace(workStyle),
+            CommunicationStyle = NullIfWhiteSpace(communicationStyle),
+            LeadershipStyle = NullIfWhiteSpace(leadershipStyle),
+            StakeholderStyle = NullIfWhiteSpace(stakeholderStyle),
+            Motivators = NullIfWhiteSpace(motivators),
+            TargetNarrative = NullIfWhiteSpace(targetNarrative),
+            Watchouts = NullIfWhiteSpace(watchouts),
+            AboutApplicantBasis = NullIfWhiteSpace(aboutApplicantBasis)
+        };
+
+    private string GetInsightsDraftStatusClass()
+    {
+        if (IsInsightsDraftActive())
+        {
+            return "status-pending";
+        }
+
+        return Workspace.ApplicantDifferentiatorProfile.HasContent && !string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
+            ? "status-ok"
+            : "status-pending";
+    }
+
+    private string GetInsightsDraftStatusMessage()
+    {
+        if (IsInsightsDraftActive())
+        {
+            return "Insights Discovery PDF is being processed. The fields below will only be replaced if extraction and drafting both succeed.";
+        }
+
+        if (!Workspace.IsLlmReady)
+        {
+            return "Choose the session LLM settings before uploading an Insights Discovery PDF.";
+        }
+
+        return string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
+            ? "Upload an Insights Discovery PDF to auto-draft these fields, or fill them in manually."
+            : "Insights Discovery draft applied to the applicant differentiator fields.";
+    }
+
+    private string GetWorkbenchReadinessMessage()
+    {
+        if (!Workspace.IsLlmReady)
+        {
+            return "Complete Ollama setup first.";
+        }
+
+        if (Workspace.CandidateProfile is null)
+        {
+            return "Load the DMA member snapshot next.";
+        }
+
+        if (Workspace.JobPosting is null)
+        {
+            return "Open the job workbench next. Add or select a job tab, then analyze a target role when you are ready.";
+        }
+
+        return "The session, profile, and job context are ready. Run fit review, technology gap, or draft generation when you want the app to start deeper analysis.";
+    }
+
+    private static string FormatThinkingLevel(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? "Pending"
+            : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static string FormatRunningModels(OllamaModelAvailability availability)
+        => availability.EffectiveRunningModels.Count == 0
+            ? "none reported"
+            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
+
+    private static string FormatLoadedState(OllamaModelAvailability availability, string? selectedModel)
+    {
+        var model = string.IsNullOrWhiteSpace(selectedModel) ? availability.Model : selectedModel.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return "Unknown";
+        }
+
+        return availability.IsModelLoaded(model) ? "Yes" : "No";
+    }
+
+    private LlmOperationTelemetry? GetInsightsDraftTelemetry()
+        => IsInsightsDraftTelemetryActive() ? Operations.ActiveLlmTelemetry : null;
+
+    private bool IsInsightsDraftActive()
+        => isProcessingInsightsPdf
+            || IsCurrentInsightsOperation(InsightsDraftRequestMessage)
+            || IsCurrentInsightsOperation(InsightsExtractionMessage)
+            || IsCurrentInsightsOperation(InsightsDraftTelemetryMessage)
+            || IsInsightsDraftTelemetryActive();
+
+    private bool IsInsightsDraftTelemetryActive()
+        => string.Equals(Operations.ActiveLlmTelemetry?.Message, InsightsDraftTelemetryMessage, StringComparison.Ordinal);
+
+    private bool IsCurrentInsightsOperation(string message)
+        => Operations.IsBusy && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
+
+    private string? GetInsightsDraftStatusDetail()
+        => IsInsightsDraftActive() ? Operations.CurrentDetail : insightsDraftStatusDetail;
+
+    private static string FormatDuration(TimeSpan? duration)
+    {
+        if (duration is null)
+        {
+            return "Pending";
+        }
+
+        var value = duration.Value;
+        return value.TotalMinutes >= 1
+            ? value.ToString(@"m\:ss")
+            : value.ToString(@"s\.f\s");
+    }
+
+    private static string FormatTokenCount(long? tokens)
+        => tokens?.ToString("N0") ?? "Pending";
+
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+}

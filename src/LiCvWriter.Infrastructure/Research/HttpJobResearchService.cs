@@ -1,0 +1,523 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using LiCvWriter.Application.Abstractions;
+using LiCvWriter.Application.Models;
+using LiCvWriter.Application.Options;
+using LiCvWriter.Core.Jobs;
+
+namespace LiCvWriter.Infrastructure.Research;
+
+public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llmClient, OllamaOptions ollamaOptions) : IJobResearchService
+{
+    private const int MaxJobContextCharacters = 8_000;
+    private const int MaxCompanyContextCharacters = 12_000;
+    private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+    private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    private const string AcceptLanguageHeader = "en-US,en;q=0.9";
+
+    public async Task<JobPostingAnalysis> AnalyzeAsync(
+        Uri jobPostingUrl,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
+        var title = ExtractMatch(html, "<title[^>]*>(.*?)</title>") ?? jobPostingUrl.Host;
+        var heading = ExtractMatch(html, "<h1[^>]*>(.*?)</h1>") ?? title;
+        var text = StripHtml(html);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException("The job page did not contain enough readable text to parse.");
+        }
+
+        var resolvedModel = ResolveModel(selectedModel);
+        var response = await llmClient.GenerateAsync(
+            new LlmRequest(
+                resolvedModel,
+                BuildJobSystemPrompt(),
+                [new LlmChatMessage("user", BuildJobUserPrompt(jobPostingUrl, title, heading, text))],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: 0.1),
+            progress is null ? null : update => progress(update with
+            {
+                Message = "Parsing job posting",
+                Detail = string.IsNullOrWhiteSpace(update.Detail)
+                    ? $"Structured job parsing is running via {update.Model}."
+                    : update.Detail
+            }),
+            cancellationToken);
+
+        return ParseJobPostingAnalysis(response.Content, jobPostingUrl, heading, text);
+    }
+
+    public async Task<CompanyResearchProfile> BuildCompanyProfileAsync(
+        IEnumerable<Uri> sourceUrls,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var urls = sourceUrls.ToArray();
+        if (urls.Length == 0)
+        {
+            throw new InvalidOperationException("At least one company context URL is required.");
+        }
+
+        var sourceDocuments = new List<(Uri Url, string Text)>();
+
+        foreach (var url in urls)
+        {
+            var html = await FetchHtmlAsync(url, cancellationToken);
+            var text = StripHtml(html);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                sourceDocuments.Add((url, text));
+            }
+        }
+
+        if (sourceDocuments.Count == 0)
+        {
+            throw new InvalidOperationException("The provided company pages did not contain enough readable text to parse.");
+        }
+
+        var response = await llmClient.GenerateAsync(
+            new LlmRequest(
+                ResolveModel(selectedModel),
+                BuildCompanySystemPrompt(),
+                [new LlmChatMessage("user", BuildCompanyUserPrompt(sourceDocuments))],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: 0.1),
+            progress is null ? null : update => progress(update with
+            {
+                Message = "Parsing company context",
+                Detail = string.IsNullOrWhiteSpace(update.Detail)
+                    ? $"Structured company parsing is running via {update.Model}."
+                    : update.Detail
+            }),
+            cancellationToken);
+
+        return ParseCompanyResearchProfile(response.Content, urls, sourceDocuments);
+    }
+
+    private static JobPostingAnalysis ParseJobPostingAnalysis(
+        string content,
+        Uri jobPostingUrl,
+        string fallbackRoleTitle,
+        string jobText)
+    {
+        using var document = JsonDocument.Parse(ExtractJsonObject(content));
+        var root = document.RootElement;
+
+        var signals = ReadSignals(
+            root,
+            "requirements",
+            defaultSourceLabel: jobPostingUrl.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase));
+
+        var roleTitle = ReadOptionalString(root, "roleTitle");
+        var companyName = ReadOptionalString(root, "companyName");
+        var summary = ReadOptionalString(root, "summary");
+
+        return new JobPostingAnalysis
+        {
+            SourceUrl = jobPostingUrl,
+            RoleTitle = string.IsNullOrWhiteSpace(roleTitle) ? fallbackRoleTitle : roleTitle,
+            CompanyName = string.IsNullOrWhiteSpace(companyName)
+                ? jobPostingUrl.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                : companyName,
+            Summary = string.IsNullOrWhiteSpace(summary) ? Clip(jobText, 1_200) : Clip(summary, 1_200),
+            MustHaveThemes = signals.Where(static signal => signal.Importance == JobRequirementImportance.MustHave).Select(static signal => signal.Requirement).ToArray(),
+            NiceToHaveThemes = signals.Where(static signal => signal.Importance == JobRequirementImportance.NiceToHave).Select(static signal => signal.Requirement).ToArray(),
+            CulturalSignals = signals.Where(static signal => signal.Importance == JobRequirementImportance.Cultural).Select(static signal => signal.Requirement).ToArray(),
+            Signals = signals
+        };
+    }
+
+    private static CompanyResearchProfile ParseCompanyResearchProfile(
+        string content,
+        IReadOnlyList<Uri> sourceUrls,
+        IReadOnlyList<(Uri Url, string Text)> sourceDocuments)
+    {
+        using var document = JsonDocument.Parse(ExtractJsonObject(content));
+        var root = document.RootElement;
+
+        var signals = ReadSignals(root, "requirements", defaultSourceLabel: sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase));
+        var summary = ReadOptionalString(root, "summary");
+        var name = ReadOptionalString(root, "name");
+        var guidingPrinciples = ReadStringArray(root, "guidingPrinciples", required: true);
+        var differentiators = ReadStringArray(root, "differentiators", required: true);
+
+        return new CompanyResearchProfile
+        {
+            Name = string.IsNullOrWhiteSpace(name)
+                ? sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                : name,
+            Summary = string.IsNullOrWhiteSpace(summary)
+                ? Clip(string.Join(Environment.NewLine + Environment.NewLine, sourceDocuments.Select(static item => item.Text)), 2_000)
+                : Clip(summary, 2_000),
+            SourceUrls = sourceUrls,
+            GuidingPrinciples = guidingPrinciples.Take(5).ToArray(),
+            CulturalSignals = signals
+                .Where(static signal => signal.Importance == JobRequirementImportance.Cultural)
+                .Select(static signal => signal.Requirement)
+                .Concat(guidingPrinciples)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            Differentiators = differentiators.Take(6).ToArray(),
+            Signals = signals
+        };
+    }
+
+    private async Task<string> FetchHtmlAsync(Uri sourceUrl, CancellationToken cancellationToken)
+    {
+        using var request = CreateHtmlRequest(sourceUrl);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            throw new InvalidOperationException(
+                $"The site blocked access to {sourceUrl} with 403 Forbidden. Some job and company pages reject automated requests even when the request looks like a browser.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var failureDetail = await ReadFailureDetailAsync(response, cancellationToken);
+            throw new InvalidOperationException(
+                $"Fetching {sourceUrl} failed with {(int)response.StatusCode} {response.ReasonPhrase}.{failureDetail}");
+        }
+
+        return await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+
+    private static HttpRequestMessage CreateHtmlRequest(Uri sourceUrl)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, sourceUrl);
+        request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
+        request.Headers.Accept.ParseAdd(HtmlAcceptHeader);
+        request.Headers.AcceptLanguage.ParseAdd(AcceptLanguageHeader);
+        request.Headers.AcceptEncoding.ParseAdd("gzip");
+        request.Headers.AcceptEncoding.ParseAdd("deflate");
+        request.Headers.AcceptEncoding.ParseAdd("br");
+        request.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+        return request;
+    }
+
+    private static async Task<string> ReadFailureDetailAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = Regex.Replace(body, @"\s+", " ").Trim();
+        if (trimmed.Length > 240)
+        {
+            trimmed = trimmed[..240].TrimEnd() + "...";
+        }
+
+        return $" Response excerpt: {trimmed}";
+    }
+
+    private static JobContextSignal[] ReadSignals(JsonElement root, string propertyName, string defaultSourceLabel)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException($"The parser response did not include a valid '{propertyName}' array.");
+        }
+
+        var signals = property.EnumerateArray()
+            .Select(item => TryReadSignal(item, defaultSourceLabel))
+            .Where(static signal => signal is not null)
+            .Cast<JobContextSignal>()
+            .DistinctBy(static signal => $"{signal.Importance}:{signal.Requirement}", StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (property.GetArrayLength() > 0 && signals.Length == 0)
+        {
+            throw new InvalidOperationException($"The parser response contained '{propertyName}' entries, but none included a usable requirement, source snippet, and confidence.");
+        }
+
+        return signals;
+    }
+
+    private static JobContextSignal? TryReadSignal(JsonElement element, string defaultSourceLabel)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var requirement = ReadOptionalString(element, "requirement");
+        var categoryValue = ReadOptionalString(element, "category");
+        var aliases = ReadStringArray(element, "aliases", required: false);
+        var sourceSnippet = ReadOptionalString(element, "sourceSnippet");
+        var confidence = ReadOptionalInt(element, "confidence");
+
+        if (string.IsNullOrWhiteSpace(requirement)
+            || string.IsNullOrWhiteSpace(sourceSnippet)
+            || confidence is null
+            || !TryMapCategory(categoryValue, out var category, out var importance))
+        {
+            return null;
+        }
+
+        return new JobContextSignal(
+            category,
+            requirement,
+            importance,
+            ResolveSourceLabel(ReadOptionalString(element, "sourceUrl"), defaultSourceLabel),
+            Clip(sourceSnippet, 260),
+            Math.Clamp(confidence.Value, 1, 100),
+            NormalizeAliases(requirement, aliases));
+    }
+
+    private static string[] NormalizeAliases(string requirement, IEnumerable<string> aliases)
+        => aliases
+            .Where(static alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(static alias => alias.Trim())
+            .Where(alias => !alias.Equals(requirement, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToArray();
+
+    private static bool TryMapCategory(string? value, out string category, out JobRequirementImportance importance)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        switch (normalized)
+        {
+            case "must have":
+            case "must-have":
+            case "required":
+                category = "Must have";
+                importance = JobRequirementImportance.MustHave;
+                return true;
+            case "nice to have":
+            case "nice-to-have":
+            case "preferred":
+            case "bonus":
+                category = "Nice to have";
+                importance = JobRequirementImportance.NiceToHave;
+                return true;
+            case "culture":
+            case "cultural":
+            case "values":
+                category = "Culture";
+                importance = JobRequirementImportance.Cultural;
+                return true;
+            default:
+                category = string.Empty;
+                importance = default;
+                return false;
+        }
+    }
+
+    private static string[] ReadStringArray(JsonElement root, string propertyName, bool required)
+    {
+        if (!root.TryGetProperty(propertyName, out var property))
+        {
+            if (required)
+            {
+                throw new InvalidOperationException($"The parser response did not include a '{propertyName}' array.");
+            }
+
+            return Array.Empty<string>();
+        }
+
+        if (property.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException($"The parser response did not include a valid '{propertyName}' array.");
+        }
+
+        return property.EnumerateArray()
+            .Where(static item => item.ValueKind == JsonValueKind.String)
+            .Select(static item => item.GetString()?.Trim())
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()!;
+    }
+
+    private static int? ReadOptionalInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt32(out var number) => number,
+            JsonValueKind.String when int.TryParse(property.GetString(), out var number) => number,
+            _ => null
+        };
+    }
+
+    private static string? ReadOptionalString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var value = property.GetString()?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string ResolveSourceLabel(string? sourceUrl, string defaultSourceLabel)
+    {
+        if (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri))
+        {
+            return uri.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return defaultSourceLabel;
+    }
+
+    private string ResolveModel(string? selectedModel)
+        => string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
+
+    private string ResolveThinkingLevel(string? selectedThinkingLevel)
+        => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();
+
+    private static string BuildJobSystemPrompt()
+        => """
+You extract structured job requirements from a single job posting.
+
+Return JSON only with this exact shape:
+{
+  "roleTitle": "string",
+  "companyName": "string",
+  "summary": "2-4 concise sentences",
+  "requirements": [
+    {
+      "category": "Must have|Nice to have|Culture",
+      "requirement": "short normalized label",
+            "aliases": ["short alternative phrasing from the page"],
+      "sourceSnippet": "verbatim or near-verbatim text from the page",
+      "confidence": 1,
+      "sourceUrl": "https://example.test/path"
+    }
+  ]
+}
+
+Rules:
+- Return valid JSON only. No markdown fences.
+- Use concise normalized requirement labels.
+- When helpful, include short aliases that reflect alternative phrasings or concrete terms appearing in the source text.
+- Include only requirements and culture signals that are clearly grounded in the supplied page.
+- Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
+- Keep summary under 550 characters.
+- Do not invent employers, technologies, or company values that are not in the page.
+""";
+
+    private static string BuildCompanySystemPrompt()
+        => """
+You extract structured company context from one or more company source pages.
+
+Return JSON only with this exact shape:
+{
+  "name": "string",
+  "summary": "2-4 concise sentences",
+  "guidingPrinciples": ["Principle"],
+  "differentiators": ["Differentiator"],
+  "requirements": [
+    {
+      "category": "Nice to have|Culture",
+      "requirement": "short normalized label",
+            "aliases": ["short alternative phrasing from the sources"],
+      "sourceSnippet": "verbatim or near-verbatim text from the sources",
+      "confidence": 1,
+      "sourceUrl": "https://example.test/path"
+    }
+  ]
+}
+
+Rules:
+- Return valid JSON only. No markdown fences.
+- guidingPrinciples should capture the clearest company values or operating principles.
+- differentiators should capture what makes the company, team, or role context distinctive.
+- When helpful, include short aliases that reflect equivalent language used in the source text.
+- requirements should only include fit-relevant company context that is clearly supported by a sourceSnippet.
+- Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
+- Keep summary under 650 characters.
+""";
+
+    private static string BuildJobUserPrompt(Uri jobPostingUrl, string title, string heading, string text)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Source URL: {jobPostingUrl}");
+        builder.AppendLine($"HTML title hint: {title}");
+        builder.AppendLine($"Main heading hint: {heading}");
+        builder.AppendLine();
+        builder.AppendLine("Page text:");
+        builder.AppendLine(Clip(text, MaxJobContextCharacters));
+        return builder.ToString();
+    }
+
+    private static string BuildCompanyUserPrompt(IEnumerable<(Uri Url, string Text)> sourceDocuments)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Company source documents:");
+
+        foreach (var (url, text) in sourceDocuments)
+        {
+            builder.AppendLine();
+            builder.AppendLine($"Source URL: {url}");
+            builder.AppendLine(Clip(text, MaxCompanyContextCharacters / Math.Max(1, sourceDocuments.Count())));
+        }
+
+        return Clip(builder.ToString(), MaxCompanyContextCharacters);
+    }
+
+    private static string ExtractJsonObject(string content)
+    {
+        var trimmed = content.Trim();
+        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            var lines = trimmed.Split('\n');
+            trimmed = string.Join('\n', lines.Skip(1).Take(lines.Length - 2));
+        }
+
+        var start = trimmed.IndexOf('{');
+        var end = trimmed.LastIndexOf('}');
+        if (start >= 0 && end > start)
+        {
+            return trimmed[start..(end + 1)];
+        }
+
+        return trimmed;
+    }
+
+    private static string Clip(string value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+        {
+            return value.Trim();
+        }
+
+        return value[..maxLength].Trim() + "...";
+    }
+
+    private static string? ExtractMatch(string html, string pattern)
+    {
+        var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        return match.Success ? StripHtml(match.Groups[1].Value).Trim() : null;
+    }
+
+    private static string StripHtml(string html)
+    {
+        var withLineBreaks = Regex.Replace(html, "<(br|/p|/div|/section|/article|/li|/ul|/ol|/h[1-6])[^>]*>", "\n", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        var noScript = Regex.Replace(withLineBreaks, "<(script|style)[^>]*>.*?</\\1>", string.Empty, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        var withoutTags = Regex.Replace(noScript, "<[^>]+>", " ", RegexOptions.Singleline);
+        var normalizedSpaces = Regex.Replace(withoutTags, "[ \t]+", " ");
+        return WebUtility.HtmlDecode(Regex.Replace(normalizedSpaces, @"\s*\n\s*", "\n")).Trim();
+    }
+}

@@ -1,0 +1,45 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Core", "src\LiCvWriter.Core\LiCvWriter.Core.csproj", "{F2A59072-3B5D-472C-9C31-5E01D8C2D041}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Application", "src\LiCvWriter.Application\LiCvWriter.Application.csproj", "{2B4E1737-A24B-4D42-8363-A21E5F5C7E5A}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Infrastructure", "src\LiCvWriter.Infrastructure\LiCvWriter.Infrastructure.csproj", "{C7CF68A4-14E9-4EB8-95F9-F0F543DD7010}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Web", "src\LiCvWriter.Web\LiCvWriter.Web.csproj", "{4D4C5D8C-793A-4E08-9C0A-6B68D7C18D19}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiCvWriter.Tests", "tests\LiCvWriter.Tests\LiCvWriter.Tests.csproj", "{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F2A59072-3B5D-472C-9C31-5E01D8C2D041}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F2A59072-3B5D-472C-9C31-5E01D8C2D041}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F2A59072-3B5D-472C-9C31-5E01D8C2D041}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F2A59072-3B5D-472C-9C31-5E01D8C2D041}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B4E1737-A24B-4D42-8363-A21E5F5C7E5A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B4E1737-A24B-4D42-8363-A21E5F5C7E5A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B4E1737-A24B-4D42-8363-A21E5F5C7E5A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B4E1737-A24B-4D42-8363-A21E5F5C7E5A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C7CF68A4-14E9-4EB8-95F9-F0F543DD7010}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C7CF68A4-14E9-4EB8-95F9-F0F543DD7010}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C7CF68A4-14E9-4EB8-95F9-F0F543DD7010}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C7CF68A4-14E9-4EB8-95F9-F0F543DD7010}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D4C5D8C-793A-4E08-9C0A-6B68D7C18D19}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D4C5D8C-793A-4E08-9C0A-6B68D7C18D19}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D4C5D8C-793A-4E08-9C0A-6B68D7C18D19}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D4C5D8C-793A-4E08-9C0A-6B68D7C18D19}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

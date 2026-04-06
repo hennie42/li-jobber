@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>LiCvWriter.Web</RootNamespace>
+    <AssemblyName>LiCvWriter.Web</AssemblyName>
+    <UserSecretsId>LiCvWriter-0d09564a-60f2-4a3d-af83-601d8f91dfe1</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiCvWriter.Application\LiCvWriter.Application.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Infrastructure\LiCvWriter.Infrastructure.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
+  </ItemGroup>
+</Project>
