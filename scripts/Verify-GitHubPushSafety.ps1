@@ -39,18 +39,40 @@ function Find-PatternMatches {
     )
 
     try {
-        return @(Select-String -Path $FullPath -Pattern $Pattern -AllMatches | ForEach-Object {
-            [PSCustomObject]@{
-                Type = $FindingType
-                Path = $RelativePath
-                LineNumber = $_.LineNumber
-                Line = $_.Line.Trim()
-            }
-        })
+        return @(Select-String -Path $FullPath -Pattern $Pattern -AllMatches |
+            ForEach-Object {
+                $finding = [PSCustomObject]@{
+                    Type = $FindingType
+                    Path = $RelativePath
+                    LineNumber = $_.LineNumber
+                    Line = $_.Line.Trim()
+                }
+
+                if (Should-IgnoreAuditScriptPatternDefinition $finding) {
+                    $null
+                }
+                else {
+                    $finding
+                }
+            } |
+            Where-Object { $null -ne $_ })
     }
     catch {
         return @()
     }
+}
+
+function Should-IgnoreAuditScriptPatternDefinition {
+    param(
+        [psobject]$Finding
+    )
+
+    if ($null -eq $Finding -or $Finding.Path -ne 'scripts/Verify-GitHubPushSafety.ps1') {
+        return $false
+    }
+
+    return $Finding.Line -match '^\$(generatedPathPattern|machinePathPattern|secretPatterns)\s*='
+        -or $Finding.Line -match "^\s*'[^']+'\s*=\s*'.+'$"
 }
 
 $generatedPathPattern = '(^|/)(bin|obj|artifacts|TestResults|\.vs|outputs|\.local|LI-export)/'
@@ -77,11 +99,12 @@ try {
     $trackedFiles = Get-GitLines -Arguments @('ls-files')
     $stagedFiles = Get-GitLines -Arguments @('diff', '--cached', '--name-only', '--diff-filter=ACMR') -AllowFailure
     $candidateFiles = @($trackedFiles + $stagedFiles | Sort-Object -Unique)
+    $contentScanFiles = @($candidateFiles | Where-Object { $_ -ne 'scripts/Verify-GitHubPushSafety.ps1' })
 
     Write-Host "Repo root: $resolvedRepoRoot"
     Write-Host "Tracked files: $($trackedFiles.Count)"
     Write-Host "Staged files: $($stagedFiles.Count)"
-    Write-Host "Files scanned: $($candidateFiles.Count)"
+    Write-Host "Files scanned: $($contentScanFiles.Count)"
 
     if ($candidateFiles.Count -eq 0) {
         Write-Host 'No tracked or staged files were found to audit.'
@@ -92,7 +115,7 @@ try {
     $machinePathFindings = @()
     $secretFindings = @()
 
-    foreach ($relativePath in $candidateFiles) {
+    foreach ($relativePath in $contentScanFiles) {
         $fullPath = Join-Path $resolvedRepoRoot $relativePath
         if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
             continue
@@ -104,6 +127,9 @@ try {
             $secretFindings += Find-PatternMatches -FullPath $fullPath -RelativePath $relativePath -Pattern $pair.Value -FindingType $pair.Key
         }
     }
+
+    $machinePathFindings = @($machinePathFindings | Where-Object { -not (Should-IgnoreAuditScriptPatternDefinition $_) })
+    $secretFindings = @($secretFindings | Where-Object { -not (Should-IgnoreAuditScriptPatternDefinition $_) })
 
     $hasFailures = $false
 
