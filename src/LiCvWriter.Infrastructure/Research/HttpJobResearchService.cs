@@ -114,7 +114,20 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string fallbackRoleTitle,
         string jobText)
     {
-        using var document = JsonDocument.Parse(ExtractJsonObject(content));
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(ExtractJsonObject(content));
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                "The model did not return parseable JSON for the job analysis. Try again or check the session model.",
+                exception);
+        }
+
+        using (document)
+        {
         var root = document.RootElement;
 
         var signals = ReadSignals(
@@ -139,6 +152,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             CulturalSignals = signals.Where(static signal => signal.Importance == JobRequirementImportance.Cultural).Select(static signal => signal.Requirement).ToArray(),
             Signals = signals
         };
+        } // using document
     }
 
     private static CompanyResearchProfile ParseCompanyResearchProfile(
@@ -146,7 +160,20 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         IReadOnlyList<Uri> sourceUrls,
         IReadOnlyList<(Uri Url, string Text)> sourceDocuments)
     {
-        using var document = JsonDocument.Parse(ExtractJsonObject(content));
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(ExtractJsonObject(content));
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                "The model did not return parseable JSON for the company analysis. Try again or check the session model.",
+                exception);
+        }
+
+        using (document)
+        {
         var root = document.RootElement;
 
         var signals = ReadSignals(root, "requirements", defaultSourceLabel: sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase));
@@ -174,6 +201,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             Differentiators = differentiators.Take(6).ToArray(),
             Signals = signals
         };
+        } // using document
     }
 
     private async Task<string> FetchHtmlAsync(Uri sourceUrl, CancellationToken cancellationToken)

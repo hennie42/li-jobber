@@ -7,10 +7,10 @@ public sealed class JobFitWorkspaceRefreshService(
     EvidenceSelectionService evidenceSelectionService,
     WorkspaceSession workspace)
 {
-    public Task<bool> RefreshActiveJobSetAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(RefreshJobSet(workspace.ActiveJobSetId));
+    public bool RefreshActiveJobSet()
+        => RefreshJobSet(workspace.ActiveJobSetId);
 
-    public Task<int> RefreshAllJobSetsAsync(CancellationToken cancellationToken = default)
+    public int RefreshAllJobSets()
     {
         var refreshed = 0;
         foreach (var jobSetId in workspace.JobSets
@@ -24,7 +24,7 @@ public sealed class JobFitWorkspaceRefreshService(
             }
         }
 
-        return Task.FromResult(refreshed);
+        return refreshed;
     }
 
     private bool RefreshJobSet(string jobSetId)

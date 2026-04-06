@@ -12,7 +12,8 @@ public sealed class LocalMarkdownAuditStore(StorageOptions options) : IAuditStor
         var root = ExpandPath(options.AuditRoot);
         Directory.CreateDirectory(root);
 
-        var fileName = $"{entry.CreatedAtUtc:yyyyMMdd-HHmmss}-{SanitizeFileName(entry.EventType)}.md";
+        var tag = Guid.NewGuid().ToString("N")[..4];
+        var fileName = $"{entry.CreatedAtUtc:yyyyMMdd-HHmmss}-{tag}-{SanitizeFileName(entry.EventType)}.md";
         var path = Path.Combine(root, fileName);
 
         var builder = new StringBuilder();

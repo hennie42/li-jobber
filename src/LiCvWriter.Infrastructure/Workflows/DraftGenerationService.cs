@@ -155,7 +155,11 @@ public sealed class DraftGenerationService(
         var outputLanguage = request.OutputLanguage;
         var languageLabel = outputLanguage == OutputLanguage.Danish ? "Danish" : "English";
         var candidate = request.Candidate;
-        var experience = string.Join(Environment.NewLine, candidate.Experience.Take(8).Select(FormatExperience));
+        var experienceEntries = candidate.Experience.Take(8).ToArray();
+        var experienceTruncationNote = candidate.Experience.Count > 8
+            ? $"{Environment.NewLine}(Note: only the 8 most recent roles are included; {candidate.Experience.Count - 8} earlier role(s) are omitted.)"
+            : string.Empty;
+        var experience = string.Join(Environment.NewLine, experienceEntries.Select(FormatExperience)) + experienceTruncationNote;
         var skills = string.Join(", ", candidate.Skills.Take(20).Select(static skill => skill.Name));
         var certifications = string.Join(", ", candidate.Certifications.Select(static cert => cert.Name));
         var recommendations = string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Take(3).Select(static recommendation =>

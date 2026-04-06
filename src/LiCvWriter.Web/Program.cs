@@ -2,6 +2,7 @@ using System.Net;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
+using LiCvWriter.Core.Jobs;
 using LiCvWriter.Infrastructure.Csv;
 using LiCvWriter.Infrastructure.Documents;
 using LiCvWriter.Infrastructure.LinkedIn;

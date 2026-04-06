@@ -143,7 +143,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions
         {
             PortabilityApiVersion = "202504"
-        });
+        }, TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
         var result = await importer.ImportMemberSnapshotAsync("Bearer dma-token");
@@ -203,7 +203,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions
         {
             PortabilityApiVersion = "20250401"
-        });
+        }, TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
         var result = await importer.ImportMemberSnapshotAsync("dma-token");
@@ -258,7 +258,7 @@ public sealed class LinkedInExportImporterTests
                     """)
             }));
 
-            var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions());
+            var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
             var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
             await importer.ImportMemberSnapshotAsync("dma-token");
@@ -353,7 +353,7 @@ public sealed class LinkedInExportImporterTests
                 """)
         }));
 
-        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions());
+        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
         var result = await importer.ImportMemberSnapshotAsync("dma-token");
@@ -414,7 +414,7 @@ public sealed class LinkedInExportImporterTests
                 """)
         }));
 
-        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions());
+        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
         var result = await importer.ImportMemberSnapshotAsync("dma-token");
@@ -428,7 +428,7 @@ public sealed class LinkedInExportImporterTests
         => new(new HttpClient(new StubMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
         {
             Content = new StringContent("No data found for this memberId")
-        })), new LinkedInAuthOptions());
+        })), new LinkedInAuthOptions(), TimeProvider.System);
 
     private static HttpRequestMessage CloneRequest(HttpRequestMessage request)
     {

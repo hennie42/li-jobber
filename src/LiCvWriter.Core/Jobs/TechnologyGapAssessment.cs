@@ -1,4 +1,4 @@
-namespace LiCvWriter.Web.Services;
+namespace LiCvWriter.Core.Jobs;
 
 public sealed record TechnologyGapAssessment(
     IReadOnlyList<string> DetectedTechnologies,

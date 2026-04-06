@@ -2,38 +2,10 @@ using System.Text;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
 
-namespace LiCvWriter.Web.Services;
+namespace LiCvWriter.Application.Services;
 
 public static class TechnologyGapAnalyzer
 {
-    private static readonly TechnologySignal[] Signals =
-    [
-        new("Generative AI", ["generative ai", "gen ai", "genai"]),
-        new("LLMs", ["llm", "llms", "large language model", "large language models"]),
-        new("RAG", ["rag", "retrieval augmented generation", "retrieval-augmented generation"]),
-        new("Agentic AI", ["agentic ai", "ai agents", "agent based ai", "agent-based ai"]),
-        new("Prompt engineering", ["prompt engineering", "prompt design"]),
-        new("Semantic Kernel", ["semantic kernel"]),
-        new("LangChain", ["langchain"]),
-        new("Vector databases", ["vector database", "vector databases", "embedding", "embeddings"]),
-        new("Python", ["python"]),
-        new("C#", ["c#", "c sharp"]),
-        new(".NET", [".net", "dotnet", "asp.net"]),
-        new("Azure", ["azure", "azure ai", "azure openai"]),
-        new("AWS", ["aws", "amazon web services"]),
-        new("Docker", ["docker", "containers"]),
-        new("Kubernetes", ["kubernetes", "k8s"]),
-        new("Terraform", ["terraform", "infrastructure as code"]),
-        new("MLOps", ["mlops", "model ops"]),
-        new("Databricks", ["databricks"]),
-        new("Apache Spark", ["spark", "apache spark"]),
-        new("Kafka", ["kafka", "apache kafka"]),
-        new("GitHub Actions", ["github actions", "github workflows"]),
-        new("TypeScript", ["typescript"]),
-        new("React", ["react", "reactjs"]),
-        new("GraphQL", ["graphql"])
-    ];
-
     public static TechnologyGapAssessment Analyze(CandidateProfile? candidateProfile, JobPostingAnalysis? jobPosting, CompanyResearchProfile? companyProfile)
     {
         if (candidateProfile is null || jobPosting is null)
@@ -75,12 +47,12 @@ public static class TechnologyGapAnalyzer
             .Concat(companyProfile?.Signals ?? Array.Empty<JobContextSignal>())
             .ToArray();
 
-        return Signals
+        return JobSignalExtractor.TechnicalThemes
             .Select(signal => ResolveTechnologySignal(signal, sourceSignals))
             .ToArray();
     }
 
-    private static ResolvedTechnologySignal ResolveTechnologySignal(TechnologySignal technologySignal, IReadOnlyList<JobContextSignal> sourceSignals)
+    private static ResolvedTechnologySignal ResolveTechnologySignal(JobSignalExtractor.ThemeSignal technologySignal, IReadOnlyList<JobContextSignal> sourceSignals)
     {
         var sourceAliases = sourceSignals
             .Where(sourceSignal => MapsToTechnology(sourceSignal, technologySignal))
@@ -93,14 +65,14 @@ public static class TechnologyGapAnalyzer
             sourceAliases.Length > 0);
     }
 
-    private static bool MapsToTechnology(JobContextSignal sourceSignal, TechnologySignal technologySignal)
+    private static bool MapsToTechnology(JobContextSignal sourceSignal, JobSignalExtractor.ThemeSignal technologySignal)
         => GetSignalTerms(sourceSignal)
             .Any(sourceTerm => GetTechnologyTerms(technologySignal).Any(technologyTerm => TermsOverlap(sourceTerm, technologyTerm)));
 
     private static IReadOnlyList<string> GetSignalTerms(JobContextSignal sourceSignal)
         => MergeAliases(sourceSignal.Requirement, sourceSignal.EffectiveAliases);
 
-    private static IReadOnlyList<string> GetTechnologyTerms(TechnologySignal technologySignal)
+    private static IReadOnlyList<string> GetTechnologyTerms(JobSignalExtractor.ThemeSignal technologySignal)
         => MergeAliases(technologySignal.Label, technologySignal.Aliases);
 
     private static string BuildJobContext(JobPostingAnalysis jobPosting, CompanyResearchProfile? companyProfile)
@@ -188,8 +160,6 @@ public static class TechnologyGapAnalyzer
             .Select(static alias => alias.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-
-    private sealed record TechnologySignal(string Label, string[] Aliases);
 
     private sealed record ResolvedTechnologySignal(string Label, IReadOnlyList<string> MatchAliases, bool HasSourceMatch);
 }

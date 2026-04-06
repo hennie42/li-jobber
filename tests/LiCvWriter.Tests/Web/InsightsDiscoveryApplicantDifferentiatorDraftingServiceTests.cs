@@ -1,7 +1,7 @@
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
-using LiCvWriter.Web.Services;
+using LiCvWriter.Infrastructure.Workflows;
 
 namespace LiCvWriter.Tests.Web;
 

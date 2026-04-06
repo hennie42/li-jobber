@@ -137,13 +137,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SetActiveJobSetEvidenceSelected(string evidenceId, bool isSelected)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateActiveJobSet(jobSet =>
         {
-            EvidenceSelection = BuildUpdatedEvidenceSelection(jobSet.EvidenceSelection, evidenceId, isSelected),
-            SelectedEvidenceIds = BuildUpdatedEvidenceSelection(jobSet.EvidenceSelection, evidenceId, isSelected)
-                .SelectedEvidence
-                .Select(static item => item.Evidence.Id)
-                .ToArray()
+            var updated = BuildUpdatedEvidenceSelection(jobSet.EvidenceSelection, evidenceId, isSelected);
+            return jobSet with
+            {
+                EvidenceSelection = updated,
+                SelectedEvidenceIds = updated.SelectedEvidence.Select(static item => item.Evidence.Id).ToArray()
+            };
         });
     }
 

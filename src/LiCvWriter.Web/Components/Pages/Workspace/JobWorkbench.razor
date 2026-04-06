@@ -891,7 +891,7 @@ else if (Workspace.JobPosting is not null)
             var refreshed = await Operations.RunAsync(
                 RefreshFitReviewMessage,
                 Workspace.ActiveJobSet.Title,
-                () => JobFitWorkspaceRefreshService.RefreshActiveJobSetAsync());
+                () => Task.FromResult(JobFitWorkspaceRefreshService.RefreshActiveJobSet()));
 
             if (!refreshed)
             {

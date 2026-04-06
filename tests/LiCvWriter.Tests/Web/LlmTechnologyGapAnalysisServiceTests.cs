@@ -3,7 +3,7 @@ using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
-using LiCvWriter.Web.Services;
+using LiCvWriter.Infrastructure.Workflows;
 
 namespace LiCvWriter.Tests.Web;
 

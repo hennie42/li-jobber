@@ -6,7 +6,7 @@ using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Profiles;
 
-namespace LiCvWriter.Web.Services;
+namespace LiCvWriter.Infrastructure.Workflows;
 
 public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlmClient llmClient, OllamaOptions ollamaOptions)
 {

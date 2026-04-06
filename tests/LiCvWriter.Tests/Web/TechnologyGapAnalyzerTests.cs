@@ -1,6 +1,6 @@
+using LiCvWriter.Application.Services;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
-using LiCvWriter.Web.Services;
 
 namespace LiCvWriter.Tests.Web;
 
