@@ -190,12 +190,20 @@ a {
   gap: 1.5rem;
 }
 
-.hero-panel h1,
-.page-header h1 {
+.hero-panel h1 {
   margin: 0.3rem 0 0;
   font-family: "Aptos Display", "Segoe UI", sans-serif;
   font-size: clamp(2rem, 4vw, 3.2rem);
   line-height: 1.02;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-family: "Aptos Display", "Segoe UI", sans-serif;
+  font-size: clamp(1.85rem, 3.1vw, 2.85rem);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .status-grid,
@@ -245,6 +253,16 @@ a {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
+  align-items: flex-start;
+}
+
+.page-header > div {
+  max-width: min(52rem, 100%);
+}
+
+.page-header p {
+  margin: 0;
+  max-width: 44rem;
 }
 
 .stack-gap {
@@ -560,6 +578,11 @@ a {
   .shell-content,
   .shell-sidebar {
     padding: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: clamp(1.75rem, 9vw, 2.25rem);
+    line-height: 1.08;
   }
 
   .fit-header,
