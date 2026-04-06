@@ -3,10 +3,11 @@ using System.Text.Json;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
 
-namespace LiCvWriter.Web.Services;
+namespace LiCvWriter.Infrastructure.Workflows;
 
 public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, OllamaOptions ollamaOptions)
 {

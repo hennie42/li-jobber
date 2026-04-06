@@ -103,8 +103,8 @@ public sealed class EvidenceSelectionServiceTests
 
         var result = service.Build(candidate, jobPosting, companyProfile: null, fitAssessment, ApplicantDifferentiatorProfile.Empty);
 
-        Assert.Single(result.RankedEvidence.Where(item => item.Evidence.Id == "skill:azure"));
-        Assert.Single(result.RankedEvidence.Where(item => item.Evidence.Id.StartsWith("experience:", StringComparison.Ordinal)));
+        Assert.Single(result.RankedEvidence, item => item.Evidence.Id == "skill:azure");
+        Assert.Single(result.RankedEvidence, item => item.Evidence.Id.StartsWith("experience:", StringComparison.Ordinal));
     }
 
     [Fact]

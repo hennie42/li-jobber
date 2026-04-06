@@ -26,13 +26,19 @@ public sealed record RankedEvidenceItem(
     IReadOnlyList<string> Reasons,
     bool IsSelected);
 
-public sealed record EvidenceSelectionResult(IReadOnlyList<RankedEvidenceItem> RankedEvidence)
+public sealed record EvidenceSelectionResult
 {
     public static EvidenceSelectionResult Empty { get; } = new(Array.Empty<RankedEvidenceItem>());
 
-    public bool HasSignals => RankedEvidence.Count > 0;
+    public EvidenceSelectionResult(IReadOnlyList<RankedEvidenceItem> rankedEvidence)
+    {
+        RankedEvidence = rankedEvidence;
+        SelectedEvidence = rankedEvidence.Where(static evidence => evidence.IsSelected).ToArray();
+    }
 
-    public IReadOnlyList<RankedEvidenceItem> SelectedEvidence => RankedEvidence
-        .Where(static evidence => evidence.IsSelected)
-        .ToArray();
+    public IReadOnlyList<RankedEvidenceItem> RankedEvidence { get; }
+
+    public IReadOnlyList<RankedEvidenceItem> SelectedEvidence { get; }
+
+    public bool HasSignals => RankedEvidence.Count > 0;
 }

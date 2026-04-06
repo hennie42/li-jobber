@@ -11,7 +11,7 @@ public sealed record JobSignalExtraction(
 
 public static class JobSignalExtractor
 {
-    private static readonly ThemeSignal[] TechnicalThemes =
+    internal static readonly ThemeSignal[] TechnicalThemes =
     [
         new("Generative AI", ["generative ai", "gen ai", "genai"]),
         new("LLMs", ["llm", "llms", "large language model", "large language models"]),
@@ -36,6 +36,7 @@ public static class JobSignalExtractor
         new("GitHub Actions", ["github actions", "github workflows"]),
         new("TypeScript", ["typescript"]),
         new("React", ["react", "reactjs"]),
+        new("GraphQL", ["graphql"]),
         new("Architecture", ["architecture", "architect", "solution design", "solution architecture"]),
         new("Consulting", ["consulting", "consultant", "advisory"]),
         new("Client leadership", ["client-facing", "client facing", "stakeholder management", "stakeholder engagement"]),
@@ -370,5 +371,5 @@ public static class JobSignalExtractor
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    private sealed record ThemeSignal(string Label, string[] Aliases);
+    internal sealed record ThemeSignal(string Label, string[] Aliases);
 }

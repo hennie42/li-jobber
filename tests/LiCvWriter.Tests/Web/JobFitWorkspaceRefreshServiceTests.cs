@@ -10,7 +10,7 @@ namespace LiCvWriter.Tests.Web;
 public sealed class JobFitWorkspaceRefreshServiceTests
 {
     [Fact]
-    public async Task RefreshAllJobSetsAsync_UpdatesEveryTrackedJobTab()
+    public void RefreshAllJobSets_UpdatesEveryTrackedJobTab()
     {
         var session = new WorkspaceSession(new OllamaOptions());
         session.SetImportResult(
@@ -52,7 +52,7 @@ public sealed class JobFitWorkspaceRefreshServiceTests
             new EvidenceSelectionService(new CandidateEvidenceService()),
             session);
 
-        var refreshed = await service.RefreshAllJobSetsAsync();
+        var refreshed = service.RefreshAllJobSets();
 
         Assert.Equal(2, refreshed);
 
@@ -66,7 +66,7 @@ public sealed class JobFitWorkspaceRefreshServiceTests
     }
 
     [Fact]
-    public async Task RefreshAllJobSetsAsync_PreservesSavedSelections()
+    public void RefreshAllJobSets_PreservesSavedSelections()
     {
         var session = new WorkspaceSession(new OllamaOptions());
         session.SetImportResult(
@@ -99,11 +99,11 @@ public sealed class JobFitWorkspaceRefreshServiceTests
             new EvidenceSelectionService(new CandidateEvidenceService()),
             session);
 
-        await service.RefreshAllJobSetsAsync();
+        service.RefreshAllJobSets();
         var evidenceId = session.EvidenceSelection.SelectedEvidence.Last().Evidence.Id;
         session.SetActiveJobSetEvidenceSelected(evidenceId, false);
 
-        await service.RefreshAllJobSetsAsync();
+        service.RefreshAllJobSets();
 
         Assert.DoesNotContain(session.EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == evidenceId);
     }

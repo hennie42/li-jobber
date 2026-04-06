@@ -7,7 +7,7 @@ using LiCvWriter.Application.Options;
 
 namespace LiCvWriter.Infrastructure.LinkedIn;
 
-public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, LinkedInAuthOptions options)
+public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, LinkedInAuthOptions options, TimeProvider timeProvider)
 {
     private const int VersionFallbackMonths = 36;
     private static readonly Uri SnapshotEndpoint = new("https://api.linkedin.com/rest/memberSnapshotData?q=criteria");
@@ -227,7 +227,8 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
         var candidates = new List<string>();
         AddCandidate(candidates, NormalizeApiVersion(options.PortabilityApiVersion));
 
-        var currentMonth = new DateTimeOffset(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var now = timeProvider.GetUtcNow();
+        var currentMonth = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
         for (var offset = 0; offset < VersionFallbackMonths; offset++)
         {
             AddCandidate(candidates, currentMonth.AddMonths(-offset).ToString("yyyyMM"));
