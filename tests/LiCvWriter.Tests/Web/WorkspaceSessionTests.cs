@@ -293,4 +293,57 @@ public sealed class WorkspaceSessionTests
         Assert.Empty(session.ActiveJobSet.SelectedEvidenceIds);
         Assert.Empty(session.EvidenceSelection.SelectedEvidence);
     }
+
+    [Fact]
+    public void AddJobSet_WithPasteTextMode_CreatesTabWithCorrectInputMode()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.AddJobSet(JobSetInputMode.PasteText);
+
+        Assert.Equal(2, session.JobSets.Count);
+        Assert.Equal(JobSetInputMode.PasteText, session.ActiveJobSet.InputMode);
+    }
+
+    [Fact]
+    public void AddJobSet_DefaultMode_IsLinkToUrls()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+
+        session.AddJobSet();
+
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+    }
+
+    [Fact]
+    public void UpdateActiveJobSetInputs_PersistsTextFields()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.AddJobSet(JobSetInputMode.PasteText);
+        session.UpdateActiveJobSetInputs(string.Empty, string.Empty, "Full job posting text here", "Company info pasted");
+
+        Assert.Equal("Full job posting text here", session.ActiveJobSet.JobPostingText);
+        Assert.Equal("Company info pasted", session.ActiveJobSet.CompanyContextText);
+    }
+
+    [Fact]
+    public void AddJobSet_MixedModes_TabsKeepIndependentInputModes()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.AddJobSet(JobSetInputMode.PasteText);
+        session.AddJobSet(JobSetInputMode.LinkToUrls);
+
+        session.SelectJobSet("job-set-01");
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+
+        session.SelectJobSet("job-set-02");
+        Assert.Equal(JobSetInputMode.PasteText, session.ActiveJobSet.InputMode);
+
+        session.SelectJobSet("job-set-03");
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+    }
 }

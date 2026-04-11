@@ -203,6 +203,112 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains("jobs.example.test/lead-ai-architect", exception.Message, StringComparison.OrdinalIgnoreCase);
       }
 
+      [Fact]
+      public async Task AnalyzeTextAsync_ParsesJobPostingFromPastedText()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Senior Backend Engineer",
+              "companyName": "Acme Corp",
+              "summary": "Build scalable backend services for the Acme platform.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": ".NET",
+                  "sourceSnippet": "Must have strong .NET experience.",
+                  "confidence": 96
+                },
+                {
+                  "category": "Nice to have",
+                  "requirement": "Kafka",
+                  "sourceSnippet": "Experience with Kafka or similar event streaming.",
+                  "confidence": 80
+                }
+              ]
+            }
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync(
+            "Senior Backend Engineer at Acme Corp. Must have strong .NET experience. Experience with Kafka or similar event streaming.",
+            "session-model",
+            "medium");
+
+        Assert.Equal("Senior Backend Engineer", result.RoleTitle);
+        Assert.Equal("Acme Corp", result.CompanyName);
+        Assert.Null(result.SourceUrl);
+        Assert.Contains(".NET", result.MustHaveThemes);
+        Assert.Contains("Kafka", result.NiceToHaveThemes);
+        Assert.Contains(result.Signals, signal => signal.SourceLabel == "pasted text");
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_WhenTextIsEmpty_Throws()
+      {
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeTextAsync(string.Empty));
+
+        Assert.Contains("empty", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
+      [Fact]
+      public async Task BuildCompanyProfileFromTextAsync_ParsesCompanyContextFromPastedText()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "name": "Acme Corp",
+              "summary": "Acme Corp builds next-generation platform services.",
+              "guidingPrinciples": ["Innovation", "Customer focus"],
+              "differentiators": ["Platform scale"],
+              "requirements": [
+                {
+                  "category": "Culture",
+                  "requirement": "Innovation",
+                  "sourceSnippet": "We foster innovation and experimentation.",
+                  "confidence": 90
+                }
+              ]
+            }
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.BuildCompanyProfileFromTextAsync(
+            "Acme Corp builds next-generation platform services. We foster innovation and experimentation.",
+            "session-model");
+
+        Assert.Equal("Acme Corp", result.Name);
+        Assert.Empty(result.SourceUrls);
+        Assert.Contains("Innovation", result.GuidingPrinciples);
+        Assert.Contains("Platform scale", result.Differentiators);
+      }
+
+      [Fact]
+      public async Task BuildCompanyProfileFromTextAsync_WhenTextIsEmpty_Throws()
+      {
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.BuildCompanyProfileFromTextAsync("   "));
+
+        Assert.Contains("empty", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
       private static HttpResponseMessage CreateHtmlResponse(string html)
         => new(HttpStatusCode.OK)
         {

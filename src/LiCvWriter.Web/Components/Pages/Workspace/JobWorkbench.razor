@@ -30,12 +30,13 @@
                     @onclick="() => SelectJobSet(jobSet.Id)">
                 <span class="job-set-button-label">
                     <span class="@GetProgressIndicatorClass(jobSet.ProgressState)" aria-hidden="true"></span>
-                    <span>@jobSet.Title</span>
+                    <span>@jobSet.Title (@FormatInputMode(jobSet.InputMode))</span>
                 </span>
             </button>
         }
 
-        <button type="button" class="secondary-button" @onclick="AddJobSet">Add job tab</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)">Add job tab (URLs)</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)">Add job tab (paste text)</button>
         <button type="button" class="secondary-button" @onclick="DeleteActiveJobSet" disabled="@(isBusy || Workspace.JobSets.Count <= 1)">Delete active job tab</button>
     </div>
     @if (Workspace.JobSets.Count == 1)
@@ -46,6 +47,7 @@
         @GetActiveTabStatusMessage()
     </div>
     <p class="muted-text">Active output folder: @Workspace.ActiveJobSet.OutputFolderName</p>
+    <p class="muted-text">Input mode: @FormatInputMode(Workspace.ActiveJobSet.InputMode)</p>
     <p class="muted-text">Current language: @Workspace.ActiveJobSet.OutputLanguage</p>
     <p class="muted-text">Session LLM: @(Workspace.IsLlmReady ? $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)}" : "Pending setup on Start / Setup")</p>
     <p class="muted-text">Loaded in Ollama: @FormatLoadedModels(Workspace.OllamaAvailability)</p>
@@ -63,15 +65,26 @@
         <div class="field-label">Research</div>
         <h2>Analyze the job and company context</h2>
 
-        <label class="field-label" for="jobUrl">Job URL</label>
-        <input id="jobUrl" class="text-input" @bind="jobUrl" @bind:event="oninput" @bind:after="PersistJobSetInputs" />
+        @if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.LinkToUrls)
+        {
+            <label class="field-label" for="jobUrl">Job URL</label>
+            <input id="jobUrl" class="text-input" @bind="jobUrl" @bind:event="oninput" @bind:after="PersistJobSetInputs" />
 
-        <label class="field-label" for="companyUrls">Company context URLs</label>
-        <textarea id="companyUrls" class="prompt-box compact-prompt" @bind="companyUrls" @bind:event="oninput" @bind:after="PersistJobSetInputs"></textarea>
+            <label class="field-label" for="companyUrls">Company context URLs</label>
+            <textarea id="companyUrls" class="prompt-box compact-prompt" @bind="companyUrls" @bind:event="oninput" @bind:after="PersistJobSetInputs"></textarea>
+        }
+        else
+        {
+            <label class="field-label" for="jobPostingText">Job posting text</label>
+            <textarea id="jobPostingText" class="prompt-box" rows="10" @bind="jobPostingText" @bind:event="oninput" @bind:after="PersistJobSetInputs" placeholder="Paste the full job posting text here..."></textarea>
+
+            <label class="field-label" for="companyContextText">Company context text (optional)</label>
+            <textarea id="companyContextText" class="prompt-box" rows="8" @bind="companyContextText" @bind:event="oninput" @bind:after="PersistJobSetInputs" placeholder="Paste company information here, or leave empty to skip company context..."></textarea>
+        }
         <div class="button-row">
             <button class="primary-button" @onclick="AnalyzeAndBuildContextAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isResearching ? "Analyzing and building..." : "Analyze job and build company context")</button>
         </div>
-        <p class="muted-text">Provide the target job URL and at least one company context URL. Structured parsing runs through the session model from Start / Setup and blocks this tab if the model cannot return valid JSON.</p>
+        <p class="muted-text">@GetResearchHelpText()</p>
 
         @if (analysis is not null)
         {
@@ -132,7 +145,14 @@
                 <summary>Company context</summary>
                 <div class="stack-gap">
                     <p>@companyProfile.Summary</p>
-                    <p class="muted-text">Built from @companyProfile.SourceUrls.Count source URLs.</p>
+                    @if (companyProfile.SourceUrls.Count > 0)
+                    {
+                        <p class="muted-text">Built from @companyProfile.SourceUrls.Count source URLs.</p>
+                    }
+                    else
+                    {
+                        <p class="muted-text">Built from pasted text.</p>
+                    }
 
                     @if (companyProfile.GuidingPrinciples.Count > 0)
                     {
@@ -486,6 +506,8 @@ else if (Workspace.JobPosting is not null)
     private const string RefreshTechnologyGapMessage = "Analyzing technology gaps";
     private string jobUrl = string.Empty;
     private string companyUrls = string.Empty;
+    private string jobPostingText = string.Empty;
+    private string companyContextText = string.Empty;
     private BusyOperation currentOperation;
     private string? errorMessage;
     private JobPostingAnalysis? analysis;
@@ -539,6 +561,12 @@ else if (Workspace.JobPosting is not null)
             return;
         }
 
+        if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText)
+        {
+            await AnalyzeAndBuildContextFromTextAsync();
+            return;
+        }
+
         if (!TryGetJobUri(out var jobUri))
         {
             return;
@@ -565,6 +593,40 @@ else if (Workspace.JobPosting is not null)
             }
 
             Operations.Success("Job and company context updated.", "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.");
+        }
+        finally
+        {
+            currentOperation = BusyOperation.None;
+        }
+    }
+
+    private async Task AnalyzeAndBuildContextFromTextAsync()
+    {
+        if (string.IsNullOrWhiteSpace(jobPostingText))
+        {
+            errorMessage = "Paste the job posting text before analyzing.";
+            return;
+        }
+
+        try
+        {
+            currentOperation = BusyOperation.AnalyzeAndBuildContext;
+            Workspace.MarkLlmWorkStarted();
+
+            if (!await ExecuteJobTextAnalysisAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(companyContextText))
+            {
+                if (!await ExecuteCompanyContextFromTextAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
+                {
+                    return;
+                }
+            }
+
+            Operations.Success("Job and company context updated.", "The job tab now has the latest target role context" + (string.IsNullOrWhiteSpace(companyContextText) ? "." : " and company context.") + " Fit review and generation are still idle until you run them.");
         }
         finally
         {
@@ -718,6 +780,110 @@ else if (Workspace.JobPosting is not null)
         }
     }
 
+    private async Task<bool> ExecuteJobTextAnalysisAsync(
+        bool manageCurrentOperation = true,
+        bool markLlmWorkStarted = true,
+        bool emitSuccess = true,
+        string? userErrorPrefix = null)
+    {
+        try
+        {
+            if (manageCurrentOperation)
+            {
+                currentOperation = BusyOperation.AnalyzeJob;
+            }
+
+            if (markLlmWorkStarted)
+            {
+                Workspace.MarkLlmWorkStarted();
+            }
+
+            Workspace.MarkActiveJobSetRunning("Job analysis is running for this tab.");
+            analysis = await Operations.RunAsync(
+                AnalyzeJobMessage,
+                $"pasted text via {Workspace.SelectedLlmModel}",
+                () => JobResearchService.AnalyzeTextAsync(jobPostingText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
+
+            Workspace.SetJobPosting(analysis);
+            SyncFromWorkspace();
+
+            if (emitSuccess)
+            {
+                Operations.Success("Job analysis updated.", "The job tab now has the latest target role context. Fit review and generation are still idle until you run them.");
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
+                ? exception.Message
+                : $"{userErrorPrefix}: {exception.Message}";
+            Workspace.MarkActiveJobSetFailed("Job analysis failed for this tab.");
+            Operations.Error("Job analysis failed.", exception.Message);
+            return false;
+        }
+        finally
+        {
+            if (manageCurrentOperation)
+            {
+                currentOperation = BusyOperation.None;
+            }
+        }
+    }
+
+    private async Task<bool> ExecuteCompanyContextFromTextAsync(
+        bool manageCurrentOperation = true,
+        bool markLlmWorkStarted = true,
+        bool emitSuccess = true,
+        string? userErrorPrefix = null)
+    {
+        try
+        {
+            if (manageCurrentOperation)
+            {
+                currentOperation = BusyOperation.BuildCompanyContext;
+            }
+
+            if (markLlmWorkStarted)
+            {
+                Workspace.MarkLlmWorkStarted();
+            }
+
+            Workspace.MarkActiveJobSetRunning("Company context analysis is running for this tab.");
+            companyProfile = await Operations.RunAsync(
+                BuildCompanyContextMessage,
+                $"pasted text via {Workspace.SelectedLlmModel}",
+                () => JobResearchService.BuildCompanyProfileFromTextAsync(companyContextText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
+
+            Workspace.SetCompanyProfile(companyProfile);
+            SyncFromWorkspace();
+
+            if (emitSuccess)
+            {
+                Operations.Success("Company context updated.", "The job tab now includes the latest company context. Fit review and generation are still idle until you run them.");
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
+                ? exception.Message
+                : $"{userErrorPrefix}: {exception.Message}";
+            Workspace.MarkActiveJobSetFailed("Company context analysis failed for this tab.");
+            Operations.Error("Company context analysis failed.", exception.Message);
+            return false;
+        }
+        finally
+        {
+            if (manageCurrentOperation)
+            {
+                currentOperation = BusyOperation.None;
+            }
+        }
+    }
+
     private async Task GenerateDraftsAsync()
     {
         errorMessage = null;
@@ -787,9 +953,9 @@ else if (Workspace.JobPosting is not null)
         }
     }
 
-    private void AddJobSet()
+    private void AddJobSet(JobSetInputMode inputMode)
     {
-        Workspace.AddJobSet();
+        Workspace.AddJobSet(inputMode);
         errorMessage = null;
         SyncFromWorkspace();
     }
@@ -816,7 +982,7 @@ else if (Workspace.JobPosting is not null)
     }
 
     private void PersistJobSetInputs()
-        => Workspace.UpdateActiveJobSetInputs(jobUrl, companyUrls);
+        => Workspace.UpdateActiveJobSetInputs(jobUrl, companyUrls, jobPostingText, companyContextText);
 
     private void SyncFromWorkspace()
     {
@@ -824,6 +990,8 @@ else if (Workspace.JobPosting is not null)
         companyProfile = Workspace.CompanyProfile;
         jobUrl = Workspace.ActiveJobSet.JobUrl;
         companyUrls = Workspace.ActiveJobSet.CompanyUrlsText;
+        jobPostingText = Workspace.ActiveJobSet.JobPostingText;
+        companyContextText = Workspace.ActiveJobSet.CompanyContextText;
 
         if (string.IsNullOrWhiteSpace(jobUrl) && analysis?.SourceUrl is not null)
         {
@@ -1121,6 +1289,19 @@ else if (Workspace.JobPosting is not null)
         SyncFromWorkspace();
         _ = InvokeAsync(StateHasChanged);
     }
+
+    private static string FormatInputMode(JobSetInputMode inputMode)
+        => inputMode switch
+        {
+            JobSetInputMode.LinkToUrls => "URLs",
+            JobSetInputMode.PasteText => "Paste text",
+            _ => "Unknown"
+        };
+
+    private string GetResearchHelpText()
+        => Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText
+            ? "Paste the job posting text and optionally company context text. Structured parsing runs through the session model from Start / Setup."
+            : "Provide the target job URL and at least one company context URL. Structured parsing runs through the session model from Start / Setup and blocks this tab if the model cannot return valid JSON.";
 
     private static string GetProgressIndicatorClass(JobSetProgressState progressState)
         => progressState switch

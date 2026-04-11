@@ -168,4 +168,36 @@ public sealed class WorkspaceRecoveryTests
             }
         }
     }
+
+    [Fact]
+    public void WorkspaceSession_RestoresInputModeAndTextFields()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+            session.AddJobSet(JobSetInputMode.PasteText);
+            session.UpdateActiveJobSetInputs(string.Empty, string.Empty, "Pasted job posting content", "Pasted company info");
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            restoredSession.SelectJobSet("job-set-02");
+            Assert.Equal(JobSetInputMode.PasteText, restoredSession.ActiveJobSet.InputMode);
+            Assert.Equal("Pasted job posting content", restoredSession.ActiveJobSet.JobPostingText);
+            Assert.Equal("Pasted company info", restoredSession.ActiveJobSet.CompanyContextText);
+
+            restoredSession.SelectJobSet("job-set-01");
+            Assert.Equal(JobSetInputMode.LinkToUrls, restoredSession.ActiveJobSet.InputMode);
+            Assert.Equal(string.Empty, restoredSession.ActiveJobSet.JobPostingText);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }
