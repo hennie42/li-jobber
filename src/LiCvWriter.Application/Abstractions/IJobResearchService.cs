@@ -18,4 +18,18 @@ public interface IJobResearchService
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
         CancellationToken cancellationToken = default);
+
+    Task<JobPostingAnalysis> AnalyzeTextAsync(
+        string jobPostingText,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(
+        string companyContextText,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default);
 }

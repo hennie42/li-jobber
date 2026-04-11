@@ -171,10 +171,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     : item)
                 .ToArray());
 
-    public void AddJobSet()
+    public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls)
     {
         var nextSortOrder = GetNextSortOrder();
-        var jobSet = CreateJobSet(nextSortOrder);
+        var jobSet = CreateJobSet(nextSortOrder, inputMode);
 
         jobSets.Add(jobSet);
         ActiveJobSetId = jobSet.Id;
@@ -216,12 +216,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
-    public void UpdateActiveJobSetInputs(string jobUrl, string companyUrlsText)
+    public void UpdateActiveJobSetInputs(string jobUrl, string companyUrlsText, string jobPostingText, string companyContextText)
     {
         UpdateActiveJobSet(jobSet => jobSet with
         {
             JobUrl = jobUrl,
-            CompanyUrlsText = companyUrlsText
+            CompanyUrlsText = companyUrlsText,
+            JobPostingText = jobPostingText,
+            CompanyContextText = companyContextText
         });
     }
 
@@ -454,6 +456,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 SortOrder = jobSet.SortOrder,
                 DefaultTitle = jobSet.DefaultTitle,
                 OutputFolderName = jobSet.OutputFolderName,
+                InputMode = jobSet.InputMode,
                 OutputLanguage = jobSet.OutputLanguage,
                 ProgressState = jobSet.ProgressState == JobSetProgressState.Done && jobSet.Exports.Count > 0
                     ? JobSetProgressState.Done
@@ -463,6 +466,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     : "Recovered after restart. Re-import the profile before resuming this job set.",
                 JobUrl = jobSet.JobUrl,
                 CompanyUrlsText = jobSet.CompanyUrlsText,
+                JobPostingText = jobSet.JobPostingText,
+                CompanyContextText = jobSet.CompanyContextText,
                 JobPosting = jobSet.JobPosting,
                 CompanyProfile = jobSet.CompanyProfile,
                 JobFitAssessment = JobFitAssessment.Empty,
@@ -510,13 +515,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    private static JobSetSessionState CreateJobSet(int sortOrder)
+    private static JobSetSessionState CreateJobSet(int sortOrder, JobSetInputMode inputMode = JobSetInputMode.LinkToUrls)
         => new()
         {
             Id = CreateJobSetId(sortOrder),
             SortOrder = sortOrder,
             DefaultTitle = $"Job set {sortOrder}",
-            OutputFolderName = BuildOutputFolderName(sortOrder, null)
+            OutputFolderName = BuildOutputFolderName(sortOrder, null),
+            InputMode = inputMode
         };
 
     private static string CreateJobSetId(int sortOrder) => $"job-set-{sortOrder:00}";
@@ -577,7 +583,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.JobPosting,
                 jobSet.CompanyProfile,
                 jobSet.Exports,
-                jobSet.SelectedEvidenceIds)).ToArray(),
+                jobSet.SelectedEvidenceIds,
+                jobSet.InputMode,
+                jobSet.JobPostingText,
+                jobSet.CompanyContextText)).ToArray(),
             ApplicantDifferentiatorProfile);
 
     private void NotifyChanged()

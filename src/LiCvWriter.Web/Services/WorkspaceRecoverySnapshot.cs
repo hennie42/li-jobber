@@ -22,4 +22,7 @@ public sealed record JobSetRecoveryState(
     JobPostingAnalysis? JobPosting,
     CompanyResearchProfile? CompanyProfile,
     IReadOnlyList<DocumentExportResult> Exports,
-    IReadOnlyList<string>? SelectedEvidenceIds = null);
+    IReadOnlyList<string>? SelectedEvidenceIds = null,
+    JobSetInputMode InputMode = JobSetInputMode.LinkToUrls,
+    string JobPostingText = "",
+    string CompanyContextText = "");

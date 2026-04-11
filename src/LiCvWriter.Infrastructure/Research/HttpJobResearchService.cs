@@ -108,9 +108,78 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return ParseCompanyResearchProfile(response.Content, urls, sourceDocuments);
     }
 
+    public async Task<JobPostingAnalysis> AnalyzeTextAsync(
+        string jobPostingText,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(jobPostingText))
+        {
+            throw new InvalidOperationException("The pasted job posting text is empty.");
+        }
+
+        var resolvedModel = ResolveModel(selectedModel);
+        var response = await llmClient.GenerateAsync(
+            new LlmRequest(
+                resolvedModel,
+                BuildJobSystemPrompt(),
+                [new LlmChatMessage("user", BuildPastedJobUserPrompt(jobPostingText))],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: 0.1),
+            progress is null ? null : update => progress(update with
+            {
+                Message = "Parsing job posting",
+                Detail = string.IsNullOrWhiteSpace(update.Detail)
+                    ? $"Structured job parsing is running via {update.Model}."
+                    : update.Detail
+            }),
+            cancellationToken);
+
+        return ParseJobPostingAnalysis(response.Content, jobPostingUrl: null, fallbackRoleTitle: "Pasted job posting", jobText: jobPostingText);
+    }
+
+    public async Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(
+        string companyContextText,
+        string? selectedModel = null,
+        string? selectedThinkingLevel = null,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(companyContextText))
+        {
+            throw new InvalidOperationException("The pasted company context text is empty.");
+        }
+
+        var response = await llmClient.GenerateAsync(
+            new LlmRequest(
+                ResolveModel(selectedModel),
+                BuildCompanySystemPrompt(),
+                [new LlmChatMessage("user", BuildPastedCompanyUserPrompt(companyContextText))],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: 0.1),
+            progress is null ? null : update => progress(update with
+            {
+                Message = "Parsing company context",
+                Detail = string.IsNullOrWhiteSpace(update.Detail)
+                    ? $"Structured company parsing is running via {update.Model}."
+                    : update.Detail
+            }),
+            cancellationToken);
+
+        return ParseCompanyResearchProfile(response.Content, sourceUrls: Array.Empty<Uri>(), sourceDocuments: [(default!, companyContextText)]);
+    }
+
     private static JobPostingAnalysis ParseJobPostingAnalysis(
         string content,
-        Uri jobPostingUrl,
+        Uri? jobPostingUrl,
         string fallbackRoleTitle,
         string jobText)
     {
@@ -133,7 +202,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var signals = ReadSignals(
             root,
             "requirements",
-            defaultSourceLabel: jobPostingUrl.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase));
+            defaultSourceLabel: jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "pasted text");
 
         var roleTitle = ReadOptionalString(root, "roleTitle");
         var companyName = ReadOptionalString(root, "companyName");
@@ -144,7 +213,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             SourceUrl = jobPostingUrl,
             RoleTitle = string.IsNullOrWhiteSpace(roleTitle) ? fallbackRoleTitle : roleTitle,
             CompanyName = string.IsNullOrWhiteSpace(companyName)
-                ? jobPostingUrl.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                ? jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "Unknown"
                 : companyName,
             Summary = string.IsNullOrWhiteSpace(summary) ? Clip(jobText, 1_200) : Clip(summary, 1_200),
             MustHaveThemes = signals.Where(static signal => signal.Importance == JobRequirementImportance.MustHave).Select(static signal => signal.Requirement).ToArray(),
@@ -176,7 +245,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         {
         var root = document.RootElement;
 
-        var signals = ReadSignals(root, "requirements", defaultSourceLabel: sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase));
+        var signals = ReadSignals(root, "requirements", defaultSourceLabel: sourceUrls.Count > 0
+            ? sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+            : "pasted text");
         var summary = ReadOptionalString(root, "summary");
         var name = ReadOptionalString(root, "name");
         var guidingPrinciples = ReadStringArray(root, "guidingPrinciples", required: true);
@@ -185,7 +256,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return new CompanyResearchProfile
         {
             Name = string.IsNullOrWhiteSpace(name)
-                ? sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                ? (sourceUrls.Count > 0
+                    ? sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                    : "Unknown")
                 : name,
             Summary = string.IsNullOrWhiteSpace(summary)
                 ? Clip(string.Join(Environment.NewLine + Environment.NewLine, sourceDocuments.Select(static item => item.Text)), 2_000)
@@ -503,6 +576,26 @@ Rules:
         }
 
         return Clip(builder.ToString(), MaxCompanyContextCharacters);
+    }
+
+    private static string BuildPastedJobUserPrompt(string jobPostingText)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Source: pasted text (no URL available)");
+        builder.AppendLine();
+        builder.AppendLine("Job posting text:");
+        builder.AppendLine(Clip(jobPostingText, MaxJobContextCharacters));
+        return builder.ToString();
+    }
+
+    private static string BuildPastedCompanyUserPrompt(string companyContextText)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Company source documents:");
+        builder.AppendLine();
+        builder.AppendLine("Source: pasted text (no URL available)");
+        builder.AppendLine(Clip(companyContextText, MaxCompanyContextCharacters));
+        return builder.ToString();
     }
 
     private static string ExtractJsonObject(string content)

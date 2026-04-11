@@ -15,6 +15,8 @@ public sealed record JobSetSessionState
 
     public required string OutputFolderName { get; init; }
 
+    public JobSetInputMode InputMode { get; init; } = JobSetInputMode.LinkToUrls;
+
     public OutputLanguage OutputLanguage { get; init; } = OutputLanguage.English;
 
     public JobSetProgressState ProgressState { get; init; } = JobSetProgressState.NotStarted;
@@ -24,6 +26,10 @@ public sealed record JobSetSessionState
     public string JobUrl { get; init; } = string.Empty;
 
     public string CompanyUrlsText { get; init; } = string.Empty;
+
+    public string JobPostingText { get; init; } = string.Empty;
+
+    public string CompanyContextText { get; init; } = string.Empty;
 
     public JobPostingAnalysis? JobPosting { get; init; }
 
