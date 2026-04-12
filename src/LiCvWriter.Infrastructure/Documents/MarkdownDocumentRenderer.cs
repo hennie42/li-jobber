@@ -109,24 +109,17 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
     private static void AppendFitSnapshot(StringBuilder builder, JobFitAssessment? assessment, OutputLanguage outputLanguage)
     {
-        if (assessment is null || !assessment.HasSignals)
+        if (assessment is null || !assessment.HasSignals || assessment.Strengths.Count == 0)
         {
             return;
         }
 
         builder.AppendLine($"## {Translate(outputLanguage, "Fit Snapshot", "Matchvurdering")}");
         builder.AppendLine();
-        builder.AppendLine($"- {Translate(outputLanguage, "Recommendation", "Anbefaling")}: {assessment.Recommendation}");
-        builder.AppendLine($"- {Translate(outputLanguage, "Score", "Score")}: {assessment.OverallScore}/100");
 
         foreach (var strength in assessment.Strengths.Take(3))
         {
             builder.AppendLine($"- {Translate(outputLanguage, "Strength", "Styrke")}: {strength}");
-        }
-
-        foreach (var gap in assessment.Gaps.Take(3))
-        {
-            builder.AppendLine($"- {Translate(outputLanguage, "Gap", "Gap")}: {gap}");
         }
 
         builder.AppendLine();
