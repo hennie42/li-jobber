@@ -309,6 +309,74 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains("empty", exception.Message, StringComparison.OrdinalIgnoreCase);
       }
 
+      [Fact]
+      public async Task AnalyzeTextAsync_ParsesJsonWrappedInThinkingTags()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            <think>
+            The user pasted a job posting for a backend role at Acme Corp.
+            I need to extract the {requirements} carefully.
+            </think>
+            {
+              "roleTitle": "Backend Engineer",
+              "companyName": "Acme Corp",
+              "summary": "Build scalable services.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": ".NET",
+                  "sourceSnippet": "Requires strong .NET skills.",
+                  "confidence": 95
+                }
+              ]
+            }
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync("Backend Engineer at Acme Corp. Requires strong .NET skills.", "model", "high");
+
+        Assert.Equal("Backend Engineer", result.RoleTitle);
+        Assert.Contains(".NET", result.MustHaveThemes);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_ParsesJsonWrappedInMarkdownFencesWithPreamble()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            Here is the analysis:
+
+            ```json
+            {
+              "roleTitle": "Data Engineer",
+              "companyName": "Contoso",
+              "summary": "Build data pipelines.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Spark",
+                  "sourceSnippet": "Experience with Spark required.",
+                  "confidence": 90
+                }
+              ]
+            }
+            ```
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync("Data Engineer at Contoso. Experience with Spark required.", "model", "low");
+
+        Assert.Equal("Data Engineer", result.RoleTitle);
+        Assert.Contains("Spark", result.MustHaveThemes);
+      }
+
       private static HttpResponseMessage CreateHtmlResponse(string html)
         => new(HttpStatusCode.OK)
         {

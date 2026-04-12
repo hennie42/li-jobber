@@ -177,6 +177,12 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return ParseCompanyResearchProfile(response.Content, sourceUrls: Array.Empty<Uri>(), sourceDocuments: [(default!, companyContextText)]);
     }
 
+    private static readonly JsonDocumentOptions LenientJsonOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip
+    };
+
     private static JobPostingAnalysis ParseJobPostingAnalysis(
         string content,
         Uri? jobPostingUrl,
@@ -186,12 +192,13 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         JsonDocument document;
         try
         {
-            document = JsonDocument.Parse(ExtractJsonObject(content));
+            document = JsonDocument.Parse(ExtractJsonObject(content), LenientJsonOptions);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
             throw new InvalidOperationException(
-                "The model did not return parseable JSON for the job analysis. Try again or check the session model.",
+                $"The model did not return parseable JSON for the job analysis. Try again or check the session model. Response preview: {preview}",
                 exception);
         }
 
@@ -232,12 +239,13 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         JsonDocument document;
         try
         {
-            document = JsonDocument.Parse(ExtractJsonObject(content));
+            document = JsonDocument.Parse(ExtractJsonObject(content), LenientJsonOptions);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
             throw new InvalidOperationException(
-                "The model did not return parseable JSON for the company analysis. Try again or check the session model.",
+                $"The model did not return parseable JSON for the company analysis. Try again or check the session model. Response preview: {preview}",
                 exception);
         }
 
@@ -601,11 +609,16 @@ Rules:
     private static string ExtractJsonObject(string content)
     {
         var trimmed = content.Trim();
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            var lines = trimmed.Split('\n');
-            trimmed = string.Join('\n', lines.Skip(1).Take(lines.Length - 2));
-        }
+
+        trimmed = Regex.Replace(trimmed, @"<think>.*?</think>", string.Empty, RegexOptions.Singleline).Trim();
+
+        trimmed = Regex.Replace(trimmed, @"```(?:json)?\s*\n?(.*?)\n?\s*```", "$1", RegexOptions.Singleline).Trim();
+
+        // Remove trailing commas before ] or } (common LLM output quirk)
+        trimmed = Regex.Replace(trimmed, @",\s*([\]\}])", "$1");
+
+        // Fix period used instead of colon between JSON key and value ("key". "value" → "key": "value")
+        trimmed = Regex.Replace(trimmed, @"(""\w+"")\s*\.\s*("")", "$1: $2");
 
         var start = trimmed.IndexOf('{');
         var end = trimmed.LastIndexOf('}');

@@ -235,6 +235,15 @@
     </section>
 }
 
+@if (!string.IsNullOrWhiteSpace(GetMostRelevantTelemetry()?.ResponseContent))
+{
+    <section class="card-panel stack-gap">
+        <h2>Last model response</h2>
+        <p class="muted-text">Full untruncated model output from the most recent LLM call.</p>
+        <pre class="response-box">@GetMostRelevantTelemetry()!.ResponseContent</pre>
+    </section>
+}
+
 <section class="card-panel stack-gap">
     <h2>Recent activity</h2>
     <div class="activity-feed">

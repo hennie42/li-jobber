@@ -295,6 +295,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             SelectedLlmModel = ResolvePreferredModel(availability.AvailableModels, ollamaOptions.Model);
             IsLlmSessionConfigured = false;
         }
+        else if (!IsLlmSessionConfigured && CanEditLlmSessionSettings)
+        {
+            IsLlmSessionConfigured = true;
+        }
 
         NotifyChanged();
     }
