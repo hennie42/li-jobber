@@ -31,7 +31,6 @@ public sealed record ApplicantDifferentiatorProfile
         Add(lines, ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Label, StakeholderStyle);
         Add(lines, ApplicantDifferentiatorFieldCatalog.Motivators.Label, Motivators);
         Add(lines, ApplicantDifferentiatorFieldCatalog.TargetNarrative.Label, TargetNarrative);
-        Add(lines, ApplicantDifferentiatorFieldCatalog.Watchouts.Label, Watchouts);
         Add(lines, ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Label, AboutApplicantBasis);
         return lines;
     }

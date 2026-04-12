@@ -178,6 +178,7 @@ Hard constraints:
 - Prefer shorter output over speculative output.
 - Do not claim experience with a technology unless it appears in the candidate evidence.
 - Keep technology names, company names, and quoted job phrases in their original form.
+- Do not mention gaps, weaknesses, missing skills, or any negative traits of the applicant.
 
 Target role:
 - Role title: {request.JobPosting.RoleTitle}
@@ -221,6 +222,7 @@ Requirements:
 - Avoid generic buzzword-heavy wording.
 - If evidence is thin, keep sections compact and factual.
 - Do not add placeholder claims or inferred achievements.
+- Avoid repeating the same fact, achievement, or phrasing in multiple sections.
 """;
     }
 
@@ -231,15 +233,10 @@ Requirements:
             return "- No structured fit review is available for this job yet.";
         }
 
-        var lines = new List<string>
-        {
-            $"- Recommendation: {assessment.Recommendation}",
-            $"- Overall score: {assessment.OverallScore}/100"
-        };
+        var lines = new List<string>();
 
         lines.AddRange(assessment.Strengths.Take(3).Select(static strength => $"- Strength: {strength}"));
-        lines.AddRange(assessment.Gaps.Take(3).Select(static gap => $"- Gap: {gap}"));
-        return string.Join(Environment.NewLine, lines);
+        return lines.Count > 0 ? string.Join(Environment.NewLine, lines) : "- No key strengths identified yet.";
     }
 
     private static string FormatLines(IReadOnlyList<string>? lines, string fallback)
