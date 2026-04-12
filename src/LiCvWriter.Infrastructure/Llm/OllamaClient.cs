@@ -286,7 +286,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             promptTokens: promptTokens,
             completionTokens: completionTokens,
             estimatedRemaining: TimeSpan.Zero,
-            thinkingPreview: BuildThinkingPreview(thinking));
+            thinkingPreview: BuildThinkingPreview(thinking),
+            responseContent: content.ToString());
 
         return new LlmResponse(
             model,
@@ -365,7 +366,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         long? promptTokens = null,
         long? completionTokens = null,
         TimeSpan? estimatedRemaining = null,
-        string? thinkingPreview = null)
+        string? thinkingPreview = null,
+        string? responseContent = null)
         => progress?.Invoke(new LlmProgressUpdate(
             message,
             detail,
@@ -375,7 +377,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             promptTokens,
             completionTokens,
             estimatedRemaining,
-            thinkingPreview));
+            thinkingPreview,
+            responseContent));
 
     private static string? BuildThinkingPreview(StringBuilder thinking)
     {

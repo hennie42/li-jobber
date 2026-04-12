@@ -136,10 +136,17 @@
             <dd>DMA member snapshot only</dd>
         </dl>
 
-        <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
-        <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste the LinkedIn DMA portability access token with r_dma_portability_self_serve."></textarea>
+        @if (!LinkedInOptions.HasAccessToken)
+        {
+            <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
+            <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste the LinkedIn DMA portability access token with r_dma_portability_self_serve."></textarea>
 
-        <p class="muted-text">Paste the static DMA portability token obtained from LinkedIn and import the member snapshot directly. The token is only used for the in-app import request and is not persisted by the app.</p>
+            <p class="muted-text">Paste the static DMA portability token obtained from LinkedIn and import the member snapshot directly. The token is only used for the in-app import request and is not persisted by the app.</p>
+        }
+        else
+        {
+            <p class="muted-text">Access token loaded from user secrets.</p>
+        }
 
         <div class="button-row">
             <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">Load DMA member snapshot</button>
@@ -632,7 +639,7 @@
             var imported = await Operations.RunAsync(
                 "Importing LinkedIn DMA member snapshot",
                 LinkedInOptions.PortabilityScope,
-                () => ExportImporter.ImportMemberSnapshotAsync(dmaAccessToken));
+                () => ExportImporter.ImportMemberSnapshotAsync(LinkedInOptions.HasAccessToken ? LinkedInOptions.AccessToken : dmaAccessToken));
 
             result = imported;
             Workspace.SetImportResult(Workspace.ExportPath, imported);

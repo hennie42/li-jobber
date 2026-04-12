@@ -9,4 +9,5 @@ public sealed record LlmProgressUpdate(
     long? PromptTokens = null,
     long? CompletionTokens = null,
     TimeSpan? EstimatedRemaining = null,
-    string? ThinkingPreview = null);
+    string? ThinkingPreview = null,
+    string? ResponseContent = null);

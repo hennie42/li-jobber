@@ -111,7 +111,8 @@ public sealed class OperationStatusService
             update.CompletionTokens,
             update.EstimatedRemaining,
             update.ThinkingPreview,
-            update.Completed);
+            update.Completed,
+            update.ResponseContent);
 
         if (update.Completed)
         {
@@ -168,7 +169,8 @@ public sealed record LlmOperationTelemetry(
     long? CompletionTokens = null,
     TimeSpan? EstimatedRemaining = null,
     string? ThinkingPreview = null,
-    bool Completed = false)
+    bool Completed = false,
+    string? ResponseContent = null)
 {
     public bool HasTokenUsage => PromptTokens is not null || CompletionTokens is not null;
 

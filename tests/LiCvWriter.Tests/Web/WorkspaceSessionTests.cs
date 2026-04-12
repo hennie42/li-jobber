@@ -29,6 +29,22 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void SetOllamaAvailability_AutoConfirmsWhenConfiguredModelMatches()
+    {
+        var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
+
+        session.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.9.0",
+            "configured-model",
+            true,
+            ["configured-model", "other-model"]));
+
+        Assert.True(session.IsLlmSessionConfigured);
+        Assert.True(session.IsLlmReady);
+        Assert.Equal("configured-model", session.SelectedLlmModel);
+    }
+
+    [Fact]
     public void MarkLlmWorkStarted_LocksFurtherChanges()
     {
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
