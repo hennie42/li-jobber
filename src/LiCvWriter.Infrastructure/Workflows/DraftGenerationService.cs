@@ -144,34 +144,28 @@ public sealed class DraftGenerationService(
 
     private static string GetSystemPrompt(DocumentKind kind, OutputLanguage outputLanguage, JobPostingAnalysis jobPosting)
     {
+        var lang = outputLanguage == OutputLanguage.Danish ? "Danish" : "English";
         var role = jobPosting.RoleTitle;
         var company = jobPosting.CompanyName;
-        var danishNameRule = " Keep technology names, company names, quoted job phrases, and file names in their original or English form.";
+        var nameRule = outputLanguage == OutputLanguage.Danish
+            ? " Keep technology names, company names, quoted job phrases, and file names in their original or English form."
+            : string.Empty;
 
-        return (outputLanguage, kind) switch
+        var focus = kind switch
         {
-            (OutputLanguage.Danish, DocumentKind.Cv) =>
-                $"You write concise Danish CVs for a {role} position at {company}, grounded strictly in supplied evidence.{danishNameRule} Emphasize impact, technical judgment, and concrete achievements.",
-            (OutputLanguage.Danish, DocumentKind.CoverLetter) =>
-                $"You write direct Danish cover letters for a {role} position at {company}, using only supplied evidence.{danishNameRule} Keep the tone credible, practical, and specific to the target employer and role.",
-            (OutputLanguage.Danish, DocumentKind.ProfileSummary) =>
-                $"You write short Danish profile summaries tailored toward a {role} position at {company}, using only supplied evidence.{danishNameRule}",
-            (OutputLanguage.Danish, DocumentKind.InterviewNotes) =>
-                $"You prepare Danish interview notes for a {role} position at {company}, grounded in supplied evidence.{danishNameRule}",
-            (OutputLanguage.Danish, _) =>
-                $"You write high quality Danish application material for a {role} position at {company}, using only supplied evidence.{danishNameRule}",
-
-            (_, DocumentKind.Cv) =>
-                $"You write concise English CVs for a {role} position at {company}, grounded strictly in supplied evidence. Emphasize impact, technical judgment, and concrete achievements. Use clear headings and compact bullet points when useful.",
-            (_, DocumentKind.CoverLetter) =>
-                $"You write direct English cover letters for a {role} position at {company}, using only supplied evidence. Keep the tone credible, practical, and specific to the target employer and role.",
-            (_, DocumentKind.ProfileSummary) =>
-                $"You write short English profile summaries tailored toward a {role} position at {company}, using only supplied evidence. Keep them crisp, concrete, and senior without hype.",
-            (_, DocumentKind.InterviewNotes) =>
-                $"You prepare English interview notes for a {role} position at {company}, grounded in supplied evidence. Focus on likely themes, proof points, and talking angles tied to the job and company context.",
+            DocumentKind.Cv =>
+                $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements.",
+            DocumentKind.CoverLetter =>
+                $"Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule} Keep the tone credible, practical, and specific to the target employer and role.",
+            DocumentKind.ProfileSummary =>
+                $"Write a short {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it crisp, concrete, and senior without hype.",
+            DocumentKind.InterviewNotes =>
+                $"Prepare {lang} interview notes for a {role} position at {company}, grounded in supplied evidence.{nameRule} Focus on likely themes, proof points, and talking angles tied to the job and company context.",
             _ =>
-                $"You write high quality English application material for a {role} position at {company}, using only supplied evidence."
+                $"Write high-quality {lang} application material for a {role} position at {company}, using only supplied evidence.{nameRule}"
         };
+
+        return focus;
     }
 
     private static string BuildUserPrompt(DocumentKind kind, DraftGenerationRequest request)
@@ -194,34 +188,25 @@ public sealed class DraftGenerationService(
         return $"""
 Generate a {kind} in {languageLabel}.
 
-Hard constraints:
-- Use only facts explicitly present in the evidence below.
-- Do not invent employers, dates, certifications, tools, responsibilities, client names, metrics, team sizes, or outcomes.
-- If a fact is missing or ambiguous, omit it instead of guessing.
-- Prefer shorter output over speculative output.
-- Do not claim experience with a technology unless it appears in the candidate evidence.
+Rules:
+- Use only facts explicitly present in the evidence. Omit anything missing or ambiguous.
+- Do not invent employers, dates, certifications, tools, metrics, or outcomes.
+- Do not mention gaps, weaknesses, missing skills, or negative traits.
+- Do not expose fit scores, gap lists, or internal assessment data.
 - Keep technology names, company names, and quoted job phrases in their original form.
-- Do not mention gaps, weaknesses, missing skills, or any negative traits of the applicant.
-- Do not include fit scores, fit percentages, gap lists, or internal assessment data in the output.
-- Use the job themes, technology context, and fit review below only to guide emphasis and framing—never surface them directly.
+- Use job themes and fit review only to guide emphasis — never surface them directly.
 
-Target role:
-- Role title: {request.JobPosting.RoleTitle}
-- Company: {request.JobPosting.CompanyName}
-- Job summary: {request.JobPosting.Summary}
-- Must-have themes: {FormatThemes(request.JobPosting.MustHaveThemes)}
-- Nice-to-have themes: {FormatThemes(request.JobPosting.NiceToHaveThemes)}
+Target role: {request.JobPosting.RoleTitle} at {request.JobPosting.CompanyName}
+Summary: {request.JobPosting.Summary}
+Must-have themes: {FormatThemes(request.JobPosting.MustHaveThemes)}
+Nice-to-have themes: {FormatThemes(request.JobPosting.NiceToHaveThemes)}
 
-Job fit review:
+Fit review:
 {fitSummary}
 
-Candidate:
-- Name: {candidate.Name.FullName}
-- Headline: {candidate.Headline}
-- Summary: {candidate.Summary}
-- Location: {candidate.Location}
-- Industry: {candidate.Industry}
-- Certifications: {certifications}
+Candidate: {candidate.Name.FullName} | {candidate.Headline} | {candidate.Location} | {candidate.Industry}
+Summary: {candidate.Summary}
+Certifications: {certifications}
 
 Experience:
 {experience}
@@ -232,26 +217,17 @@ Company context:
 Applicant differentiators:
 {differentiators}
 
-Selected evidence for this role:
+Selected evidence:
 {selectedEvidence}
 
 Technology context:
 {BuildTechnologyContext(request.TechnologyGapAssessment)}
 
-Selected recommendations:
+Recommendations:
 {recommendations}
 
 Additional instructions:
 {request.AdditionalInstructions}
-
-Requirements:
-- Write in {languageLabel}.
-- Make the content concrete and evidence-based.
-- Match the tone and focus to the target role and company context.
-- Avoid generic buzzword-heavy wording.
-- If evidence is thin, keep sections compact and factual.
-- Do not add placeholder claims or inferred achievements.
-- Avoid repeating the same fact, achievement, or phrasing in multiple sections.
 """;
     }
 

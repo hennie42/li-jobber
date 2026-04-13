@@ -32,6 +32,8 @@ public sealed record JobSetSessionState
 
     public string CompanyContextText { get; init; } = string.Empty;
 
+    public string AdditionalInstructions { get; init; } = string.Empty;
+
     public JobPostingAnalysis? JobPosting { get; init; }
 
     public CompanyResearchProfile? CompanyProfile { get; init; }

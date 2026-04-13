@@ -346,6 +346,22 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void SetActiveJobSetAdditionalInstructions_KeepsTabsIndependent()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetActiveJobSetAdditionalInstructions("Instructions for tab 1");
+        session.AddJobSet();
+        session.SetActiveJobSetAdditionalInstructions("Instructions for tab 2");
+
+        session.SelectJobSet("job-set-01");
+        Assert.Equal("Instructions for tab 1", session.ActiveJobSet.AdditionalInstructions);
+
+        session.SelectJobSet("job-set-02");
+        Assert.Equal("Instructions for tab 2", session.ActiveJobSet.AdditionalInstructions);
+    }
+
+    [Fact]
     public void AddJobSet_MixedModes_TabsKeepIndependentInputModes()
     {
         var session = new WorkspaceSession(new OllamaOptions());

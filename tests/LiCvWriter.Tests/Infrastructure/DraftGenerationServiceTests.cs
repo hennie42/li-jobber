@@ -93,13 +93,13 @@ public sealed class DraftGenerationServiceTests
         await service.GenerateAsync(request);
 
         var prompt = llmClient.LastRequest!.Messages[0].Content;
-        Assert.Contains("Job fit review", prompt);
+        Assert.Contains("Fit review:", prompt);
         Assert.Contains("Strength: Azure", prompt);
         Assert.Contains("Overall fit score: 81/100 (Apply)", prompt);
-        Assert.Contains("Do not include fit scores", prompt);
+        Assert.Contains("Do not expose fit scores", prompt);
         Assert.Contains("Applicant differentiators", prompt);
         Assert.Contains("Pragmatic AI architect", prompt);
-        Assert.Contains("Selected evidence for this role", prompt);
+        Assert.Contains("Selected evidence:", prompt);
         Assert.Contains("Lead Architect @ Contoso", prompt);
     }
 

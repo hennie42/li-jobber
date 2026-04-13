@@ -94,12 +94,12 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
 
         builder.AppendLine();
         builder.AppendLine("Rules:");
+        builder.AppendLine($"- {PromptConstraints.JsonOnlyOutput}");
         builder.AppendLine("- Use concise, reusable job-search language.");
         builder.AppendLine("- Prefer 1-3 short sentences per field.");
         builder.AppendLine("- Generalize the source instead of copying raw assessment text verbatim.");
         builder.AppendLine("- Avoid names, employer-specific confidential details, or color shorthand unless the source makes it essential.");
         builder.AppendLine("- If the source does not support a field, return an empty string for that field.");
-        builder.AppendLine("- Do not include markdown, explanations, or commentary outside the JSON object.");
         return builder.ToString();
     }
 
