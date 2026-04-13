@@ -110,7 +110,6 @@ Rules:
         builder.AppendLine("Candidate evidence:");
         builder.AppendLine($"- Headline: {candidateProfile.Headline}");
         builder.AppendLine($"- Summary: {candidateProfile.Summary}");
-        builder.AppendLine($"- Skills: {string.Join(", ", candidateProfile.Skills.Select(static skill => skill.Name))}");
         builder.AppendLine($"- Certifications: {string.Join(", ", candidateProfile.Certifications.Select(static certification => certification.Name))}");
         builder.AppendLine($"- Projects: {string.Join(" | ", candidateProfile.Projects.Select(static project => $"{project.Title}: {project.Description}"))}");
         builder.AppendLine($"- Experience: {string.Join(" | ", candidateProfile.Experience.Take(8).Select(static role => $"{role.Title}: {role.Description}"))}");

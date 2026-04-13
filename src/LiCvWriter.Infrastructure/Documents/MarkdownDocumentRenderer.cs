@@ -48,13 +48,9 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                     AppendExperience(builder, request, outputLanguage);
                 }
 
-                if (HasSelectedSkills(selectedEvidence))
+                if (HasSelectedCertifications(selectedEvidence))
                 {
-                    AppendSelectedSkills(builder, selectedEvidence, outputLanguage);
-                }
-                else
-                {
-                    AppendSkills(builder, request, outputLanguage);
+                    AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
                 }
                 break;
             case DocumentKind.CoverLetter:
@@ -66,13 +62,9 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             case DocumentKind.ProfileSummary:
                 AppendSection(builder, Translate(outputLanguage, "Summary", "Profil") , generatedBody);
                 AppendApplicantAngle(builder, request.ApplicantDifferentiatorProfile, outputLanguage);
-                if (HasSelectedSkills(selectedEvidence))
+                if (HasSelectedCertifications(selectedEvidence))
                 {
-                    AppendSelectedSkills(builder, selectedEvidence, outputLanguage);
-                }
-                else
-                {
-                    AppendSkills(builder, request, outputLanguage);
+                    AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
                 }
                 break;
             case DocumentKind.InterviewNotes:
@@ -170,27 +162,9 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         }
     }
 
-    private static void AppendSkills(StringBuilder builder, DocumentRenderRequest request, OutputLanguage outputLanguage)
-    {
-        if (request.Candidate.Skills.Count == 0)
-        {
-            return;
-        }
-
-        builder.AppendLine($"## {Translate(outputLanguage, "Selected Skills", "Udvalgte kompetencer")}");
-        builder.AppendLine();
-        foreach (var skill in request.Candidate.Skills.Take(12))
-        {
-            builder.AppendLine($"- {skill.Name}");
-        }
-
-        builder.AppendLine();
-    }
-
     private static void AppendSelectedEvidence(StringBuilder builder, IReadOnlyList<RankedEvidenceItem> selectedEvidence, OutputLanguage outputLanguage)
     {
         var proofItems = selectedEvidence
-            .Where(static item => item.Evidence.Type is not CandidateEvidenceType.Skill)
             .Take(6)
             .ToArray();
 
@@ -209,21 +183,21 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         builder.AppendLine();
     }
 
-    private static void AppendSelectedSkills(StringBuilder builder, IReadOnlyList<RankedEvidenceItem> selectedEvidence, OutputLanguage outputLanguage)
+    private static void AppendSelectedCertifications(StringBuilder builder, IReadOnlyList<RankedEvidenceItem> selectedEvidence, OutputLanguage outputLanguage)
     {
-        var skillItems = selectedEvidence
-            .Where(static item => item.Evidence.Type is CandidateEvidenceType.Skill or CandidateEvidenceType.Certification)
+        var certItems = selectedEvidence
+            .Where(static item => item.Evidence.Type is CandidateEvidenceType.Certification)
             .Take(8)
             .ToArray();
 
-        if (skillItems.Length == 0)
+        if (certItems.Length == 0)
         {
             return;
         }
 
-        builder.AppendLine($"## {Translate(outputLanguage, "Selected Skills", "Udvalgte kompetencer")}");
+        builder.AppendLine($"## {Translate(outputLanguage, "Certifications", "Certificeringer")}");
         builder.AppendLine();
-        foreach (var item in skillItems)
+        foreach (var item in certItems)
         {
             builder.AppendLine($"- {item.Evidence.Title}");
         }
@@ -254,8 +228,8 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     private static bool HasSelectedProof(IReadOnlyList<RankedEvidenceItem> selectedEvidence)
         => selectedEvidence.Any(static item => item.Evidence.Type is CandidateEvidenceType.Experience or CandidateEvidenceType.Project or CandidateEvidenceType.Recommendation or CandidateEvidenceType.Certification or CandidateEvidenceType.Note);
 
-    private static bool HasSelectedSkills(IReadOnlyList<RankedEvidenceItem> selectedEvidence)
-        => selectedEvidence.Any(static item => item.Evidence.Type is CandidateEvidenceType.Skill or CandidateEvidenceType.Certification);
+    private static bool HasSelectedCertifications(IReadOnlyList<RankedEvidenceItem> selectedEvidence)
+        => selectedEvidence.Any(static item => item.Evidence.Type is CandidateEvidenceType.Certification);
 
     private static string Translate(OutputLanguage outputLanguage, string english, string danish)
         => outputLanguage == OutputLanguage.Danish ? danish : english;

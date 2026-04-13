@@ -184,7 +184,6 @@ public sealed class DraftGenerationService(
             ? $"{Environment.NewLine}(Note: only the 8 most recent roles are included; {candidate.Experience.Count - 8} earlier role(s) are omitted.)"
             : string.Empty;
         var experience = string.Join(Environment.NewLine, experienceEntries.Select(FormatExperience)) + experienceTruncationNote;
-        var skills = string.Join(", ", candidate.Skills.Take(20).Select(static skill => skill.Name));
         var certifications = string.Join(", ", candidate.Certifications.Select(static cert => cert.Name));
         var recommendations = string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Take(3).Select(static recommendation =>
             $"Recommendation from {recommendation.Author.FullName}{FormatOptional($" at {recommendation.Company}")}: {recommendation.Text}"));
@@ -222,7 +221,6 @@ Candidate:
 - Summary: {candidate.Summary}
 - Location: {candidate.Location}
 - Industry: {candidate.Industry}
-- Skills: {skills}
 - Certifications: {certifications}
 
 Experience:

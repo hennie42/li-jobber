@@ -13,28 +13,16 @@
 
 <PageTitle>Start / Setup</PageTitle>
 
-<section class="hero-panel">
+<section class="page-header">
     <div>
-        <div class="eyebrow">Start / Setup</div>
-        <h2>Set up your session before working in the job workbench</h2>
-        <p class="hero-copy">Choose the local AI model, load your LinkedIn profile, and optionally add personal differentiators. Once ready, open the job workbench to tailor your applications.</p>
-    </div>
-    <div class="hero-flow">
-        <div class="field-label">How it works</div>
-        <ol class="feature-list hero-flow-list">
-            <li>Pick your local Ollama model and thinking level.</li>
-            <li>Import your LinkedIn profile via the DMA portability token.</li>
-            <li>Review the imported profile on this page.</li>
-            <li>Optionally add personal differentiators (manually or from an Insights Discovery PDF).</li>
-            <li>Open the job workbench and create a tab for each target role.</li>
-            <li>Analyse the job and build company context.</li>
-            <li>Run fit review, gap analysis, or draft generation.</li>
-        </ol>
+        <h2>Start / Setup</h2>
+        <p>Choose the local AI model, load your LinkedIn profile, and optionally add personal differentiators.</p>
     </div>
 </section>
 
+<div class="stepper-container">
 <section class="content-grid">
-    <article class="card-panel stack-gap">
+    <article class="card-panel stack-gap step-card @Step1StateClass">
         <div class="field-label">Step 1</div>
         <h3>Check Ollama and set the session model</h3>
         <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
@@ -105,7 +93,7 @@
                 <div class="message error">@llmErrorMessage</div>
             }
         }
-        else
+        @if (!isStep1Expanded)
         {
             <p class="muted-text">Click the button below to review or change the model settings.</p>
         }
@@ -115,7 +103,7 @@
         </div>
     </article>
 
-    <article class="card-panel stack-gap">
+    <article class="card-panel stack-gap step-card @Step2StateClass">
         <div class="field-label">Step 2</div>
         <h3>Load your LinkedIn profile</h3>
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
@@ -130,21 +118,29 @@
             <dd>DMA member snapshot only</dd>
         </dl>
 
-        @if (!LinkedInOptions.HasAccessToken)
+        @if (!hasProfile)
         {
-            <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
-            <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste your LinkedIn DMA portability access token here."></textarea>
+            @if (!LinkedInOptions.HasAccessToken)
+            {
+                <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
+                <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste your LinkedIn DMA portability access token here."></textarea>
 
-            <p class="muted-text">Paste the DMA portability token from LinkedIn. It is used once for the import and is not stored.</p>
-        }
-        else
-        {
-            <p class="muted-text">Access token loaded from user secrets.</p>
+                <p class="muted-text">Paste the DMA portability token from LinkedIn. It is used once for the import and is not stored.</p>
+            }
+            else
+            {
+                <p class="muted-text">Access token loaded from user secrets.</p>
+            }
         }
 
         <div class="button-row">
-            <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">@(isImportingProfile ? "Importing..." : "Load LinkedIn profile")</button>
+            <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">@(isImportingProfile ? "Importing..." : hasProfile ? "Refresh profile" : "Load LinkedIn profile")</button>
         </div>
+
+        @if (isImportingProfile)
+        {
+            <div class="import-progress"></div>
+        }
 
         @if (isImportingProfile && !string.IsNullOrWhiteSpace(importProgressStatus))
         {
@@ -163,7 +159,7 @@
     </article>
 </section>
 
-<details class="card-panel stack-gap">
+<details class="card-panel stack-gap step-card @Step3StateClass">
     <summary>
         <div class="field-label">Step 3</div>
         <h3>Add personal differentiators (optional)</h3>
@@ -300,67 +296,231 @@
         <button class="secondary-button" @onclick="ClearApplicantDifferentiatorsAsync" disabled="@(!Workspace.ApplicantDifferentiatorProfile.HasContent)">Clear differentiators</button>
     </div>
 </details>
+</div>
 
-@if (result is not null)
+@if (Workspace.CandidateProfile is not null)
 {
-    <section class="content-grid">
-        <article class="card-panel">
-            <h3>Profile snapshot</h3>
-            <dl class="key-value-grid">
-                <dt>Name</dt>
-                <dd>@result.Profile.Name.FullName</dd>
-                <dt>Headline</dt>
-                <dd>@result.Profile.Headline</dd>
-                <dt>Location</dt>
-                <dd>@result.Profile.Location</dd>
-                <dt>Industry</dt>
-                <dd>@result.Profile.Industry</dd>
-                <dt>Roles</dt>
-                <dd>@result.Profile.Experience.Count</dd>
-                <dt>Skills</dt>
-                <dd>@result.Profile.Skills.Count</dd>
-                <dt>Projects</dt>
-                <dd>@result.Profile.Projects.Count</dd>
-                <dt>Recommendations</dt>
-                <dd>@result.Profile.Recommendations.Count</dd>
-            </dl>
-        </article>
+    <details class="card-panel stack-gap" open="@isProfileExpanded">
+        <summary>
+            <h3>Imported LinkedIn profile</h3>
+            <span class="profile-summary-line">
+                @Workspace.CandidateProfile.Name.FullName
+                <span class="meta-sep">·</span> @(Workspace.CandidateProfile.Experience.Count) roles
+                @if (Workspace.CandidateProfile.Education.Count > 0)
+                {
+                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Education.Count) education</text>
+                }
+                @if (Workspace.CandidateProfile.Projects.Count > 0)
+                {
+                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Projects.Count) projects</text>
+                }
+            </span>
+        </summary>
 
-        <article class="card-panel">
-            <h3>Import warnings</h3>
-            @if (result.Warnings.Count == 0)
-            {
-                <p class="muted-text">No profile load warnings.</p>
-            }
-            else
-            {
+        @if (result?.Warnings.Count > 0)
+        {
+            <details class="details-card">
+                <summary>Import warnings (@result.Warnings.Count)</summary>
                 <ul class="feature-list">
                     @foreach (var warning in result.Warnings)
                     {
                         <li>@warning</li>
                     }
                 </ul>
-            }
-        </article>
-    </section>
+            </details>
+        }
 
-    <section class="card-panel">
-        <h3>Recent experience</h3>
-        <div class="timeline-grid">
-            @foreach (var role in result.Profile.Experience.Take(4))
-            {
-                <article class="timeline-card">
-                    <div class="timeline-period">@role.Period.DisplayValue</div>
-                    <h3>@role.Title</h3>
-                    <p class="timeline-company">@role.CompanyName</p>
-                    @if (!string.IsNullOrWhiteSpace(role.Description))
-                    {
-                        <p>@role.Description</p>
-                    }
-                </article>
-            }
+        <div class="profile-tabs">
+            <button class="profile-tab @(activeProfileTab == "experience" ? "active" : "")" @onclick='() => activeProfileTab = "experience"'>Experience <span class="tab-count">@Workspace.CandidateProfile.Experience.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "education" ? "active" : "")" @onclick='() => activeProfileTab = "education"'>Education <span class="tab-count">@Workspace.CandidateProfile.Education.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "certifications" ? "active" : "")" @onclick='() => activeProfileTab = "certifications"'>Certifications <span class="tab-count">@Workspace.CandidateProfile.Certifications.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "projects" ? "active" : "")" @onclick='() => activeProfileTab = "projects"'>Projects <span class="tab-count">@Workspace.CandidateProfile.Projects.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "recommendations" ? "active" : "")" @onclick='() => activeProfileTab = "recommendations"'>Recommendations <span class="tab-count">@Workspace.CandidateProfile.Recommendations.Count</span></button>
         </div>
-    </section>
+
+        @if (activeProfileTab == "experience")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Experience.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Experience[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"exp-title-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Title))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"exp-title-{index}", entry.Title)'>@entry.Title</span>
+                            }
+                            @if (savedField == $"exp-title-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"exp-company-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.CompanyName))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable" @onclick='() => StartEdit($"exp-company-{index}", entry.CompanyName)'>@entry.CompanyName</span>
+                        }
+                        @if (savedField == $"exp-company-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"exp-desc-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Description))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"exp-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
+                        }
+                        @if (savedField == $"exp-desc-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "education")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Education.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Education[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"edu-school-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.SchoolName))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"edu-school-{index}", entry.SchoolName)'>@entry.SchoolName</span>
+                            }
+                            @if (savedField == $"edu-school-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"edu-degree-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.DegreeName))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.DegreeName) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-degree-{index}", entry.DegreeName)'>@(string.IsNullOrWhiteSpace(entry.DegreeName) ? "(click to add degree)" : entry.DegreeName)</span>
+                        }
+                        @if (savedField == $"edu-degree-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"edu-notes-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.Notes))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Notes) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-notes-{index}", entry.Notes)'>@(string.IsNullOrWhiteSpace(entry.Notes) ? "(click to add notes)" : entry.Notes)</span>
+                        }
+                        @if (savedField == $"edu-notes-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "certifications")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Certifications.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Certifications[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"cert-name-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Name))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"cert-name-{index}", entry.Name)'>@entry.Name</span>
+                            }
+                            @if (savedField == $"cert-name-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"cert-authority-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Authority))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Authority) ? "placeholder" : "")" @onclick='() => StartEdit($"cert-authority-{index}", entry.Authority)'>@(string.IsNullOrWhiteSpace(entry.Authority) ? "(click to add authority)" : entry.Authority)</span>
+                        }
+                        @if (savedField == $"cert-authority-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "projects")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Projects.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Projects[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"proj-title-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Title))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"proj-title-{index}", entry.Title)'>@entry.Title</span>
+                            }
+                            @if (savedField == $"proj-title-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"proj-desc-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Description))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"proj-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
+                        }
+                        @if (savedField == $"proj-desc-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "recommendations")
+        {
+            @foreach (var entry in Workspace.CandidateProfile.Recommendations)
+            {
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Author.FullName</h4>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(entry.Company) || !string.IsNullOrWhiteSpace(entry.JobTitle))
+                    {
+                        <div class="profile-entry-sub">@entry.JobTitle @(!string.IsNullOrWhiteSpace(entry.Company) ? $"at {entry.Company}" : "")</div>
+                    }
+                    <div class="profile-entry-body">@entry.Text</div>
+                </div>
+            }
+        }
+    </details>
 }
 
 @code {
@@ -375,6 +535,12 @@
     private string? importProgressStatus;
     private bool isProcessingInsightsPdf;
     private bool isStep1Expanded = false;
+    private bool isProfileExpanded;
+    private string activeProfileTab = "experience";
+    private string? editingField;
+    private string editingValue = string.Empty;
+    private string? savedField;
+    private CancellationTokenSource? savedFieldCts;
     private string? llmErrorMessage;
     private string? profileErrorMessage;
     private string? profileWarningMessage;
@@ -401,6 +567,12 @@
         && availability.AvailableModels.Count > 0
         && !string.IsNullOrWhiteSpace(selectedModel);
 
+    private bool hasProfile => Workspace.CandidateProfile is not null;
+
+    private string Step1StateClass => Workspace.IsLlmReady ? "step-done" : (isCheckingOllama ? "step-active" : "step-pending");
+    private string Step2StateClass => hasProfile ? "step-done" : (isImportingProfile ? "step-active" : "step-pending");
+    private string Step3StateClass => Workspace.ApplicantDifferentiatorProfile.HasContent ? "step-done" : "step-pending";
+
     protected override void OnInitialized()
     {
         Operations.Changed += HandleChanged;
@@ -414,6 +586,15 @@
             Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
                 true,
                 $"LinkedIn profile ready from {result.SourceDescription}.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+        else if (Workspace.CandidateProfile is not null)
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                "LinkedIn profile loaded from recovered session.",
                 null,
                 null,
                 LinkedInOptions.PortabilityScope));
@@ -619,6 +800,7 @@
 
             result = imported;
             Workspace.SetImportResult(Workspace.ExportPath, imported);
+            isProfileExpanded = true;
             Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
                 true,
                 "LinkedIn DMA member snapshot imported with the provided portability token.",
@@ -772,6 +954,131 @@
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private void SaveExperienceField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Experience.Count) return;
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Experience[index];
+        var updated = field switch
+        {
+            nameof(ExperienceEntry.Title) => entry with { Title = value ?? entry.Title },
+            nameof(ExperienceEntry.CompanyName) => entry with { CompanyName = value ?? entry.CompanyName },
+            nameof(ExperienceEntry.Description) => entry with { Description = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Experience.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Experience = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveEducationField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Education.Count) return;
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Education[index];
+        var updated = field switch
+        {
+            nameof(EducationEntry.SchoolName) => entry with { SchoolName = value ?? entry.SchoolName },
+            nameof(EducationEntry.DegreeName) => entry with { DegreeName = value },
+            nameof(EducationEntry.Notes) => entry with { Notes = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Education.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Education = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveCertificationField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Certifications.Count) return;
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Certifications[index];
+        var updated = field switch
+        {
+            nameof(CertificationEntry.Name) => entry with { Name = value ?? entry.Name },
+            nameof(CertificationEntry.Authority) => entry with { Authority = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Certifications.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Certifications = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveProjectField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Projects.Count) return;
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Projects[index];
+        var updated = field switch
+        {
+            nameof(ProjectEntry.Title) => entry with { Title = value ?? entry.Title },
+            nameof(ProjectEntry.Description) => entry with { Description = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Projects.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Projects = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void StartEdit(string fieldKey, string? currentValue)
+    {
+        editingField = fieldKey;
+        editingValue = currentValue ?? string.Empty;
+    }
+
+    private void ShowSaved(string fieldKey)
+    {
+        savedFieldCts?.Cancel();
+        savedFieldCts = new CancellationTokenSource();
+        savedField = fieldKey;
+        var cts = savedFieldCts;
+
+        _ = Task.Delay(1500, cts.Token).ContinueWith(_ =>
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                savedField = null;
+                _ = InvokeAsync(StateHasChanged);
+            }
+        }, TaskScheduler.Default);
+    }
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
 }

@@ -422,6 +422,12 @@ details.card-panel summary .status-chip {
   border-color: rgba(190, 87, 67, 0.28);
 }
 
+.status-llm {
+  background: rgba(91, 120, 190, 0.14);
+  border-color: rgba(91, 120, 190, 0.28);
+  font-size: 0.82rem;
+}
+
 .key-value-grid {
   display: grid;
   grid-template-columns: 160px 1fr;
@@ -590,6 +596,297 @@ details.card-panel summary .status-chip {
 .job-tabs-meta .meta-sep {
   margin: 0 0.35rem;
   opacity: 0.45;
+}
+
+/* ── Stepper ─────────────────────────────── */
+
+.stepper-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.stepper-container::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--line);
+  border-radius: 2px;
+}
+
+.step-card {
+  border-left: 3px solid var(--line);
+  margin-left: -3px;
+  position: relative;
+  z-index: 1;
+  transition: border-color 200ms ease, background-color 200ms ease;
+}
+
+.step-done {
+  border-left-color: #56a379;
+  background: rgba(86, 163, 121, 0.06);
+}
+
+.step-active {
+  border-left-color: var(--accent);
+}
+
+.step-pending {
+  border-left-color: var(--line);
+}
+
+/* ── Profile tabs ────────────────────────── */
+
+.profile-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+
+.profile-tab {
+  border: none;
+  background: none;
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 140ms ease, border-color 140ms ease;
+  white-space: nowrap;
+}
+
+.profile-tab:hover {
+  color: var(--ink);
+}
+
+.profile-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.profile-tab .tab-count {
+  font-weight: 400;
+  font-size: 0.82rem;
+  opacity: 0.7;
+  margin-left: 0.3rem;
+}
+
+/* ── Inline editable fields ──────────────── */
+
+.inline-editable {
+  cursor: text;
+  border-radius: 0.4rem;
+  padding: 0.15rem 0.35rem;
+  margin: -0.15rem -0.35rem;
+  transition: background-color 140ms ease;
+}
+
+.inline-editable:hover {
+  background: rgba(191, 107, 57, 0.08);
+}
+
+.inline-editable.placeholder {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.inline-edit-input {
+  width: 100%;
+  border: 1px solid rgba(191, 107, 57, 0.35);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  color: var(--ink);
+  outline: none;
+}
+
+.inline-edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(191, 107, 57, 0.12);
+}
+
+textarea.inline-edit-input {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.save-flash {
+  display: inline-block;
+  color: #56a379;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  animation: flash-fade 1.5s ease forwards;
+}
+
+@keyframes flash-fade {
+  0%   { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── Import progress bar ─────────────────── */
+
+.import-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.import-progress::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 35%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(380%); }
+}
+
+/* ── Profile entry cards ─────────────────── */
+
+.profile-entry {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.45);
+  padding: 0.9rem 1rem;
+}
+
+.profile-entry + .profile-entry {
+  margin-top: 0.6rem;
+}
+
+.profile-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.profile-entry-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.profile-entry-period {
+  color: var(--muted);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.profile-entry-sub {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin-top: 0.1rem;
+}
+
+.profile-entry-body {
+  margin-top: 0.45rem;
+  line-height: 1.6;
+}
+
+/* ── Skill tags ──────────────────────────── */
+
+.skill-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.skill-tag {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.6);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.skill-tag-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 140ms;
+}
+
+.skill-tag-remove:hover {
+  opacity: 1;
+  color: #882f1e;
+}
+
+/* ── Sidebar compact grid ────────────────── */
+
+.sidebar-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.sidebar-grid dt {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.sidebar-grid dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Sidebar groups ──────────────────────── */
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sidebar-group + .sidebar-group {
+  margin-top: 0.35rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--line);
+}
+
+.sidebar-group-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* ── Profile summary line ────────────────── */
+
+.profile-summary-line {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-top: 0.2rem;
 }
 
 @media (max-width: 1100px) {

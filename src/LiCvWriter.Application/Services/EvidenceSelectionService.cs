@@ -172,7 +172,6 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             CandidateEvidenceType.Project => 20,
             CandidateEvidenceType.Recommendation => 18,
             CandidateEvidenceType.Certification => 12,
-            CandidateEvidenceType.Skill => 10,
             CandidateEvidenceType.Summary => 8,
             CandidateEvidenceType.Headline => 6,
             CandidateEvidenceType.Note => 6,

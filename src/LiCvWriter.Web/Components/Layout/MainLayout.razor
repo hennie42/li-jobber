@@ -20,18 +20,36 @@
         <section class="sidebar-panel">
             <div class="field-label">Workspace</div>
             <div class="sidebar-metric">@(Workspace.CandidateProfile?.Name.FullName ?? "No profile loaded")</div>
-            <div class="sidebar-text">Active tab: @Workspace.ActiveJobSet.Title</div>
-            <div class="sidebar-text">Target role: @(Workspace.JobPosting?.RoleTitle ?? "No target role yet")</div>
-            <div class="sidebar-text">Language: @Workspace.ActiveJobSet.OutputLanguage</div>
-            <div class="sidebar-text">LinkedIn data: @FormatLinkedInDataState(Workspace.LinkedInAuthorizationStatus)</div>
-            <div class="sidebar-text">LLM: @(Workspace.IsLlmReady ? Workspace.SelectedLlmModel : "Pending setup")</div>
-            <div class="sidebar-text">Ollama loaded: @FormatLoadedModels(Workspace.OllamaAvailability)</div>
-            <div class="sidebar-text">Thinking: @(Workspace.IsLlmReady ? FormatThinkingLevel(Workspace.SelectedThinkingLevel) : "Pending")</div>
-            <div class="sidebar-text">Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Stored" : "Not set")</div>
-            <div class="sidebar-text">Selected evidence: @Workspace.GetActiveSelectedEvidenceCount()</div>
-            <div class="sidebar-text">Tab status: @FormatProgressState(Workspace.ActiveJobSet.ProgressState)</div>
-            <div class="sidebar-text">@Workspace.ActiveJobSet.ProgressDetail</div>
-            <div class="sidebar-text">Drafts: @Workspace.GeneratedDocuments.Count</div>
+
+            <div class="sidebar-group">
+                <div class="sidebar-group-label">Session</div>
+                <dl class="sidebar-grid">
+                    <dt>LLM</dt>
+                    <dd>@(Workspace.IsLlmReady ? $"{Workspace.SelectedLlmModel} · {FormatThinkingLevel(Workspace.SelectedThinkingLevel)}" : "Pending setup")</dd>
+                    <dt>LinkedIn</dt>
+                    <dd>@FormatLinkedInDataState(Workspace.LinkedInAuthorizationStatus)</dd>
+                    <dt>Differentiators</dt>
+                    <dd>@(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Stored" : "Not set")</dd>
+                </dl>
+            </div>
+
+            <div class="sidebar-group">
+                <div class="sidebar-group-label">Active job</div>
+                <dl class="sidebar-grid">
+                    <dt>Tab</dt>
+                    <dd>@Workspace.ActiveJobSet.Title</dd>
+                    <dt>Role</dt>
+                    <dd>@(Workspace.JobPosting?.RoleTitle ?? "—")</dd>
+                    <dt>Language</dt>
+                    <dd>@Workspace.ActiveJobSet.OutputLanguage</dd>
+                    <dt>Evidence</dt>
+                    <dd>@Workspace.GetActiveSelectedEvidenceCount()</dd>
+                    <dt>Drafts</dt>
+                    <dd>@Workspace.GeneratedDocuments.Count</dd>
+                    <dt>Status</dt>
+                    <dd>@FormatProgressState(Workspace.ActiveJobSet.ProgressState)</dd>
+                </dl>
+            </div>
         </section>
 
         <section class="sidebar-panel">
@@ -162,18 +180,6 @@
         => status.IsAuthorized
             ? "Loaded"
             : "Pending DMA import";
-
-    private static string FormatLoadedModels(OllamaModelAvailability? availability)
-    {
-        if (availability is null)
-        {
-            return "Unknown";
-        }
-
-        return availability.EffectiveRunningModels.Count == 0
-            ? "None reported"
-            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
-    }
 
     private static string FormatDuration(TimeSpan? duration)
     {

@@ -96,7 +96,6 @@ public static class TechnologyGapAnalyzer
         var builder = new StringBuilder();
         builder.AppendLine(candidateProfile.Headline);
         builder.AppendLine(candidateProfile.Summary);
-        builder.AppendLine(string.Join(", ", candidateProfile.Skills.Select(static skill => skill.Name)));
         builder.AppendLine(string.Join(Environment.NewLine, candidateProfile.Experience.Select(static role => $"{role.Title} {role.Description}")));
         builder.AppendLine(string.Join(Environment.NewLine, candidateProfile.Projects.Select(static project => $"{project.Title} {project.Description}")));
         builder.AppendLine(string.Join(Environment.NewLine, candidateProfile.Certifications.Select(static certification => certification.Name)));

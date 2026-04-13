@@ -5,6 +5,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="LiCvWriter.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
     <ProjectReference Include="..\LiCvWriter.Application\LiCvWriter.Application.csproj" />
   </ItemGroup>

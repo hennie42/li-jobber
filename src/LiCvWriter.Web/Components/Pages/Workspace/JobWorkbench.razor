@@ -6,6 +6,7 @@
 @inject IJobResearchService JobResearchService
 @inject IDraftGenerationService DraftGenerationService
 @inject LlmTechnologyGapAnalysisService GapAnalysisService
+@inject LlmFitEnhancementService FitEnhancementService
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
 
@@ -13,7 +14,6 @@
 
 <section class="page-header">
     <div>
-        <div class="eyebrow">Job Workbench</div>
         <h2>Job workbench</h2>
         <p>Each tab holds a target role with its own research, fit review, and drafts.</p>
     </div>
@@ -43,9 +43,6 @@
     {
         <p class="muted-text">At least one job tab must remain in the workspace.</p>
     }
-    <div class="status-chip @(Workspace.ActiveJobSet.ProgressState == JobSetProgressState.Done ? "status-ok" : "status-pending")">
-        @GetActiveTabStatusMessage()
-    </div>
     <div class="job-tabs-meta">
         @Workspace.ActiveJobSet.OutputFolderName
         <span class="meta-sep">&middot;</span>
@@ -68,12 +65,7 @@
 }
 
 <details class="card-panel stack-gap" open>
-    <summary><h2>Research</h2></summary>
-
-    @if (isResearching && operationStartedAt is not null)
-    {
-        <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-    }
+    <summary><h3>Research</h3></summary>
 
     @if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.LinkToUrls)
         {
@@ -200,7 +192,11 @@
         <summary>
             <div class="fit-header">
                 <div>
-                    <h2>Fit review</h2>
+                    <h3>Fit review</h3>
+                    @if (Workspace.JobFitAssessment.IsLlmEnhanced)
+                    {
+                        <span class="status-chip status-llm">LLM-enhanced</span>
+                    }
                 </div>
                 <div class="status-chip @GetRecommendationStatusClass(Workspace.JobFitAssessment.Recommendation)">
                     @FormatRecommendation(Workspace.JobFitAssessment.Recommendation) - @Workspace.JobFitAssessment.OverallScore/100
@@ -208,12 +204,16 @@
             </div>
         </summary>
 
-        @if (isRefreshingFitReview && operationStartedAt is not null)
-        {
-            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-        }
-
-        <p class="muted-text">This deterministic review maps source-backed job and company signals to imported evidence and your stored applicant differentiators.</p>
+        <p class="muted-text">
+            @if (Workspace.JobFitAssessment.IsLlmEnhanced)
+            {
+                <text>This review combines deterministic signal matching with an LLM semantic pass that identifies evidence keyword search may have missed.</text>
+            }
+            else
+            {
+                <text>This deterministic review maps source-backed job and company signals to imported evidence and your stored applicant differentiators.</text>
+            }
+        </p>
 
         <div class="button-row">
             <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
@@ -244,6 +244,10 @@
                         <div class="status-chip @GetRequirementStatusClass(requirement.Match)">
                             @FormatMatch(requirement.Match)
                         </div>
+                        @if (requirement.IsLlmEnhanced)
+                        {
+                            <div class="status-chip status-llm">Enhanced by LLM</div>
+                        }
                     </div>
                     <p class="muted-text">Importance: @FormatImportance(requirement.Importance)</p>
                     <p>@requirement.Rationale</p>
@@ -280,12 +284,7 @@
 else if (CanRunFitReview)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Fit review</h2></summary>
-
-        @if (isRefreshingFitReview && operationStartedAt is not null)
-        {
-            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-        }
+        <summary><h3>Fit review</h3></summary>
 
         <div class="button-row">
             <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
@@ -298,12 +297,7 @@ else if (CanRunFitReview)
 @if (Workspace.CandidateProfile is not null && Workspace.ActiveJobSet.TechnologyGapAssessment.HasSignals)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Technology gap check</h2></summary>
-
-        @if (isRefreshingTechnologyGap && operationStartedAt is not null)
-        {
-            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-        }
+        <summary><h3>Technology gap check</h3></summary>
 
         <p class="muted-text">This LLM-based check compares the current job context with profile skills, experience, projects, certifications, headline, summary, and manual notes.</p>
 
@@ -342,12 +336,7 @@ else if (CanRunFitReview)
 else if (Workspace.JobPosting is not null)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Technology gap check</h2></summary>
-
-        @if (isRefreshingTechnologyGap && operationStartedAt is not null)
-        {
-            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-        }
+        <summary><h3>Technology gap check</h3></summary>
 
         <div class="button-row">
             <button class="secondary-button" @onclick="RefreshTechnologyGapAsync" disabled="@(!CanRunTechnologyGapCheck || isBusy)">@(isRefreshingTechnologyGap ? $"Running {GetOperationElapsed()}" : "Refresh technology gap check")</button>
@@ -363,7 +352,7 @@ else if (Workspace.JobPosting is not null)
         <summary>
             <div class="fit-header">
                 <div>
-                    <h2>Ranked evidence</h2>
+                    <h3>Ranked evidence</h3>
                 </div>
                 <div class="status-chip @(Workspace.GetActiveSelectedEvidenceCount() > 0 ? "status-ok" : "status-pending")">
                     @Workspace.GetActiveSelectedEvidenceCount() selected
@@ -412,18 +401,13 @@ else if (Workspace.JobPosting is not null)
 else if (CanRunFitReview)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Ranked evidence</h2></summary>
+        <summary><h3>Ranked evidence</h3></summary>
         <p class="muted-text">No evidence ranking is available for this tab yet. It will be prepared when you run fit review or generate drafts.</p>
     </details>
 }
 
 <details class="card-panel stack-gap" open>
-    <summary><h2>LLM + Drafts</h2></summary>
-
-    @if ((isGenerating || isRefreshingAll) && operationStartedAt is not null)
-    {
-        <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
-    }
+    <summary><h3>LLM + Drafts</h3></summary>
 
     <div class="status-chip @(Workspace.CanStartDraftGeneration ? "status-ok" : "status-pending")">
         @GetGenerationReadinessMessage()
@@ -532,7 +516,7 @@ else if (CanRunFitReview)
 @if (Workspace.GeneratedDocuments.Count > 0)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Generated markdown drafts</h2></summary>
+        <summary><h3>Generated markdown drafts</h3></summary>
         @foreach (var document in Workspace.GeneratedDocuments)
         {
             <details class="details-card">
@@ -547,7 +531,7 @@ else if (CanRunFitReview)
 @if (Workspace.Exports.Count > 0)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h2>Exported markdown files</h2></summary>
+        <summary><h3>Exported markdown files</h3></summary>
         <ul class="feature-list">
             @foreach (var export in Workspace.Exports)
             {
@@ -1233,6 +1217,7 @@ else if (CanRunFitReview)
             await TryRefreshFitReviewAsync();
             await TryRefreshTechnologyGapAsync();
 
+            additionalInstructions = BuildResearchInstructions();
             Operations.Success("All analysis refreshed.", "Job, company, fit review, technology gap and evidence are current for this tab.");
         }
         catch (Exception exception)
@@ -1275,6 +1260,34 @@ else if (CanRunFitReview)
                 }
 
                 return;
+            }
+
+            if (Workspace.JobFitAssessment.Requirements.Any(static r => r.Match != JobRequirementMatch.Strong))
+            {
+                Workspace.MarkLlmWorkStarted();
+                Workspace.MarkActiveJobSetRunning("Enhancing fit review with LLM semantic matching.");
+                var enhanced = await FitEnhancementService.EnhanceAsync(
+                    Workspace.JobFitAssessment,
+                    Workspace.CandidateProfile!,
+                    Workspace.JobPosting!,
+                    Workspace.CompanyProfile,
+                    Workspace.SelectedLlmModel,
+                    Workspace.SelectedThinkingLevel,
+                    ReportLlmProgress,
+                    default);
+
+                Workspace.SetActiveJobSetJobFitAssessment(enhanced);
+                JobFitWorkspaceRefreshService.RefreshActiveJobSetEvidence();
+
+                if (enhanced.IsLlmEnhanced)
+                {
+                    var upgradedCount = enhanced.Requirements.Count(static r => r.IsLlmEnhanced);
+                    Operations.Info($"LLM enhanced {upgradedCount} requirement(s).", "Semantic evidence matching found additional supporting evidence.");
+                }
+                else
+                {
+                    Operations.Info("LLM found no additional evidence.", "The semantic evidence pass did not identify upgrades beyond keyword matching.");
+                }
             }
 
             Workspace.ResetActiveJobSetProgress("Fit review updated for this job tab. Markdown generation not started for this tab.");

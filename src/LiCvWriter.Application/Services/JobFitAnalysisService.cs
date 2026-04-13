@@ -31,20 +31,7 @@ public sealed class JobFitAnalysisService(CandidateEvidenceService candidateEvid
             .Select(requirement => AssessRequirement(requirement, evidenceCatalog, differentiatorProfile))
             .ToArray();
 
-        var overallScore = Score(assessments);
-        var recommendation = Recommend(assessments, overallScore);
-        var strengths = assessments
-            .Where(static assessment => assessment.Match == JobRequirementMatch.Strong)
-            .Select(static assessment => $"{assessment.Requirement}: {assessment.Rationale}")
-            .Take(4)
-            .ToArray();
-        var gaps = assessments
-            .Where(static assessment => assessment.Match != JobRequirementMatch.Strong)
-            .Select(static assessment => $"{assessment.Requirement}: {assessment.Rationale}")
-            .Take(4)
-            .ToArray();
-
-        return new JobFitAssessment(overallScore, recommendation, assessments, strengths, gaps);
+        return JobFitScoring.BuildAssessment(assessments);
     }
 
     private static IReadOnlyList<FitRequirementContext> BuildRequirements(
@@ -184,65 +171,6 @@ public sealed class JobFitAnalysisService(CandidateEvidenceService candidateEvid
             _ => "No clear supporting evidence was found in the imported profile."
         };
 
-    private static int Score(IEnumerable<JobRequirementAssessment> assessments)
-    {
-        var scored = assessments.ToArray();
-        if (scored.Length == 0)
-        {
-            return 0;
-        }
-
-        var possible = scored.Sum(GetWeight);
-        if (possible == 0)
-        {
-            return 0;
-        }
-
-        var earned = scored.Sum(GetEarnedWeight);
-        return (int)Math.Round((double)earned / possible * 100, MidpointRounding.AwayFromZero);
-    }
-
-    private static JobFitRecommendation Recommend(IReadOnlyList<JobRequirementAssessment> assessments, int score)
-    {
-        if (assessments.Count == 0)
-        {
-            return JobFitRecommendation.InsufficientData;
-        }
-
-        var mustHaveRequirements = assessments.Where(static assessment => assessment.Importance == JobRequirementImportance.MustHave).ToArray();
-        var missingMustHaveCount = mustHaveRequirements.Count(static assessment => assessment.Match == JobRequirementMatch.Missing);
-        var partialMustHaveCount = mustHaveRequirements.Count(static assessment => assessment.Match == JobRequirementMatch.Partial);
-
-        if (missingMustHaveCount >= 2 || score < 40)
-        {
-            return JobFitRecommendation.Skip;
-        }
-
-        if (missingMustHaveCount > 0 || partialMustHaveCount > 1 || score < 75)
-        {
-            return JobFitRecommendation.Stretch;
-        }
-
-        return JobFitRecommendation.Apply;
-    }
-
-    private static int GetWeight(JobRequirementAssessment assessment)
-        => assessment.Importance switch
-        {
-            JobRequirementImportance.MustHave => 24,
-            JobRequirementImportance.NiceToHave => 8,
-            JobRequirementImportance.Cultural => 9,
-            _ => 0
-        };
-
-    private static int GetEarnedWeight(JobRequirementAssessment assessment)
-        => assessment.Match switch
-        {
-            JobRequirementMatch.Strong => GetWeight(assessment),
-            JobRequirementMatch.Partial => (int)Math.Round(GetWeight(assessment) * 0.45, MidpointRounding.AwayFromZero),
-            _ => 0
-        };
-
     private static int GetEvidenceWeight(CandidateEvidenceItem evidence)
         => evidence.Type switch
         {
@@ -250,7 +178,6 @@ public sealed class JobFitAnalysisService(CandidateEvidenceService candidateEvid
             CandidateEvidenceType.Project => 55,
             CandidateEvidenceType.Recommendation => 50,
             CandidateEvidenceType.Certification => 40,
-            CandidateEvidenceType.Skill => 25,
             CandidateEvidenceType.Summary => 20,
             CandidateEvidenceType.Headline => 18,
             CandidateEvidenceType.Note => 14,

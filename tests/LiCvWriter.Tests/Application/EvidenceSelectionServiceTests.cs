@@ -71,7 +71,11 @@ public sealed class EvidenceSelectionServiceTests
     {
         var candidate = new CandidateProfile
         {
-            Skills = [new SkillTag("Azure", 1), new SkillTag("Azure", 2)],
+            Certifications =
+            [
+                new CertificationEntry("Azure Solutions Architect", "Microsoft", null, new DateRange(new PartialDate("Jan 2023", 2023, 1), null), null),
+                new CertificationEntry("Azure Solutions Architect", "Microsoft", null, new DateRange(new PartialDate("Jan 2023", 2023, 1), null), null)
+            ],
             Experience =
             [
                 new ExperienceEntry(
@@ -103,7 +107,7 @@ public sealed class EvidenceSelectionServiceTests
 
         var result = service.Build(candidate, jobPosting, companyProfile: null, fitAssessment, ApplicantDifferentiatorProfile.Empty);
 
-        Assert.Single(result.RankedEvidence, item => item.Evidence.Id == "skill:azure");
+        Assert.Single(result.RankedEvidence, item => item.Evidence.Id == "certification:azure-solutions-architect");
         Assert.Single(result.RankedEvidence, item => item.Evidence.Id.StartsWith("experience:", StringComparison.Ordinal));
     }
 
