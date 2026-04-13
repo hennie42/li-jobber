@@ -39,9 +39,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public OllamaModelAvailability? OllamaAvailability { get; private set; }
 
-    public string SelectedLlmModel { get; private set; } = ollamaOptions.Model;
+    public string SelectedLlmModel { get; private set; } = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
 
-    public string SelectedThinkingLevel { get; private set; } = NormalizeThinkingLevel(ollamaOptions.Think);
+    public string SelectedThinkingLevel { get; private set; } = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
 
     public bool IsLlmSessionConfigured { get; private set; }
 
@@ -238,6 +238,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             JobPostingText = jobPostingText,
             CompanyContextText = companyContextText
         });
+    }
+
+    public void SetActiveJobSetAdditionalInstructions(string? additionalInstructions)
+    {
+        UpdateActiveJobSet(jobSet => jobSet with { AdditionalInstructions = additionalInstructions ?? string.Empty });
     }
 
     public void SetImportResult(string exportPath, LinkedInExportImportResult importResult)
@@ -497,6 +502,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     CompanyUrlsText = jobSet.CompanyUrlsText,
                     JobPostingText = jobSet.JobPostingText,
                     CompanyContextText = jobSet.CompanyContextText,
+                    AdditionalInstructions = jobSet.AdditionalInstructions,
                     JobPosting = jobSet.JobPosting,
                     CompanyProfile = jobSet.CompanyProfile,
                     JobFitAssessment = jobSet.JobFitAssessment ?? JobFitAssessment.Empty,
@@ -528,6 +534,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     private static CandidateProfile? LoadCandidateProfile(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.CandidateProfile;
+
+    private static string LoadSelectedLlmModel(WorkspaceRecoveryStore? recoveryStore, string configuredModel)
+    {
+        var recoveredModel = recoveryStore?.Load()?.SelectedLlmModel;
+        return string.IsNullOrWhiteSpace(recoveredModel) ? configuredModel : recoveredModel;
+    }
+
+    private static string LoadSelectedThinkingLevel(WorkspaceRecoveryStore? recoveryStore, string configuredThinkingLevel)
+    {
+        var recoveredThinkingLevel = recoveryStore?.Load()?.SelectedThinkingLevel;
+        return NormalizeThinkingLevel(string.IsNullOrWhiteSpace(recoveredThinkingLevel) ? configuredThinkingLevel : recoveredThinkingLevel);
+    }
 
     private void UpdateActiveJobSet(Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
         => UpdateJobSet(ActiveJobSetId, update, notifyChanged);
@@ -623,9 +641,12 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.JobFitAssessment,
                 jobSet.TechnologyGapAssessment,
                 jobSet.EvidenceSelection,
-                jobSet.GeneratedDocuments)).ToArray(),
+                jobSet.GeneratedDocuments,
+                jobSet.AdditionalInstructions)).ToArray(),
             ApplicantDifferentiatorProfile,
-            CandidateProfile);
+            CandidateProfile,
+            SelectedLlmModel,
+            SelectedThinkingLevel);
 
     private void NotifyChanged()
     {

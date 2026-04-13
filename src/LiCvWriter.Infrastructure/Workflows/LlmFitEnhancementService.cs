@@ -135,7 +135,7 @@ public sealed class LlmFitEnhancementService(
         };
 
     private static string BuildSystemPrompt()
-        => """
+        => $$"""
             You are a semantic evidence matcher for candidate fit reviews.
 
             Given a list of job requirements that were NOT strongly matched by keyword search,
@@ -144,10 +144,8 @@ public sealed class LlmFitEnhancementService(
             evidence that keyword matching missed.
 
             Focus especially on:
-            - Recommendations: third-party endorsements often describe capabilities in different
-              words than job postings use.
-            - Experience descriptions: long-form text may contain evidence for requirements
-              that don't share exact keywords.
+            - Recommendations: third-party endorsements often describe capabilities in different words than job postings use.
+            - Experience descriptions: long-form text may contain evidence that doesn't share exact keywords.
             - Project descriptions: hands-on work that demonstrates capability.
 
             Return JSON only with this exact shape:
@@ -163,12 +161,11 @@ public sealed class LlmFitEnhancementService(
             }
 
             Rules:
+            - {{PromptConstraints.JsonOnlyOutput}}
             - Only include requirements where you found genuine supporting evidence.
             - Set newMatch to "Strong" only when the evidence clearly and directly supports the requirement.
             - Set newMatch to "Partial" when the evidence is indirect but relevant.
-            - Do not include requirements where you found no new evidence.
             - Be conservative: only upgrade when the semantic connection is clear.
-            - Do not include commentary outside the JSON object.
             """;
 
     private static string BuildUserPrompt(
@@ -179,28 +176,24 @@ public sealed class LlmFitEnhancementService(
     {
         var builder = new StringBuilder();
 
-        builder.AppendLine("Target role:");
-        builder.AppendLine($"- Role: {jobPosting.RoleTitle}");
-        builder.AppendLine($"- Company: {jobPosting.CompanyName}");
-        builder.AppendLine($"- Summary: {jobPosting.Summary}");
+        builder.AppendLine($"Role: {jobPosting.RoleTitle} at {jobPosting.CompanyName}");
+        builder.AppendLine($"Summary: {jobPosting.Summary}");
 
         if (companyProfile is not null && !string.IsNullOrWhiteSpace(companyProfile.Summary))
         {
-            builder.AppendLine();
-            builder.AppendLine("Company context:");
-            builder.AppendLine(companyProfile.Summary);
+            builder.AppendLine($"Company: {companyProfile.Summary}");
         }
 
         builder.AppendLine();
-        builder.AppendLine("Requirements to re-evaluate (these were NOT matched strongly by keyword search):");
+        builder.AppendLine("Requirements to re-evaluate (not matched by keyword search):");
 
         foreach (var requirement in candidateRequirements)
         {
-            builder.AppendLine($"- [{requirement.Importance}] {requirement.Requirement} (current: {requirement.Match}, rationale: {requirement.Rationale})");
+            builder.AppendLine($"- [{requirement.Importance}] {requirement.Requirement} (current: {requirement.Match})");
         }
 
         builder.AppendLine();
-        builder.AppendLine("Full candidate profile:");
+        builder.AppendLine("Candidate profile:");
 
         if (!string.IsNullOrWhiteSpace(candidateProfile.Headline))
         {
@@ -215,44 +208,36 @@ public sealed class LlmFitEnhancementService(
         if (candidateProfile.Experience.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Experience:");
 
             foreach (var role in candidateProfile.Experience)
             {
-                builder.AppendLine($"- {role.Title} @ {role.CompanyName} ({role.Period.DisplayValue})");
-
-                if (!string.IsNullOrWhiteSpace(role.Description))
-                {
-                    builder.AppendLine($"  {role.Description}");
-                }
+                var desc = string.IsNullOrWhiteSpace(role.Description) ? string.Empty : $" — {role.Description}";
+                builder.AppendLine($"- {role.Title} @ {role.CompanyName} ({role.Period.DisplayValue}){desc}");
             }
         }
 
         if (candidateProfile.Recommendations.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Recommendations:");
 
-            foreach (var recommendation in candidateProfile.Recommendations)
+            foreach (var rec in candidateProfile.Recommendations)
             {
-                builder.AppendLine($"- From {recommendation.Author.FullName} ({recommendation.JobTitle} at {recommendation.Company}):");
-                builder.AppendLine($"  \"{recommendation.Text}\"");
+                builder.AppendLine($"- Rec from {rec.Author.FullName} ({rec.JobTitle} at {rec.Company}): {rec.Text}");
             }
         }
 
         if (candidateProfile.Projects.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Projects:");
 
             foreach (var project in candidateProfile.Projects)
             {
-                builder.AppendLine($"- {project.Title}: {project.Description}");
+                builder.AppendLine($"- Project {project.Title}: {project.Description}");
             }
         }
 
         builder.AppendLine();
-        builder.AppendLine("Identify which of the listed requirements have genuine semantic evidence in this profile that keyword matching missed.");
+        builder.AppendLine("Find requirements with genuine semantic evidence that keyword matching missed.");
 
         return builder.ToString();
     }

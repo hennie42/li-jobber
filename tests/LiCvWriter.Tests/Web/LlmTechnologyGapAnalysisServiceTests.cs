@@ -73,7 +73,7 @@ public sealed class LlmTechnologyGapAnalysisServiceTests
             "high");
 
         var prompt = Assert.Single(llmClient.LastRequest!.Messages).Content;
-        Assert.Contains("Source-backed job/company signals", prompt);
+        Assert.Contains("Signals:", prompt);
         Assert.Contains("RAG", prompt);
         Assert.Contains("Azure AI Search", prompt);
         Assert.Contains("vector search", prompt);

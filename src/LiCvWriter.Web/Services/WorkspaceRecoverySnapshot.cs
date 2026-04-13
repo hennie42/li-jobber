@@ -9,7 +9,9 @@ public sealed record WorkspaceRecoverySnapshot(
     string ActiveJobSetId,
     IReadOnlyList<JobSetRecoveryState> JobSets,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
-    CandidateProfile? CandidateProfile = null);
+    CandidateProfile? CandidateProfile = null,
+    string SelectedLlmModel = "",
+    string SelectedThinkingLevel = "");
 
 public sealed record JobSetRecoveryState(
     string Id,
@@ -31,4 +33,5 @@ public sealed record JobSetRecoveryState(
     JobFitAssessment? JobFitAssessment = null,
     TechnologyGapAssessment? TechnologyGapAssessment = null,
     EvidenceSelectionResult? EvidenceSelection = null,
-    IReadOnlyList<GeneratedDocument>? GeneratedDocuments = null);
+    IReadOnlyList<GeneratedDocument>? GeneratedDocuments = null,
+    string AdditionalInstructions = "");

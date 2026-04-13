@@ -407,7 +407,7 @@ else if (CanRunFitReview)
 }
 
 <details class="card-panel stack-gap" open>
-    <summary><h3>LLM + Drafts</h3></summary>
+    <summary><h3>Draft generation</h3></summary>
 
     <div class="status-chip @(Workspace.CanStartDraftGeneration ? "status-ok" : "status-pending")">
         @GetGenerationReadinessMessage()
@@ -418,26 +418,6 @@ else if (CanRunFitReview)
     <div class="button-row">
         <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isRefreshingAll ? $"Running {GetOperationElapsed()}" : "Refresh all analysis")</button>
     </div>
-
-    @if (Workspace.OllamaAvailability is not null)
-    {
-        <dl class="key-value-grid">
-            <dt>Version</dt>
-            <dd>@Workspace.OllamaAvailability.Version</dd>
-            <dt>Available models</dt>
-            <dd>@Workspace.OllamaAvailability.AvailableModels.Count</dd>
-            <dt>Loaded models</dt>
-            <dd>@Workspace.OllamaAvailability.EffectiveRunningModels.Count</dd>
-            <dt>Session model</dt>
-            <dd>@(string.IsNullOrWhiteSpace(Workspace.SelectedLlmModel) ? "Not selected" : Workspace.SelectedLlmModel)</dd>
-            <dt>Session model loaded</dt>
-            <dd>@(Workspace.OllamaAvailability.IsModelLoaded(Workspace.SelectedLlmModel) ? "Yes" : "No")</dd>
-            <dt>Thinking level</dt>
-            <dd>@FormatThinkingLevel(Workspace.SelectedThinkingLevel)</dd>
-        </dl>
-
-        <p class="muted-text">Loaded now: @FormatLoadedModels(Workspace.OllamaAvailability)</p>
-    }
 
     <label class="field-label" for="outputLanguage">Output language</label>
     <select id="outputLanguage" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
@@ -455,7 +435,7 @@ else if (CanRunFitReview)
     </div>
 
     <label class="field-label" for="additionalInstructions">Additional instructions</label>
-    <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions"></textarea>
+    <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions" @bind:event="oninput" @bind:after="PersistAdditionalInstructions"></textarea>
 
     <div class="button-row">
         <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGeneration)">@(isGenerating ? $"Running {GetOperationElapsed()}" : "Generate and export drafts")</button>
@@ -663,7 +643,7 @@ else if (CanRunFitReview)
             }
 
             Operations.Success("Job and company context updated.", "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.");
-            additionalInstructions = BuildResearchInstructions();
+            SetAdditionalInstructions(BuildResearchInstructions());
         }
         finally
         {
@@ -699,7 +679,7 @@ else if (CanRunFitReview)
             }
 
             Operations.Success("Job and company context updated.", "The job tab now has the latest target role context" + (string.IsNullOrWhiteSpace(companyContextText) ? "." : " and company context.") + " Fit review and generation are still idle until you run them.");
-            additionalInstructions = BuildResearchInstructions();
+            SetAdditionalInstructions(BuildResearchInstructions());
         }
         finally
         {
@@ -1061,6 +1041,15 @@ else if (CanRunFitReview)
     private void PersistJobSetInputs()
         => Workspace.UpdateActiveJobSetInputs(jobUrl, companyUrls, jobPostingText, companyContextText);
 
+    private void PersistAdditionalInstructions()
+        => Workspace.SetActiveJobSetAdditionalInstructions(additionalInstructions);
+
+    private void SetAdditionalInstructions(string value)
+    {
+        additionalInstructions = value;
+        Workspace.SetActiveJobSetAdditionalInstructions(value);
+    }
+
     private string BuildResearchInstructions()
     {
         var lines = new List<string>();
@@ -1107,6 +1096,7 @@ else if (CanRunFitReview)
         companyUrls = Workspace.ActiveJobSet.CompanyUrlsText;
         jobPostingText = Workspace.ActiveJobSet.JobPostingText;
         companyContextText = Workspace.ActiveJobSet.CompanyContextText;
+        additionalInstructions = Workspace.ActiveJobSet.AdditionalInstructions;
 
         if (string.IsNullOrWhiteSpace(jobUrl) && analysis?.SourceUrl is not null)
         {
@@ -1422,11 +1412,6 @@ else if (CanRunFitReview)
             _ => Workspace.ActiveJobSet.ProgressDetail
         };
 
-    private static string FormatThinkingLevel(string value)
-        => string.IsNullOrWhiteSpace(value)
-            ? "Pending"
-            : char.ToUpperInvariant(value[0]) + value[1..];
-
     private static string FormatSourceContext(JobRequirementAssessment requirement)
     {
         var segments = new List<string>();
@@ -1442,18 +1427,6 @@ else if (CanRunFitReview)
         }
 
         return segments.Count == 0 ? "Source-backed extraction" : string.Join(" · ", segments);
-    }
-
-    private static string FormatLoadedModels(OllamaModelAvailability? availability)
-    {
-        if (availability is null)
-        {
-            return "Unknown";
-        }
-
-        return availability.EffectiveRunningModels.Count == 0
-            ? "None reported"
-            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
     }
 
     private static string FormatDuration(TimeSpan? duration)

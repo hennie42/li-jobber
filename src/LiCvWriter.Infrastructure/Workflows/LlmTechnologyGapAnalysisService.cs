@@ -45,7 +45,7 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
     }
 
     private static string BuildSystemPrompt()
-        => """
+        => $$"""
 You analyze technology alignment between a candidate profile and a target job.
 
 Return JSON only with this exact shape:
@@ -55,20 +55,18 @@ Return JSON only with this exact shape:
 }
 
 Rules:
+- {{PromptConstraints.JsonOnlyOutput}}
 - Use concise technology labels.
-- `detectedTechnologies` should include the most relevant modern technologies explicitly or strongly implied by the job and company context.
-- `possiblyUnderrepresentedTechnologies` should only include technologies from `detectedTechnologies` that seem weak or absent in the candidate evidence.
-- Prefer grounded source-backed requirement signals and aliases when they are provided.
-- Do not include commentary outside the JSON object.
+- `detectedTechnologies`: the most relevant modern technologies explicitly or strongly implied by the job and company context.
+- `possiblyUnderrepresentedTechnologies`: only technologies from `detectedTechnologies` that seem weak or absent in the candidate evidence.
+- Prefer grounded source-backed requirement signals and aliases when provided.
 """;
 
     private static string BuildUserPrompt(CandidateProfile candidateProfile, JobPostingAnalysis jobPosting, CompanyResearchProfile? companyProfile)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("Target job:");
-        builder.AppendLine($"- Role: {jobPosting.RoleTitle}");
-        builder.AppendLine($"- Company: {jobPosting.CompanyName}");
-        builder.AppendLine($"- Summary: {jobPosting.Summary}");
+        builder.AppendLine($"Role: {jobPosting.RoleTitle} at {jobPosting.CompanyName}");
+        builder.AppendLine($"Summary: {jobPosting.Summary}");
 
         var sourceSignals = jobPosting.Signals
             .Concat(companyProfile?.Signals ?? Array.Empty<JobContextSignal>())
@@ -79,7 +77,7 @@ Rules:
         if (sourceSignals.Length > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("Source-backed job/company signals:");
+            builder.AppendLine("Signals:");
 
             foreach (var signal in sourceSignals)
             {
@@ -92,7 +90,7 @@ Rules:
 
                 if (!string.IsNullOrWhiteSpace(signal.SourceSnippet))
                 {
-                    builder.Append($" | Source: {signal.SourceSnippet}");
+                    builder.Append($" | {signal.SourceSnippet}");
                 }
 
                 builder.AppendLine();
@@ -101,26 +99,22 @@ Rules:
 
         if (companyProfile is not null)
         {
-            builder.AppendLine();
-            builder.AppendLine("Company context:");
-            builder.AppendLine(companyProfile.Summary);
+            builder.AppendLine($"Company: {companyProfile.Summary}");
         }
 
         builder.AppendLine();
-        builder.AppendLine("Candidate evidence:");
-        builder.AppendLine($"- Headline: {candidateProfile.Headline}");
-        builder.AppendLine($"- Summary: {candidateProfile.Summary}");
-        builder.AppendLine($"- Certifications: {string.Join(", ", candidateProfile.Certifications.Select(static certification => certification.Name))}");
-        builder.AppendLine($"- Projects: {string.Join(" | ", candidateProfile.Projects.Select(static project => $"{project.Title}: {project.Description}"))}");
-        builder.AppendLine($"- Experience: {string.Join(" | ", candidateProfile.Experience.Take(8).Select(static role => $"{role.Title}: {role.Description}"))}");
+        builder.AppendLine($"Candidate: {candidateProfile.Headline} | {candidateProfile.Summary}");
+        builder.AppendLine($"Certifications: {string.Join(", ", candidateProfile.Certifications.Select(static c => c.Name))}");
+        builder.AppendLine($"Projects: {string.Join(" | ", candidateProfile.Projects.Select(static p => $"{p.Title}: {p.Description}"))}");
+        builder.AppendLine($"Experience: {string.Join(" | ", candidateProfile.Experience.Take(8).Select(static r => $"{r.Title}: {r.Description}"))}");
 
         if (candidateProfile.ManualSignals.Count > 0)
         {
-            builder.AppendLine($"- Manual notes: {string.Join(" | ", candidateProfile.ManualSignals.Values)}");
+            builder.AppendLine($"Notes: {string.Join(" | ", candidateProfile.ManualSignals.Values)}");
         }
 
         builder.AppendLine();
-        builder.AppendLine("Identify relevant newer technologies from the job context and then mark which ones are only possibly underrepresented on the profile.");
+        builder.AppendLine("Identify relevant newer technologies from the job context and mark which are possibly underrepresented on the profile.");
         return builder.ToString();
     }
 

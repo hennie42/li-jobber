@@ -10,6 +10,97 @@ namespace LiCvWriter.Tests.Web;
 public sealed class WorkspaceRecoveryTests
 {
     [Fact]
+    public void WorkspaceSession_RestoresAdditionalInstructionsAndLlmSettings()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var options = new OllamaOptions { Model = "configured-model", Think = "low" };
+            var session = new WorkspaceSession(options, store);
+
+            session.SetOllamaAvailability(new OllamaModelAvailability(
+                "0.9.0",
+                "configured-model",
+                true,
+                ["configured-model", "session-model"]));
+            session.SetLlmSessionSettings("session-model", "high");
+            session.SetActiveJobSetAdditionalInstructions("Use concise, evidence-backed bullets.");
+            session.AddJobSet();
+            session.SetActiveJobSetAdditionalInstructions("Prioritize platform architecture outcomes.");
+
+            var restoredSession = new WorkspaceSession(options, store);
+
+            Assert.Equal("session-model", restoredSession.SelectedLlmModel);
+            Assert.Equal("high", restoredSession.SelectedThinkingLevel);
+
+            restoredSession.SelectJobSet("job-set-01");
+            Assert.Equal("Use concise, evidence-backed bullets.", restoredSession.ActiveJobSet.AdditionalInstructions);
+
+            restoredSession.SelectJobSet("job-set-02");
+            Assert.Equal("Prioritize platform architecture outcomes.", restoredSession.ActiveJobSet.AdditionalInstructions);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_UsesConfiguredLlmDefaultsWhenRecoveryDoesNotContainLlmSettings()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            var snapshotPath = Path.Combine(root, "workspace-recovery.json");
+            File.WriteAllText(snapshotPath, """
+                {
+                  "activeJobSetId": "job-set-01",
+                  "jobSets": [
+                    {
+                      "id": "job-set-01",
+                      "sortOrder": 1,
+                      "defaultTitle": "Job set 1",
+                      "outputFolderName": "job-set-01",
+                      "outputLanguage": 0,
+                      "progressState": 0,
+                      "progressDetail": "LLM work not started for this job set.",
+                      "jobUrl": "",
+                      "companyUrlsText": "",
+                      "jobPosting": null,
+                      "companyProfile": null,
+                      "exports": []
+                    }
+                  ],
+                  "applicantDifferentiatorProfile": null,
+                  "candidateProfile": null
+                }
+                """);
+
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var options = new OllamaOptions { Model = "configured-model", Think = "high" };
+            var restoredSession = new WorkspaceSession(options, store);
+
+            Assert.Equal("configured-model", restoredSession.SelectedLlmModel);
+            Assert.Equal("high", restoredSession.SelectedThinkingLevel);
+            Assert.Equal(string.Empty, restoredSession.ActiveJobSet.AdditionalInstructions);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void WorkspaceSession_RestoresRecoveredJobSetsWithoutProfile()
     {
         var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
