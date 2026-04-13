@@ -17,4 +17,5 @@ public sealed record DraftGenerationRequest(
     OutputLanguage OutputLanguage = OutputLanguage.English,
     JobFitAssessment? JobFitAssessment = null,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
-    EvidenceSelectionResult? EvidenceSelection = null);
+    EvidenceSelectionResult? EvidenceSelection = null,
+    TechnologyGapAssessment? TechnologyGapAssessment = null);

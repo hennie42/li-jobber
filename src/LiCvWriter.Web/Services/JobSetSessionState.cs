@@ -3,6 +3,7 @@ using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
 
+
 namespace LiCvWriter.Web.Services;
 
 public sealed record JobSetSessionState

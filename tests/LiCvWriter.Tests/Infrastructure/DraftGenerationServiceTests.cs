@@ -95,8 +95,8 @@ public sealed class DraftGenerationServiceTests
         var prompt = llmClient.LastRequest!.Messages[0].Content;
         Assert.Contains("Job fit review", prompt);
         Assert.Contains("Strength: Azure", prompt);
-        Assert.DoesNotContain("Recommendation:", prompt);
-        Assert.DoesNotContain("score:", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Overall fit score: 81/100 (Apply)", prompt);
+        Assert.Contains("Do not include fit scores", prompt);
         Assert.Contains("Applicant differentiators", prompt);
         Assert.Contains("Pragmatic AI architect", prompt);
         Assert.Contains("Selected evidence for this role", prompt);

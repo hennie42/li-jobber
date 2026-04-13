@@ -190,14 +190,42 @@ a {
   gap: 1.5rem;
 }
 
-.hero-panel h1 {
-  margin: 0.3rem 0 0;
-  font-family: "Aptos Display", "Segoe UI", sans-serif;
-  font-size: clamp(2rem, 4vw, 3.2rem);
-  line-height: 1.02;
+.hero-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.page-header h1 {
+.hero-flow-list {
+  margin-top: 0.2rem;
+  font-size: 0.93rem;
+  color: var(--muted);
+  padding-left: 1.3rem;
+}
+
+details.card-panel summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.card-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+details.card-panel summary .status-chip {
+  margin-top: 0.5rem;
+}
+
+.hero-panel h1,
+.hero-panel h2 {
+  margin: 0.3rem 0 0;
+  font-family: "Aptos Display", "Segoe UI", sans-serif;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  line-height: 1.08;
+}
+
+.page-header h1,
+.page-header h2 {
   margin: 0;
   font-family: "Aptos Display", "Segoe UI", sans-serif;
   font-size: clamp(1.85rem, 3.1vw, 2.85rem);
@@ -551,6 +579,17 @@ a {
   border-radius: 999px;
   font-weight: 700;
   background: rgba(31, 41, 51, 0.08);
+}
+
+.job-tabs-meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.job-tabs-meta .meta-sep {
+  margin: 0 0.35rem;
+  opacity: 0.45;
 }
 
 @media (max-width: 1100px) {

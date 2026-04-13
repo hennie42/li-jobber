@@ -17,7 +17,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public string ExportPath { get; private set; } = Path.Combine(Environment.CurrentDirectory, "LI-export");
 
-    public CandidateProfile? CandidateProfile { get; private set; }
+    public CandidateProfile? CandidateProfile { get; private set; } = LoadCandidateProfile(recoveryStore);
 
     public LinkedInExportImportResult? ImportResult { get; private set; }
 
@@ -155,6 +155,19 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             SelectedEvidenceIds = Array.Empty<string>(),
             EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
                 .Select(item => item with { IsSelected = false })
+                .ToArray())
+        });
+    }
+
+    public void SelectAllActiveJobSetEvidence()
+    {
+        UpdateActiveJobSet(jobSet => jobSet with
+        {
+            SelectedEvidenceIds = jobSet.EvidenceSelection.RankedEvidence
+                .Select(item => item.Evidence.Id)
+                .ToArray(),
+            EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
+                .Select(item => item with { IsSelected = true })
                 .ToArray())
         });
     }
@@ -454,32 +467,33 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
         return snapshot.JobSets
             .OrderBy(jobSet => jobSet.SortOrder)
-            .Select(static jobSet => new JobSetSessionState
+            .Select(static jobSet =>
             {
-                Id = jobSet.Id,
-                SortOrder = jobSet.SortOrder,
-                DefaultTitle = jobSet.DefaultTitle,
-                OutputFolderName = jobSet.OutputFolderName,
-                InputMode = jobSet.InputMode,
-                OutputLanguage = jobSet.OutputLanguage,
-                ProgressState = jobSet.ProgressState == JobSetProgressState.Done && jobSet.Exports.Count > 0
-                    ? JobSetProgressState.Done
-                    : JobSetProgressState.NotStarted,
-                ProgressDetail = jobSet.ProgressState == JobSetProgressState.Done && jobSet.Exports.Count > 0
-                    ? jobSet.ProgressDetail
-                    : "Recovered after restart. Re-import the profile before resuming this job set.",
-                JobUrl = jobSet.JobUrl,
-                CompanyUrlsText = jobSet.CompanyUrlsText,
-                JobPostingText = jobSet.JobPostingText,
-                CompanyContextText = jobSet.CompanyContextText,
-                JobPosting = jobSet.JobPosting,
-                CompanyProfile = jobSet.CompanyProfile,
-                JobFitAssessment = JobFitAssessment.Empty,
-                Exports = jobSet.Exports,
-                GeneratedDocuments = Array.Empty<GeneratedDocument>(),
-                TechnologyGapAssessment = TechnologyGapAssessment.Empty,
-                SelectedEvidenceIds = jobSet.SelectedEvidenceIds ?? Array.Empty<string>(),
-                EvidenceSelection = EvidenceSelectionResult.Empty
+                var isInterrupted = jobSet.ProgressState == JobSetProgressState.Running;
+
+                return new JobSetSessionState
+                {
+                    Id = jobSet.Id,
+                    SortOrder = jobSet.SortOrder,
+                    DefaultTitle = jobSet.DefaultTitle,
+                    OutputFolderName = jobSet.OutputFolderName,
+                    InputMode = jobSet.InputMode,
+                    OutputLanguage = jobSet.OutputLanguage,
+                    ProgressState = isInterrupted ? JobSetProgressState.NotStarted : jobSet.ProgressState,
+                    ProgressDetail = isInterrupted ? "Recovered after restart." : jobSet.ProgressDetail,
+                    JobUrl = jobSet.JobUrl,
+                    CompanyUrlsText = jobSet.CompanyUrlsText,
+                    JobPostingText = jobSet.JobPostingText,
+                    CompanyContextText = jobSet.CompanyContextText,
+                    JobPosting = jobSet.JobPosting,
+                    CompanyProfile = jobSet.CompanyProfile,
+                    JobFitAssessment = jobSet.JobFitAssessment ?? JobFitAssessment.Empty,
+                    Exports = jobSet.Exports,
+                    GeneratedDocuments = jobSet.GeneratedDocuments ?? Array.Empty<GeneratedDocument>(),
+                    TechnologyGapAssessment = jobSet.TechnologyGapAssessment ?? TechnologyGapAssessment.Empty,
+                    SelectedEvidenceIds = jobSet.SelectedEvidenceIds ?? Array.Empty<string>(),
+                    EvidenceSelection = jobSet.EvidenceSelection ?? EvidenceSelectionResult.Empty
+                };
             })
             .ToList();
     }
@@ -499,6 +513,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     private static ApplicantDifferentiatorProfile LoadApplicantDifferentiatorProfile(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.ApplicantDifferentiatorProfile ?? ApplicantDifferentiatorProfile.Empty;
+
+    private static CandidateProfile? LoadCandidateProfile(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.CandidateProfile;
 
     private void UpdateActiveJobSet(Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
         => UpdateJobSet(ActiveJobSetId, update, notifyChanged);
@@ -590,8 +607,13 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.SelectedEvidenceIds,
                 jobSet.InputMode,
                 jobSet.JobPostingText,
-                jobSet.CompanyContextText)).ToArray(),
-            ApplicantDifferentiatorProfile);
+                jobSet.CompanyContextText,
+                jobSet.JobFitAssessment,
+                jobSet.TechnologyGapAssessment,
+                jobSet.EvidenceSelection,
+                jobSet.GeneratedDocuments)).ToArray(),
+            ApplicantDifferentiatorProfile,
+            CandidateProfile);
 
     private void NotifyChanged()
     {

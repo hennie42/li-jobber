@@ -3,7 +3,7 @@ using LiCvWriter.Core.Profiles;
 
 namespace LiCvWriter.Application.Services;
 
-public sealed class EvidenceSelectionService(CandidateEvidenceService candidateEvidenceService)
+public sealed class EvidenceSelectionService(CandidateEvidenceService candidateEvidenceService, int defaultSelectedEvidenceCount = 30)
 {
     public EvidenceSelectionResult Build(
         CandidateProfile candidateProfile,
@@ -30,7 +30,7 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             return EvidenceSelectionResult.Empty;
         }
 
-        var selectedIds = SelectDefaults(ranked);
+        var selectedIds = SelectDefaults(ranked, defaultSelectedEvidenceCount);
         var selectedRanked = ranked
             .Select(item => item with { IsSelected = selectedIds.Contains(item.Evidence.Id) })
             .ToArray();
@@ -159,30 +159,11 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
         return JobSignalExtractor.ContainsTermOrOverlap(evidenceText, term);
     }
 
-    private static HashSet<string> SelectDefaults(IReadOnlyList<RankedEvidenceItem> rankedEvidence)
-    {
-        var selected = new List<string>();
-
-        foreach (var evidence in rankedEvidence.Where(static item => item.Evidence.Type is CandidateEvidenceType.Experience or CandidateEvidenceType.Project or CandidateEvidenceType.Recommendation).Take(4))
-        {
-            selected.Add(evidence.Evidence.Id);
-        }
-
-        foreach (var evidence in rankedEvidence)
-        {
-            if (selected.Count >= 6)
-            {
-                break;
-            }
-
-            if (!selected.Contains(evidence.Evidence.Id, StringComparer.OrdinalIgnoreCase))
-            {
-                selected.Add(evidence.Evidence.Id);
-            }
-        }
-
-        return selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
+    private static HashSet<string> SelectDefaults(IReadOnlyList<RankedEvidenceItem> rankedEvidence, int maxCount)
+        => rankedEvidence
+            .Take(maxCount)
+            .Select(static item => item.Evidence.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static int BaseScore(CandidateEvidenceType type)
         => type switch

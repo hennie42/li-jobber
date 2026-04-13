@@ -14,8 +14,8 @@
 <section class="page-header">
     <div>
         <div class="eyebrow">Job Workbench</div>
-        <h1>Research, compare, and generate markdown drafts from the same job tab</h1>
-        <p>Each job tab keeps its own job URL, company context, fit review, evidence selection, technology gap signals, output language, and exported markdown files.</p>
+        <h2>Job workbench</h2>
+        <p>Each tab holds a target role with its own research, fit review, and drafts.</p>
     </div>
 </section>
 
@@ -46,11 +46,18 @@
     <div class="status-chip @(Workspace.ActiveJobSet.ProgressState == JobSetProgressState.Done ? "status-ok" : "status-pending")">
         @GetActiveTabStatusMessage()
     </div>
-    <p class="muted-text">Active output folder: @Workspace.ActiveJobSet.OutputFolderName</p>
-    <p class="muted-text">Input mode: @FormatInputMode(Workspace.ActiveJobSet.InputMode)</p>
-    <p class="muted-text">Current language: @Workspace.ActiveJobSet.OutputLanguage</p>
-    <p class="muted-text">Session LLM: @(Workspace.IsLlmReady ? $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)}" : "Pending setup on Start / Setup")</p>
-    <p class="muted-text">Loaded in Ollama: @FormatLoadedModels(Workspace.OllamaAvailability)</p>
+    <div class="job-tabs-meta">
+        @Workspace.ActiveJobSet.OutputFolderName
+        <span class="meta-sep">&middot;</span>
+        @FormatInputMode(Workspace.ActiveJobSet.InputMode)
+        <span class="meta-sep">&middot;</span>
+        @Workspace.ActiveJobSet.OutputLanguage
+        @if (Workspace.IsLlmReady)
+        {
+            <span class="meta-sep">&middot;</span>
+            @Workspace.SelectedLlmModel
+        }
+    </div>
 </section>
 
 @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -60,12 +67,15 @@
     </section>
 }
 
-<section class="content-grid">
-    <article class="card-panel stack-gap">
-        <div class="field-label">Research</div>
-        <h2>Analyze the job and company context</h2>
+<details class="card-panel stack-gap" open>
+    <summary><h2>Research</h2></summary>
 
-        @if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.LinkToUrls)
+    @if (isResearching && operationStartedAt is not null)
+    {
+        <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+    }
+
+    @if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.LinkToUrls)
         {
             <label class="field-label" for="jobUrl">Job URL</label>
             <input id="jobUrl" class="text-input" @bind="jobUrl" @bind:event="oninput" @bind:after="PersistJobSetInputs" />
@@ -82,7 +92,7 @@
             <textarea id="companyContextText" class="prompt-box" rows="8" @bind="companyContextText" @bind:event="oninput" @bind:after="PersistJobSetInputs" placeholder="Paste company information here, or leave empty to skip company context..."></textarea>
         }
         <div class="button-row">
-            <button class="primary-button" @onclick="AnalyzeAndBuildContextAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isResearching ? "Analyzing and building..." : "Analyze job and build company context")</button>
+            <button class="primary-button" @onclick="AnalyzeAndBuildContextAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isResearching ? $"Running {GetOperationElapsed()}" : "Analyze job and build company context")</button>
         </div>
         <p class="muted-text">@GetResearchHelpText()</p>
 
@@ -182,126 +192,31 @@
                 </div>
             </details>
         }
-    </article>
-
-    <article class="card-panel stack-gap">
-        <div class="field-label">LLM + Drafts</div>
-        <h2>Generate markdown output for this tab</h2>
-
-        <div class="status-chip @(Workspace.CanStartDraftGeneration ? "status-ok" : "status-pending")">
-            @GetGenerationReadinessMessage()
-        </div>
-        <p class="muted-text">Saved applicant differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Yes" : "No")</p>
-        <p class="muted-text">Selected evidence items for this tab: @Workspace.GetActiveSelectedEvidenceCount()</p>
-
-        @if (Workspace.OllamaAvailability is not null)
-        {
-            <dl class="key-value-grid">
-                <dt>Version</dt>
-                <dd>@Workspace.OllamaAvailability.Version</dd>
-                <dt>Available models</dt>
-                <dd>@Workspace.OllamaAvailability.AvailableModels.Count</dd>
-                <dt>Loaded models</dt>
-                <dd>@Workspace.OllamaAvailability.EffectiveRunningModels.Count</dd>
-                <dt>Session model</dt>
-                <dd>@(string.IsNullOrWhiteSpace(Workspace.SelectedLlmModel) ? "Not selected" : Workspace.SelectedLlmModel)</dd>
-                <dt>Session model loaded</dt>
-                <dd>@(Workspace.OllamaAvailability.IsModelLoaded(Workspace.SelectedLlmModel) ? "Yes" : "No")</dd>
-                <dt>Thinking level</dt>
-                <dd>@FormatThinkingLevel(Workspace.SelectedThinkingLevel)</dd>
-            </dl>
-
-            <p class="muted-text">Loaded now: @FormatLoadedModels(Workspace.OllamaAvailability)</p>
-        }
-
-        <label class="field-label" for="outputLanguage">Output language</label>
-        <select id="outputLanguage" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
-            <option value="@OutputLanguage.English">English</option>
-            <option value="@OutputLanguage.Danish">Danish</option>
-        </select>
-
-        <p class="muted-text">Danish output keeps technology names, company names, quoted job phrases, and file names in English or original form.</p>
-
-        <div class="check-grid">
-            <label><input type="checkbox" @bind="generateCv" /> CV</label>
-            <label><input type="checkbox" @bind="generateCoverLetter" /> Cover letter</label>
-            <label><input type="checkbox" @bind="generateSummary" /> Profile summary</label>
-            <label><input type="checkbox" @bind="generateInterviewNotes" /> Interview notes</label>
-        </div>
-
-        <label class="field-label" for="additionalInstructions">Additional instructions</label>
-        <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions"></textarea>
-
-        <div class="button-row">
-            <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGeneration)">@(isGenerating ? "Generating..." : "Generate and export drafts")</button>
-            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? "Refreshing fit review..." : "Refresh fit review")</button>
-            <button class="secondary-button" @onclick="RefreshTechnologyGapAsync" disabled="@(!CanRunTechnologyGapCheck || isBusy)">@(isRefreshingTechnologyGap ? "Refreshing technology gap..." : "Refresh technology gap check")</button>
-            <a class="secondary-button" href="/">Open Start / Setup</a>
-        </div>
-
-        @if (GetCurrentLlmTelemetry() is { } telemetry)
-        {
-            <div class="details-card stack-gap">
-                <div class="field-label">Live LLM progress</div>
-                <div class="sidebar-metric">@telemetry.Message</div>
-                @if (!string.IsNullOrWhiteSpace(telemetry.Detail))
-                {
-                    <p class="muted-text">@telemetry.Detail</p>
-                }
-                <dl class="key-value-grid compact-grid">
-                    <dt>Elapsed</dt>
-                    <dd>@FormatDuration(telemetry.Elapsed)</dd>
-                    @if (telemetry.PromptTokens is not null)
-                    {
-                        <dt>Prompt</dt>
-                        <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
-                    }
-                    @if (telemetry.CompletionTokens is not null)
-                    {
-                        <dt>Completion</dt>
-                        <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
-                    }
-                    @if (telemetry.HasEstimatedRemaining)
-                    {
-                        <dt>ETA</dt>
-                        <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
-                    }
-                </dl>
-                <div class="button-row">
-                    <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
-                </div>
-            </div>
-        }
-
-        <p class="muted-text">Job parsing, company parsing, technology gap analysis, and generation use the session model you selected on Start / Setup. Fit scoring and evidence ranking stay deterministic after that context is stored.</p>
-
-        @if (!CanRunFitReview)
-        {
-            <p class="muted-text">Load a profile and analyze a target job before running the fit review or evidence ranking.</p>
-        }
-        else if (!Workspace.ApplicantDifferentiatorProfile.HasContent)
-        {
-            <p class="muted-text">The fit review works without differentiators, but saving them on Start / Setup gives the app a stronger applicant narrative.</p>
-        }
-
-        @if (!CanRunTechnologyGapCheck)
-        {
-            <p class="muted-text">Load a profile and complete the session LLM setup before running the technology gap check or generation.</p>
-        }
-    </article>
-</section>
+    </details>
 
 @if (Workspace.JobFitAssessment.HasSignals)
 {
-    <section class="card-panel stack-gap">
-        <div class="fit-header">
-            <div>
-                <h2>Fit review</h2>
-                <p class="muted-text">This deterministic review maps source-backed job and company signals to imported evidence and your stored applicant differentiators.</p>
+    <details class="card-panel stack-gap" open>
+        <summary>
+            <div class="fit-header">
+                <div>
+                    <h2>Fit review</h2>
+                </div>
+                <div class="status-chip @GetRecommendationStatusClass(Workspace.JobFitAssessment.Recommendation)">
+                    @FormatRecommendation(Workspace.JobFitAssessment.Recommendation) - @Workspace.JobFitAssessment.OverallScore/100
+                </div>
             </div>
-            <div class="status-chip @GetRecommendationStatusClass(Workspace.JobFitAssessment.Recommendation)">
-                @FormatRecommendation(Workspace.JobFitAssessment.Recommendation) - @Workspace.JobFitAssessment.OverallScore/100
-            </div>
+        </summary>
+
+        @if (isRefreshingFitReview && operationStartedAt is not null)
+        {
+            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+        }
+
+        <p class="muted-text">This deterministic review maps source-backed job and company signals to imported evidence and your stored applicant differentiators.</p>
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
         </div>
 
         <dl class="key-value-grid compact-grid">
@@ -360,76 +275,41 @@
                 </article>
             }
         </div>
-    </section>
+    </details>
 }
 else if (CanRunFitReview)
 {
-    <section class="card-panel stack-gap">
-        <h2>Fit review</h2>
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Fit review</h2></summary>
+
+        @if (isRefreshingFitReview && operationStartedAt is not null)
+        {
+            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+        }
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
+        </div>
+
         <p class="muted-text">No structured fit review is available for this tab yet. Run fit review or generate drafts when you want the app to score the current job context.</p>
-    </section>
-}
-
-@if (Workspace.EvidenceSelection.HasSignals)
-{
-    <section class="card-panel stack-gap">
-        <div class="fit-header">
-            <div>
-                <h2>Ranked evidence</h2>
-                <p class="muted-text">Select the strongest proof points to feed into the draft prompts for this job tab.</p>
-            </div>
-            <div class="button-row">
-                <div class="status-chip @(Workspace.GetActiveSelectedEvidenceCount() > 0 ? "status-ok" : "status-pending")">
-                    @Workspace.GetActiveSelectedEvidenceCount() selected
-                </div>
-                <button class="secondary-button" @onclick="ClearEvidenceSelectionsAsync" disabled="@(Workspace.GetActiveSelectedEvidenceCount() == 0)">Clear selections</button>
-            </div>
-        </div>
-
-        <div class="evidence-selection-list">
-            @foreach (var rankedEvidence in Workspace.EvidenceSelection.RankedEvidence.Take(10))
-            {
-                <label class="evidence-selection-card">
-                    <input type="checkbox"
-                           checked="@rankedEvidence.IsSelected"
-                           @onchange="args => HandleEvidenceSelectionChanged(rankedEvidence.Evidence.Id, args)" />
-                    <div class="evidence-selection-body">
-                        <div class="fit-card-header">
-                            <div>
-                                <div class="field-label">@rankedEvidence.Evidence.Type</div>
-                                <strong>@rankedEvidence.Evidence.Title</strong>
-                            </div>
-                            <div class="score-pill">@rankedEvidence.Score</div>
-                        </div>
-                        <p class="muted-text">@rankedEvidence.Evidence.Summary</p>
-                        @if (rankedEvidence.Reasons.Count > 0)
-                        {
-                            <ul class="feature-list compact-list">
-                                @foreach (var reason in rankedEvidence.Reasons)
-                                {
-                                    <li>@reason</li>
-                                }
-                            </ul>
-                        }
-                    </div>
-                </label>
-            }
-        </div>
-    </section>
-}
-else if (CanRunFitReview)
-{
-    <section class="card-panel stack-gap">
-        <h2>Ranked evidence</h2>
-        <p class="muted-text">No evidence ranking is available for this tab yet. It will be prepared when you run fit review or generate drafts.</p>
-    </section>
+    </details>
 }
 
 @if (Workspace.CandidateProfile is not null && Workspace.ActiveJobSet.TechnologyGapAssessment.HasSignals)
 {
-    <section class="card-panel stack-gap">
-        <h2>Technology gap check</h2>
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Technology gap check</h2></summary>
+
+        @if (isRefreshingTechnologyGap && operationStartedAt is not null)
+        {
+            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+        }
+
         <p class="muted-text">This LLM-based check compares the current job context with profile skills, experience, projects, certifications, headline, summary, and manual notes.</p>
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshTechnologyGapAsync" disabled="@(!CanRunTechnologyGapCheck || isBusy)">@(isRefreshingTechnologyGap ? $"Running {GetOperationElapsed()}" : "Refresh technology gap check")</button>
+        </div>
 
         <div>
             <div class="field-label">Detected in job context</div>
@@ -457,20 +337,202 @@ else if (CanRunFitReview)
                 <p class="muted-text">No obvious technology gaps were detected for the active job tab.</p>
             }
         </div>
-    </section>
+    </details>
 }
 else if (Workspace.JobPosting is not null)
 {
-    <section class="card-panel stack-gap">
-        <h2>Technology gap check</h2>
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Technology gap check</h2></summary>
+
+        @if (isRefreshingTechnologyGap && operationStartedAt is not null)
+        {
+            <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+        }
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshTechnologyGapAsync" disabled="@(!CanRunTechnologyGapCheck || isBusy)">@(isRefreshingTechnologyGap ? $"Running {GetOperationElapsed()}" : "Refresh technology gap check")</button>
+        </div>
+
         <p class="muted-text">No LLM-based technology gap result is currently available for this job tab. Run the check when you want the app to inspect technology coverage.</p>
-    </section>
+    </details>
 }
+
+@if (Workspace.EvidenceSelection.HasSignals)
+{
+    <details class="card-panel stack-gap" open>
+        <summary>
+            <div class="fit-header">
+                <div>
+                    <h2>Ranked evidence</h2>
+                </div>
+                <div class="status-chip @(Workspace.GetActiveSelectedEvidenceCount() > 0 ? "status-ok" : "status-pending")">
+                    @Workspace.GetActiveSelectedEvidenceCount() selected
+                </div>
+            </div>
+        </summary>
+
+        <p class="muted-text">Select the strongest proof points to feed into the draft prompts for this job tab.</p>
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="SelectAllEvidenceAsync" disabled="@(Workspace.GetActiveSelectedEvidenceCount() == Workspace.EvidenceSelection.RankedEvidence.Count)">Select all</button>
+            <button class="secondary-button" @onclick="ClearEvidenceSelectionsAsync" disabled="@(Workspace.GetActiveSelectedEvidenceCount() == 0)">Deselect all</button>
+        </div>
+
+        <div class="evidence-selection-list">
+            @foreach (var rankedEvidence in Workspace.EvidenceSelection.RankedEvidence)
+            {
+                <label class="evidence-selection-card">
+                    <input type="checkbox"
+                           checked="@rankedEvidence.IsSelected"
+                           @onchange="args => HandleEvidenceSelectionChanged(rankedEvidence.Evidence.Id, args)" />
+                    <div class="evidence-selection-body">
+                        <div class="fit-card-header">
+                            <div>
+                                <div class="field-label">@rankedEvidence.Evidence.Type</div>
+                                <strong>@rankedEvidence.Evidence.Title</strong>
+                            </div>
+                            <div class="score-pill">@rankedEvidence.Score</div>
+                        </div>
+                        <p class="muted-text">@rankedEvidence.Evidence.Summary</p>
+                        @if (rankedEvidence.Reasons.Count > 0)
+                        {
+                            <ul class="feature-list compact-list">
+                                @foreach (var reason in rankedEvidence.Reasons)
+                                {
+                                    <li>@reason</li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </label>
+            }
+        </div>
+    </details>
+}
+else if (CanRunFitReview)
+{
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Ranked evidence</h2></summary>
+        <p class="muted-text">No evidence ranking is available for this tab yet. It will be prepared when you run fit review or generate drafts.</p>
+    </details>
+}
+
+<details class="card-panel stack-gap" open>
+    <summary><h2>LLM + Drafts</h2></summary>
+
+    @if ((isGenerating || isRefreshingAll) && operationStartedAt is not null)
+    {
+        <div class="status-chip status-pending">Running @GetOperationElapsed()</div>
+    }
+
+    <div class="status-chip @(Workspace.CanStartDraftGeneration ? "status-ok" : "status-pending")">
+        @GetGenerationReadinessMessage()
+    </div>
+    <p class="muted-text">Saved applicant differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Yes" : "No")</p>
+    <p class="muted-text">Selected evidence items for this tab: @Workspace.GetActiveSelectedEvidenceCount()</p>
+
+    <div class="button-row">
+        <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isRefreshingAll ? $"Running {GetOperationElapsed()}" : "Refresh all analysis")</button>
+    </div>
+
+    @if (Workspace.OllamaAvailability is not null)
+    {
+        <dl class="key-value-grid">
+            <dt>Version</dt>
+            <dd>@Workspace.OllamaAvailability.Version</dd>
+            <dt>Available models</dt>
+            <dd>@Workspace.OllamaAvailability.AvailableModels.Count</dd>
+            <dt>Loaded models</dt>
+            <dd>@Workspace.OllamaAvailability.EffectiveRunningModels.Count</dd>
+            <dt>Session model</dt>
+            <dd>@(string.IsNullOrWhiteSpace(Workspace.SelectedLlmModel) ? "Not selected" : Workspace.SelectedLlmModel)</dd>
+            <dt>Session model loaded</dt>
+            <dd>@(Workspace.OllamaAvailability.IsModelLoaded(Workspace.SelectedLlmModel) ? "Yes" : "No")</dd>
+            <dt>Thinking level</dt>
+            <dd>@FormatThinkingLevel(Workspace.SelectedThinkingLevel)</dd>
+        </dl>
+
+        <p class="muted-text">Loaded now: @FormatLoadedModels(Workspace.OllamaAvailability)</p>
+    }
+
+    <label class="field-label" for="outputLanguage">Output language</label>
+    <select id="outputLanguage" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
+        <option value="@OutputLanguage.English">English</option>
+        <option value="@OutputLanguage.Danish">Danish</option>
+    </select>
+
+    <p class="muted-text">Danish output keeps technology names, company names, quoted job phrases, and file names in English or original form.</p>
+
+    <div class="check-grid">
+        <label><input type="checkbox" @bind="generateCv" /> CV</label>
+        <label><input type="checkbox" @bind="generateCoverLetter" /> Cover letter</label>
+        <label><input type="checkbox" @bind="generateSummary" /> Profile summary</label>
+        <label><input type="checkbox" @bind="generateInterviewNotes" /> Interview notes</label>
+    </div>
+
+    <label class="field-label" for="additionalInstructions">Additional instructions</label>
+    <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions"></textarea>
+
+    <div class="button-row">
+        <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGeneration)">@(isGenerating ? $"Running {GetOperationElapsed()}" : "Generate and export drafts")</button>
+        <a class="secondary-button" href="/">Open Start / Setup</a>
+    </div>
+
+    @if (GetCurrentLlmTelemetry() is { } telemetry)
+    {
+        <div class="details-card stack-gap">
+            <div class="field-label">Live LLM progress</div>
+            <div class="sidebar-metric">@telemetry.Message</div>
+            @if (!string.IsNullOrWhiteSpace(telemetry.Detail))
+            {
+                <p class="muted-text">@telemetry.Detail</p>
+            }
+            <dl class="key-value-grid compact-grid">
+                <dt>Elapsed</dt>
+                <dd>@FormatDuration(telemetry.Elapsed)</dd>
+                @if (telemetry.PromptTokens is not null)
+                {
+                    <dt>Prompt</dt>
+                    <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
+                }
+                @if (telemetry.CompletionTokens is not null)
+                {
+                    <dt>Completion</dt>
+                    <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
+                }
+                @if (telemetry.HasEstimatedRemaining)
+                {
+                    <dt>ETA</dt>
+                    <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
+                }
+            </dl>
+            <div class="button-row">
+                <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
+            </div>
+        </div>
+    }
+
+    <p class="muted-text">Job parsing, company parsing, technology gap analysis, and generation use the session model you selected on Start / Setup. Fit scoring and evidence ranking stay deterministic after that context is stored.</p>
+
+    @if (!CanRunFitReview)
+    {
+        <p class="muted-text">Load a profile and analyze a target job before running the fit review or evidence ranking.</p>
+    }
+    else if (!Workspace.ApplicantDifferentiatorProfile.HasContent)
+    {
+        <p class="muted-text">The fit review works without differentiators, but saving them on Start / Setup gives the app a stronger applicant narrative.</p>
+    }
+
+    @if (!CanRunTechnologyGapCheck)
+    {
+        <p class="muted-text">Load a profile and complete the session LLM setup before running the technology gap check or generation.</p>
+    }
+</details>
 
 @if (Workspace.GeneratedDocuments.Count > 0)
 {
-    <section class="card-panel stack-gap">
-        <h2>Generated markdown drafts</h2>
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Generated markdown drafts</h2></summary>
         @foreach (var document in Workspace.GeneratedDocuments)
         {
             <details class="details-card">
@@ -479,20 +541,20 @@ else if (Workspace.JobPosting is not null)
                 <pre class="response-box">@document.Markdown</pre>
             </details>
         }
-    </section>
+    </details>
 }
 
 @if (Workspace.Exports.Count > 0)
 {
-    <section class="card-panel">
-        <h2>Exported markdown files</h2>
+    <details class="card-panel stack-gap" open>
+        <summary><h2>Exported markdown files</h2></summary>
         <ul class="feature-list">
             @foreach (var export in Workspace.Exports)
             {
                 <li>@export.Kind: @export.MarkdownPath</li>
             }
         </ul>
-    </section>
+    </details>
 }
 
 @code {
@@ -509,15 +571,17 @@ else if (Workspace.JobPosting is not null)
     private string jobPostingText = string.Empty;
     private string companyContextText = string.Empty;
     private BusyOperation currentOperation;
+    private DateTimeOffset? operationStartedAt;
+    private System.Threading.Timer? uiRefreshTimer;
     private string? errorMessage;
     private JobPostingAnalysis? analysis;
     private CompanyResearchProfile? companyProfile;
-    private string additionalInstructions = "Prioritize consulting impact, architecture judgment, AI pragmatism, and credibility with regulated or complex client environments.";
+    private string additionalInstructions = string.Empty;
     private bool generateCv = true;
     private bool generateCoverLetter = true;
     private bool generateSummary = true;
     private bool generateInterviewNotes = true;
-    private bool isBusy => isResearching || isGenerating || isRefreshingFitReview || isRefreshingTechnologyGap;
+    private bool isBusy => isResearching || isGenerating || isRefreshingFitReview || isRefreshingTechnologyGap || isRefreshingAll;
     private bool isResearching => currentOperation == BusyOperation.AnalyzeAndBuildContext || isAnalyzing || isBuildingCompanyContext;
     private bool isAnalyzing => currentOperation == BusyOperation.AnalyzeJob
         || IsCurrentWorkbenchOperation(AnalyzeJobMessage)
@@ -533,6 +597,7 @@ else if (Workspace.JobPosting is not null)
     private bool isRefreshingTechnologyGap => currentOperation == BusyOperation.RefreshTechnologyGap
         || IsCurrentWorkbenchOperation(RefreshTechnologyGapMessage)
         || IsActiveTelemetryMessage(RefreshTechnologyGapMessage);
+    private bool isRefreshingAll => currentOperation == BusyOperation.RefreshAll;
 
     private bool CanRunFitReview => Workspace.CandidateProfile is not null && Workspace.JobPosting is not null;
 
@@ -547,14 +612,35 @@ else if (Workspace.JobPosting is not null)
 
     public void Dispose()
     {
+        uiRefreshTimer?.Dispose();
         Operations.Changed -= HandleChanged;
         Workspace.Changed -= HandleWorkspaceChanged;
     }
+
+    private void StartOperationTimer()
+    {
+        operationStartedAt = DateTimeOffset.Now;
+        uiRefreshTimer?.Dispose();
+        uiRefreshTimer = new System.Threading.Timer(_ => _ = InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopOperationTimer()
+    {
+        operationStartedAt = null;
+        uiRefreshTimer?.Dispose();
+        uiRefreshTimer = null;
+    }
+
+    private string GetOperationElapsed()
+        => operationStartedAt is not null
+            ? FormatDuration(DateTimeOffset.Now - operationStartedAt.Value)
+            : string.Empty;
 
     private async Task AnalyzeAndBuildContextAsync()
     {
         errorMessage = null;
         PersistJobSetInputs();
+        StartOperationTimer();
 
         if (!TryEnsureResearchReadiness())
         {
@@ -593,10 +679,12 @@ else if (Workspace.JobPosting is not null)
             }
 
             Operations.Success("Job and company context updated.", "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.");
+            additionalInstructions = BuildResearchInstructions();
         }
         finally
         {
             currentOperation = BusyOperation.None;
+            StopOperationTimer();
         }
     }
 
@@ -627,10 +715,12 @@ else if (Workspace.JobPosting is not null)
             }
 
             Operations.Success("Job and company context updated.", "The job tab now has the latest target role context" + (string.IsNullOrWhiteSpace(companyContextText) ? "." : " and company context.") + " Fit review and generation are still idle until you run them.");
+            additionalInstructions = BuildResearchInstructions();
         }
         finally
         {
             currentOperation = BusyOperation.None;
+            StopOperationTimer();
         }
     }
 
@@ -888,6 +978,7 @@ else if (Workspace.JobPosting is not null)
     {
         errorMessage = null;
         currentOperation = BusyOperation.GenerateDrafts;
+        StartOperationTimer();
 
         try
         {
@@ -936,7 +1027,8 @@ else if (Workspace.JobPosting is not null)
                     OutputLanguage: Workspace.ActiveJobSet.OutputLanguage,
                     JobFitAssessment: Workspace.JobFitAssessment,
                     ApplicantDifferentiatorProfile: Workspace.ApplicantDifferentiatorProfile,
-                        EvidenceSelection: Workspace.EvidenceSelection),
+                        EvidenceSelection: Workspace.EvidenceSelection,
+                        TechnologyGapAssessment: Workspace.ActiveJobSet.TechnologyGapAssessment),
                         ReportLlmProgress));
 
             Workspace.SetGeneratedDocuments(result.Documents, result.Exports);
@@ -950,6 +1042,7 @@ else if (Workspace.JobPosting is not null)
         finally
         {
             currentOperation = BusyOperation.None;
+            StopOperationTimer();
         }
     }
 
@@ -984,6 +1077,44 @@ else if (Workspace.JobPosting is not null)
     private void PersistJobSetInputs()
         => Workspace.UpdateActiveJobSetInputs(jobUrl, companyUrls, jobPostingText, companyContextText);
 
+    private string BuildResearchInstructions()
+    {
+        var lines = new List<string>();
+
+        if (analysis is not null)
+        {
+            foreach (var signal in analysis.CulturalSignals)
+            {
+                lines.Add($"- Reflect the cultural signal: {signal}");
+            }
+        }
+
+        if (companyProfile is not null)
+        {
+            foreach (var principle in companyProfile.GuidingPrinciples)
+            {
+                lines.Add($"- Align with this guiding principle: {principle}");
+            }
+
+            foreach (var signal in companyProfile.CulturalSignals)
+            {
+                if (analysis?.CulturalSignals.Contains(signal, StringComparer.OrdinalIgnoreCase) != true)
+                {
+                    lines.Add($"- Reflect the company cultural signal: {signal}");
+                }
+            }
+
+            foreach (var differentiator in companyProfile.Differentiators)
+            {
+                lines.Add($"- Show awareness of company differentiator: {differentiator}");
+            }
+        }
+
+        return lines.Count > 0
+            ? "Tone and cultural alignment from research:\n" + string.Join("\n", lines)
+            : string.Empty;
+    }
+
     private void SyncFromWorkspace()
     {
         analysis = Workspace.JobPosting;
@@ -1009,6 +1140,7 @@ else if (Workspace.JobPosting is not null)
         }
 
         currentOperation = BusyOperation.RefreshFitReview;
+        StartOperationTimer();
 
         try
         {
@@ -1017,6 +1149,7 @@ else if (Workspace.JobPosting is not null)
         finally
         {
             currentOperation = BusyOperation.None;
+            StopOperationTimer();
         }
     }
 
@@ -1030,6 +1163,7 @@ else if (Workspace.JobPosting is not null)
         }
 
         currentOperation = BusyOperation.RefreshTechnologyGap;
+        StartOperationTimer();
 
         try
         {
@@ -1038,6 +1172,78 @@ else if (Workspace.JobPosting is not null)
         finally
         {
             currentOperation = BusyOperation.None;
+            StopOperationTimer();
+        }
+    }
+
+    private async Task RefreshAllAnalysisAsync()
+    {
+        errorMessage = null;
+        PersistJobSetInputs();
+
+        if (!TryEnsureResearchReadiness())
+        {
+            return;
+        }
+
+        currentOperation = BusyOperation.RefreshAll;
+        StartOperationTimer();
+
+        try
+        {
+            Workspace.MarkLlmWorkStarted();
+
+            if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText)
+            {
+                if (!string.IsNullOrWhiteSpace(jobPostingText))
+                {
+                    if (!await ExecuteJobTextAnalysisAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
+                    {
+                        return;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(companyContextText))
+                {
+                    if (!await ExecuteCompanyContextFromTextAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
+                    {
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                if (TryGetJobUri(out var jobUri))
+                {
+                    if (!await ExecuteJobAnalysisAsync(jobUri, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
+                    {
+                        return;
+                    }
+                }
+
+                if (TryGetCompanyContextUris(out var companyContextUris))
+                {
+                    if (!await ExecuteCompanyContextAsync(companyContextUris, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
+                    {
+                        return;
+                    }
+                }
+            }
+
+            await TryRefreshFitReviewAsync();
+            await TryRefreshTechnologyGapAsync();
+
+            Operations.Success("All analysis refreshed.", "Job, company, fit review, technology gap and evidence are current for this tab.");
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+            Operations.Error("Refresh all failed.", exception.Message);
+        }
+        finally
+        {
+            currentOperation = BusyOperation.None;
+            StopOperationTimer();
         }
     }
 
@@ -1146,6 +1352,13 @@ else if (Workspace.JobPosting is not null)
     {
         Workspace.ClearActiveJobSetEvidenceSelections();
         Operations.Info("Evidence selections cleared.", "The next generation pass will use either refreshed ranking defaults or whatever you select next.");
+        return Task.CompletedTask;
+    }
+
+    private Task SelectAllEvidenceAsync()
+    {
+        Workspace.SelectAllActiveJobSetEvidence();
+        Operations.Info("All evidence selected.", "Every ranked evidence item is now selected for this tab.");
         return Task.CompletedTask;
     }
 
@@ -1320,7 +1533,8 @@ else if (Workspace.JobPosting is not null)
         BuildCompanyContext,
         GenerateDrafts,
         RefreshFitReview,
-        RefreshTechnologyGap
+        RefreshTechnologyGap,
+        RefreshAll
     }
 
     private static string FormatRecommendation(JobFitRecommendation recommendation)

@@ -11,6 +11,8 @@ public sealed class OperationStatusService
 
     public bool IsBusy => busyDepth > 0;
 
+    public DateTimeOffset? BusyStartedAt { get; private set; }
+
     public string CurrentMessage { get; private set; } = "Idle";
 
     public string? CurrentDetail { get; private set; }
@@ -27,15 +29,16 @@ public sealed class OperationStatusService
     public async Task RunAsync(string message, string? detail, Func<Task> action)
     {
         Begin(message, detail);
+        var started = DateTimeOffset.Now;
 
         try
         {
             await action();
-            Success($"Completed: {message}", detail);
+            Success($"Completed: {message}", detail, DateTimeOffset.Now - started);
         }
         catch (Exception exception)
         {
-            Error($"Failed: {message}", exception.Message);
+            Error($"Failed: {message}", exception.Message, DateTimeOffset.Now - started);
             throw;
         }
         finally
@@ -47,16 +50,17 @@ public sealed class OperationStatusService
     public async Task<T> RunAsync<T>(string message, string? detail, Func<Task<T>> action)
     {
         Begin(message, detail);
+        var started = DateTimeOffset.Now;
 
         try
         {
             var result = await action();
-            Success($"Completed: {message}", detail);
+            Success($"Completed: {message}", detail, DateTimeOffset.Now - started);
             return result;
         }
         catch (Exception exception)
         {
-            Error($"Failed: {message}", exception.Message);
+            Error($"Failed: {message}", exception.Message, DateTimeOffset.Now - started);
             throw;
         }
         finally
@@ -73,20 +77,20 @@ public sealed class OperationStatusService
         AddEntry("info", message, detail);
     }
 
-    public void Success(string message, string? detail = null)
+    public void Success(string message, string? detail = null, TimeSpan? duration = null)
     {
         ResetCurrentLlmTelemetry();
         CurrentMessage = message;
         CurrentDetail = detail;
-        AddEntry("success", message, detail);
+        AddEntry("success", message, detail, duration);
     }
 
-    public void Error(string message, string? detail = null)
+    public void Error(string message, string? detail = null, TimeSpan? duration = null)
     {
         ResetCurrentLlmTelemetry();
         CurrentMessage = message;
         CurrentDetail = detail;
-        AddEntry("error", message, detail);
+        AddEntry("error", message, detail, duration);
     }
 
     public void UpdateCurrent(string message, string? detail = null)
@@ -126,6 +130,7 @@ public sealed class OperationStatusService
     {
         ResetCurrentLlmTelemetry();
         busyDepth++;
+        BusyStartedAt ??= DateTimeOffset.Now;
         CurrentMessage = message;
         CurrentDetail = detail;
         AddEntry("busy", message, detail);
@@ -134,6 +139,11 @@ public sealed class OperationStatusService
     private void End()
     {
         busyDepth = Math.Max(0, busyDepth - 1);
+        if (!IsBusy)
+        {
+            BusyStartedAt = null;
+        }
+
         if (!IsBusy && CurrentMessage.StartsWith("Completed:", StringComparison.Ordinal))
         {
             CurrentDetail ??= "Ready for the next step.";
@@ -144,9 +154,9 @@ public sealed class OperationStatusService
 
     private void ResetCurrentLlmTelemetry() => CurrentLlmTelemetry = null;
 
-    private void AddEntry(string level, string message, string? detail)
+    private void AddEntry(string level, string message, string? detail, TimeSpan? duration = null)
     {
-        entries.Insert(0, new OperationStatusEntry(DateTimeOffset.Now, level, message, detail));
+        entries.Insert(0, new OperationStatusEntry(DateTimeOffset.Now, level, message, detail, duration));
 
         if (entries.Count > 14)
         {
@@ -157,7 +167,7 @@ public sealed class OperationStatusService
     }
 }
 
-public sealed record OperationStatusEntry(DateTimeOffset Timestamp, string Level, string Message, string? Detail);
+public sealed record OperationStatusEntry(DateTimeOffset Timestamp, string Level, string Message, string? Detail, TimeSpan? Duration = null);
 
 public sealed record LlmOperationTelemetry(
     DateTimeOffset Timestamp,

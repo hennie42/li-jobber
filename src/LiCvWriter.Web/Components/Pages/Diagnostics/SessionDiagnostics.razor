@@ -1,22 +1,23 @@
 @page "/diagnostics/session"
 @implements IDisposable
 @using LiCvWriter.Infrastructure.LinkedIn
+@using LiCvWriter.Infrastructure.Llm
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
+@inject PromptCapturingLlmClient PromptCapture
 
 <PageTitle>Session Diagnostics</PageTitle>
 
 <section class="page-header">
     <div>
         <div class="eyebrow">Session Diagnostics</div>
-        <h1>Inspect live LLM telemetry for the whole session</h1>
-        <p>This view is global to the current session. The default workflow UI stays minimal, while deeper telemetry and any thinking preview stay here.</p>
+        <h2>Session diagnostics</h2>
+        <p>Inspect LLM telemetry, imported data, and captured prompts for this session.</p>
     </div>
 </section>
 
-<section class="content-grid">
-    <article class="card-panel stack-gap">
-        <div class="field-label">Current telemetry</div>
+<section class="card-panel stack-gap">
+    <div class="field-label">Current telemetry</div>
         @if (GetMostRelevantTelemetry() is { } telemetry)
         {
             <div class="status-chip @(telemetry.Completed ? "status-ok" : "status-pending")">
@@ -58,26 +59,7 @@
         {
             <p class="muted-text">No LLM telemetry has been captured in this session yet.</p>
         }
-    </article>
-
-    <article class="card-panel stack-gap">
-        <div class="field-label">Session context</div>
-        <dl class="key-value-grid compact-grid">
-            <dt>LLM ready</dt>
-            <dd>@(Workspace.IsLlmReady ? "Yes" : "No")</dd>
-            <dt>Session model</dt>
-            <dd>@(string.IsNullOrWhiteSpace(Workspace.SelectedLlmModel) ? "Not selected" : Workspace.SelectedLlmModel)</dd>
-            <dt>Thinking</dt>
-            <dd>@FormatThinkingLevel(Workspace.SelectedThinkingLevel)</dd>
-            <dt>Active tab</dt>
-            <dd>@Workspace.ActiveJobSet.Title</dd>
-            <dt>Target role</dt>
-            <dd>@(Workspace.JobPosting?.RoleTitle ?? "No target role yet")</dd>
-            <dt>Last activity</dt>
-            <dd>@Operations.CurrentMessage</dd>
-        </dl>
-    </article>
-</section>
+    </section>
 
 <section class="card-panel stack-gap">
     <h2>LinkedIn import</h2>
@@ -226,6 +208,27 @@
     }
 </section>
 
+@if (PromptCapture.CapturedPrompts.Count > 0)
+{
+    <section class="card-panel stack-gap">
+        <h2>LLM prompts</h2>
+        <p class="muted-text">Verbatim system and user prompts sent to the LLM for every call in this session, captured by the prompt-capturing decorator.</p>
+
+        @foreach (var prompt in PromptCapture.CapturedPrompts)
+        {
+            <details class="details-card">
+                <summary>@prompt.OperationLabel — @prompt.CapturedAtUtc.ToLocalTime().ToString("HH:mm:ss")</summary>
+                <div class="stack-gap">
+                    <div class="field-label">System prompt</div>
+                    <pre class="response-box">@prompt.SystemPrompt</pre>
+                    <div class="field-label">User prompt</div>
+                    <pre class="response-box">@prompt.UserPrompt</pre>
+                </div>
+            </details>
+        }
+    </section>
+}
+
 @if (GetMostRelevantTelemetry()?.HasThinkingPreview == true)
 {
     <section class="card-panel stack-gap">
@@ -255,7 +258,7 @@
                 {
                     <div class="activity-detail">@entry.Detail</div>
                 }
-                <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")</div>
+                <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")@(entry.Duration is { } d ? $" ({d.Minutes}:{d.Seconds:D2})" : "")</div>
             </article>
         }
     </div>
