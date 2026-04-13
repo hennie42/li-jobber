@@ -6,5 +6,5 @@ public interface ILinkedInExportImporter
 {
     Task<LinkedInExportImportResult> ImportAsync(string exportRootPath, CancellationToken cancellationToken = default);
 
-    Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(string accessToken, CancellationToken cancellationToken = default);
+    Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(string accessToken, Action<string>? onProgress = null, CancellationToken cancellationToken = default);
 }

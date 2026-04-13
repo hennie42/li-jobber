@@ -32,9 +32,12 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SimpleCsvParser>();
 builder.Services.AddSingleton<LinkedInPartialDateParser>();
 builder.Services.AddSingleton<CandidateProfileMergeService>();
+var defaultSelectedEvidenceCount = builder.Configuration.GetValue("Evidence:DefaultSelectedCount", 30);
+
 builder.Services.AddSingleton<CandidateEvidenceService>();
 builder.Services.AddSingleton<JobFitAnalysisService>();
-builder.Services.AddSingleton<EvidenceSelectionService>();
+builder.Services.AddSingleton(provider =>
+    new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>(), defaultSelectedEvidenceCount));
 builder.Services.AddSingleton<WorkspaceRecoveryStore>();
 builder.Services.AddScoped<OperationStatusService>();
 builder.Services.AddScoped<LlmTechnologyGapAnalysisService>();
@@ -46,14 +49,18 @@ builder.Services.AddSingleton<IInsightsDiscoveryPdfImporter, InsightsDiscoveryPd
 builder.Services.AddSingleton<IAuditStore, LocalMarkdownAuditStore>();
 builder.Services.AddSingleton<IDocumentRenderer, MarkdownDocumentRenderer>();
 builder.Services.AddSingleton<IDocumentExportService, LocalDocumentExportService>();
-builder.Services.AddSingleton<IDraftGenerationService, DraftGenerationService>();
+builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
 
 builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
-builder.Services.AddHttpClient<ILlmClient, OllamaClient>(client =>
+builder.Services.AddHttpClient<OllamaClient>(client =>
 {
     client.BaseAddress = NormalizeApiBase(ollamaOptions.BaseUrl);
     client.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
 });
+builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
+    new PromptCapturingLlmClient(provider.GetRequiredService<OllamaClient>()));
+builder.Services.AddScoped<ILlmClient>(provider =>
+    provider.GetRequiredService<PromptCapturingLlmClient>());
 
 builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(client =>
 {

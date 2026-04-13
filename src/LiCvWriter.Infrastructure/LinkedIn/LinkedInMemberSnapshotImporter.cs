@@ -88,6 +88,7 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
     public async Task<LinkedInExportImportResult> ImportAsync(
         string accessToken,
         Func<string, CancellationToken, Task<LinkedInExportImportResult>> importExportAsync,
+        Action<string>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(accessToken))
@@ -103,9 +104,12 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
         try
         {
             var warnings = new List<string>();
-            var domainData = await FetchSnapshotDataAsync(NormalizeAccessToken(accessToken), warnings, cancellationToken);
+            onProgress?.Invoke("Fetching snapshot pages from LinkedIn API");
+            var domainData = await FetchSnapshotDataAsync(NormalizeAccessToken(accessToken), warnings, onProgress, cancellationToken);
+            onProgress?.Invoke("Writing imported domain data");
             WriteMappedCsvFiles(exportRoot, domainData, warnings);
 
+            onProgress?.Invoke("Parsing imported profile data");
             var imported = await importExportAsync(exportRoot, cancellationToken);
             var mergedWarnings = imported.Warnings
                 .Concat(warnings)
@@ -138,6 +142,7 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
     private async Task<Dictionary<string, List<Dictionary<string, string>>>> FetchSnapshotDataAsync(
         string accessToken,
         List<string> warnings,
+        Action<string>? onProgress,
         CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
@@ -198,6 +203,7 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
                 {
                     records = new List<Dictionary<string, string>>();
                     data[domain] = records;
+                    onProgress?.Invoke($"Importing domain: {domain}");
                 }
 
                 foreach (var record in EnumerateSnapshotData(element))

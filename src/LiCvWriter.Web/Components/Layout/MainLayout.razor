@@ -38,41 +38,50 @@
             <div class="field-label">Activity</div>
             <div class="sidebar-metric">@Operations.CurrentMessage</div>
             <div class="status-chip @(Operations.IsBusy ? "status-pending" : "status-ok")">
-                @(Operations.IsBusy ? "App-level work is running." : "App-level status feed only. The UI stays interactive.")
+                @if (Operations.IsBusy)
+                {
+                    <span>Running @GetActivityElapsed()</span>
+                }
+                else
+                {
+                    <span>App-level status feed only. The UI stays interactive.</span>
+                }
             </div>
             @if (!string.IsNullOrWhiteSpace(Operations.CurrentDetail))
             {
                 <div class="sidebar-text">@Operations.CurrentDetail</div>
             }
 
-            @if (Operations.CurrentLlmTelemetry is not null)
+            @{
+                var telemetry = Operations.CurrentLlmTelemetry ?? Operations.LastCompletedLlmTelemetry;
+            }
+            @if (telemetry is not null)
             {
+                <div class="field-label">@(Operations.CurrentLlmTelemetry is not null ? "Live telemetry" : "Last completed")</div>
                 <dl class="key-value-grid compact-grid">
                     <dt>Phase</dt>
-                    <dd>@Operations.CurrentLlmTelemetry.Message</dd>
+                    <dd>@telemetry.Message</dd>
+                    <dt>Model</dt>
+                    <dd>@telemetry.Model</dd>
                     <dt>Elapsed</dt>
-                    <dd>@FormatDuration(Operations.CurrentLlmTelemetry.Elapsed)</dd>
-                    @if (Operations.CurrentLlmTelemetry.PromptTokens is not null)
+                    <dd>@FormatDuration(telemetry.Elapsed)</dd>
+                    @if (telemetry.PromptTokens is not null)
                     {
                         <dt>Prompt</dt>
-                        <dd>@FormatTokenCount(Operations.CurrentLlmTelemetry.PromptTokens)</dd>
+                        <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
                     }
-                    @if (Operations.CurrentLlmTelemetry.CompletionTokens is not null)
+                    @if (telemetry.CompletionTokens is not null)
                     {
                         <dt>Completion</dt>
-                        <dd>@FormatTokenCount(Operations.CurrentLlmTelemetry.CompletionTokens)</dd>
+                        <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
                     }
-                    @if (Operations.CurrentLlmTelemetry.HasEstimatedRemaining)
+                    @if (telemetry.HasEstimatedRemaining)
                     {
                         <dt>ETA</dt>
-                        <dd>@FormatDuration(Operations.CurrentLlmTelemetry.EstimatedRemaining)</dd>
+                        <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
                     }
                 </dl>
             }
-
-            <div class="button-row">
-                <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
-            </div>
 
             <div class="activity-feed">
                 @foreach (var entry in Operations.Entries.Take(6))
@@ -83,7 +92,7 @@
                         {
                             <div class="activity-detail">@entry.Detail</div>
                         }
-                        <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")</div>
+                        <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")@(entry.Duration is { } d ? $" ({d.Minutes}:{d.Seconds:D2})" : "")</div>
                     </article>
                 }
             </div>
@@ -98,6 +107,9 @@
 </div>
 
 @code {
+    private System.Threading.Timer? activityTimer;
+    private bool wasBusy;
+
     protected override void OnInitialized()
     {
         Operations.Changed += HandleChanged;
@@ -106,8 +118,30 @@
 
     public void Dispose()
     {
+        activityTimer?.Dispose();
         Operations.Changed -= HandleChanged;
         Workspace.Changed -= HandleChanged;
+    }
+
+    private string GetActivityElapsed()
+        => Operations.BusyStartedAt is { } started
+            ? FormatDuration(DateTimeOffset.Now - started)
+            : string.Empty;
+
+    private void SyncActivityTimer()
+    {
+        if (Operations.IsBusy && !wasBusy)
+        {
+            activityTimer?.Dispose();
+            activityTimer = new System.Threading.Timer(_ => _ = InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+            wasBusy = true;
+        }
+        else if (!Operations.IsBusy && wasBusy)
+        {
+            activityTimer?.Dispose();
+            activityTimer = null;
+            wasBusy = false;
+        }
     }
 
     private static string FormatThinkingLevel(string value)
@@ -157,6 +191,10 @@
     private static string FormatTokenCount(long? tokens)
         => tokens?.ToString("N0") ?? "Pending";
 
-    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+    private void HandleChanged()
+    {
+        SyncActivityTimer();
+        _ = InvokeAsync(StateHasChanged);
+    }
 }
 

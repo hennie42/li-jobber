@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
@@ -28,7 +29,8 @@ public sealed class DraftGenerationService(
 
         foreach (var kind in request.DocumentKinds.Distinct())
         {
-            var systemPrompt = GetSystemPrompt(kind, outputLanguage);
+            var documentStopwatch = Stopwatch.StartNew();
+            var systemPrompt = GetSystemPrompt(kind, outputLanguage, request.JobPosting);
             var userPrompt = BuildUserPrompt(kind, request);
 
             var response = await llmClient.GenerateAsync(new LlmRequest(
@@ -102,6 +104,17 @@ public sealed class DraftGenerationService(
                     ["Duration"] = response.Duration?.ToString() ?? string.Empty,
                     ["MarkdownPath"] = export?.MarkdownPath ?? string.Empty
                 }), cancellationToken);
+
+            documentStopwatch.Stop();
+            progress?.Invoke(new LlmProgressUpdate(
+                $"Completed {kind}",
+                $"{kind} finished in {FormatDuration(documentStopwatch.Elapsed)} (LLM: {FormatDuration(response.Duration)}).",
+                response.Model,
+                documentStopwatch.Elapsed,
+                Completed: true,
+                PromptTokens: response.PromptTokens,
+                CompletionTokens: response.CompletionTokens,
+                EstimatedRemaining: TimeSpan.Zero));
         }
 
         return new DraftGenerationResult(documents, exports);
@@ -129,26 +142,37 @@ public sealed class DraftGenerationService(
             : value.ToString(@"s\.f\s");
     }
 
-    private static string GetSystemPrompt(DocumentKind kind, OutputLanguage outputLanguage)
-        => outputLanguage switch
+    private static string GetSystemPrompt(DocumentKind kind, OutputLanguage outputLanguage, JobPostingAnalysis jobPosting)
+    {
+        var role = jobPosting.RoleTitle;
+        var company = jobPosting.CompanyName;
+        var danishNameRule = " Keep technology names, company names, quoted job phrases, and file names in their original or English form.";
+
+        return (outputLanguage, kind) switch
         {
-            OutputLanguage.Danish => kind switch
-            {
-                DocumentKind.Cv => "You write concise Danish consulting CVs grounded strictly in supplied evidence. Keep technology names, company names, quoted job phrases, and file names in their original or English form. Emphasize impact, architecture judgment, trusted client advisory work, practical AI use, and maintainable engineering.",
-                DocumentKind.CoverLetter => "You write direct Danish cover letters for senior consulting roles using only supplied evidence. Keep technology names, company names, and quoted job phrases in their original or English form. Keep the tone credible, practical, and specific.",
-                DocumentKind.ProfileSummary => "You write short Danish profile summaries for experienced consultants using only supplied evidence. Keep technology names and company names in their original or English form.",
-                DocumentKind.InterviewNotes => "You prepare Danish interview notes grounded in supplied evidence. Keep technology names, company names, and quoted job phrases in their original or English form.",
-                _ => "You write high quality Danish application material using only supplied evidence while preserving technology names, company names, and quoted job phrases in their original or English form."
-            },
-            _ => kind switch
-            {
-                DocumentKind.Cv => "You write concise English consulting CVs grounded strictly in supplied evidence. Emphasize impact, architecture judgment, trusted client advisory work, AI pragmatism, and maintainable engineering. Use clear headings and compact bullet points when useful.",
-                DocumentKind.CoverLetter => "You write direct English cover letters for senior consulting roles using only supplied evidence. Keep the tone credible, practical, and specific to the target employer and role.",
-                DocumentKind.ProfileSummary => "You write short English profile summaries for experienced consultants using only supplied evidence. Keep them crisp, concrete, and senior without hype.",
-                DocumentKind.InterviewNotes => "You prepare English interview notes grounded in supplied evidence. Focus on likely themes, proof points, and talking angles tied to the job and company context.",
-                _ => "You write high quality English application material using only supplied evidence."
-            }
+            (OutputLanguage.Danish, DocumentKind.Cv) =>
+                $"You write concise Danish CVs for a {role} position at {company}, grounded strictly in supplied evidence.{danishNameRule} Emphasize impact, technical judgment, and concrete achievements.",
+            (OutputLanguage.Danish, DocumentKind.CoverLetter) =>
+                $"You write direct Danish cover letters for a {role} position at {company}, using only supplied evidence.{danishNameRule} Keep the tone credible, practical, and specific to the target employer and role.",
+            (OutputLanguage.Danish, DocumentKind.ProfileSummary) =>
+                $"You write short Danish profile summaries tailored toward a {role} position at {company}, using only supplied evidence.{danishNameRule}",
+            (OutputLanguage.Danish, DocumentKind.InterviewNotes) =>
+                $"You prepare Danish interview notes for a {role} position at {company}, grounded in supplied evidence.{danishNameRule}",
+            (OutputLanguage.Danish, _) =>
+                $"You write high quality Danish application material for a {role} position at {company}, using only supplied evidence.{danishNameRule}",
+
+            (_, DocumentKind.Cv) =>
+                $"You write concise English CVs for a {role} position at {company}, grounded strictly in supplied evidence. Emphasize impact, technical judgment, and concrete achievements. Use clear headings and compact bullet points when useful.",
+            (_, DocumentKind.CoverLetter) =>
+                $"You write direct English cover letters for a {role} position at {company}, using only supplied evidence. Keep the tone credible, practical, and specific to the target employer and role.",
+            (_, DocumentKind.ProfileSummary) =>
+                $"You write short English profile summaries tailored toward a {role} position at {company}, using only supplied evidence. Keep them crisp, concrete, and senior without hype.",
+            (_, DocumentKind.InterviewNotes) =>
+                $"You prepare English interview notes for a {role} position at {company}, grounded in supplied evidence. Focus on likely themes, proof points, and talking angles tied to the job and company context.",
+            _ =>
+                $"You write high quality English application material for a {role} position at {company}, using only supplied evidence."
         };
+    }
 
     private static string BuildUserPrompt(DocumentKind kind, DraftGenerationRequest request)
     {
@@ -179,11 +203,15 @@ Hard constraints:
 - Do not claim experience with a technology unless it appears in the candidate evidence.
 - Keep technology names, company names, and quoted job phrases in their original form.
 - Do not mention gaps, weaknesses, missing skills, or any negative traits of the applicant.
+- Do not include fit scores, fit percentages, gap lists, or internal assessment data in the output.
+- Use the job themes, technology context, and fit review below only to guide emphasis and framing—never surface them directly.
 
 Target role:
 - Role title: {request.JobPosting.RoleTitle}
 - Company: {request.JobPosting.CompanyName}
 - Job summary: {request.JobPosting.Summary}
+- Must-have themes: {FormatThemes(request.JobPosting.MustHaveThemes)}
+- Nice-to-have themes: {FormatThemes(request.JobPosting.NiceToHaveThemes)}
 
 Job fit review:
 {fitSummary}
@@ -209,6 +237,9 @@ Applicant differentiators:
 Selected evidence for this role:
 {selectedEvidence}
 
+Technology context:
+{BuildTechnologyContext(request.TechnologyGapAssessment)}
+
 Selected recommendations:
 {recommendations}
 
@@ -218,7 +249,7 @@ Additional instructions:
 Requirements:
 - Write in {languageLabel}.
 - Make the content concrete and evidence-based.
-- Reflect strong consulting values when relevant: trust, craftsmanship, knowledge sharing, pragmatic AI use, and client-facing technical leadership.
+- Match the tone and focus to the target role and company context.
 - Avoid generic buzzword-heavy wording.
 - If evidence is thin, keep sections compact and factual.
 - Do not add placeholder claims or inferred achievements.
@@ -233,10 +264,37 @@ Requirements:
             return "- No structured fit review is available for this job yet.";
         }
 
-        var lines = new List<string>();
+        var lines = new List<string>
+        {
+            $"- Overall fit score: {assessment.OverallScore}/100 ({assessment.Recommendation})"
+        };
 
-        lines.AddRange(assessment.Strengths.Take(3).Select(static strength => $"- Strength: {strength}"));
-        return lines.Count > 0 ? string.Join(Environment.NewLine, lines) : "- No key strengths identified yet.";
+        lines.AddRange(assessment.Strengths.Take(4).Select(static strength => $"- Strength: {strength}"));
+        lines.AddRange(assessment.Gaps.Take(3).Select(static gap => $"- Gap to frame around: {gap}"));
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatThemes(IReadOnlyList<string> themes)
+        => themes.Count > 0 ? string.Join(", ", themes) : "none identified";
+
+    private static string BuildTechnologyContext(TechnologyGapAssessment? assessment)
+    {
+        if (assessment is null || !assessment.HasSignals)
+        {
+            return "- No technology gap analysis is available.";
+        }
+
+        var lines = new List<string>
+        {
+            $"- Key technologies the role emphasizes: {string.Join(", ", assessment.DetectedTechnologies)}"
+        };
+
+        if (assessment.HasGaps)
+        {
+            lines.Add($"- Technologies to avoid over-claiming (thin evidence): {string.Join(", ", assessment.PossiblyUnderrepresentedTechnologies)}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string FormatLines(IReadOnlyList<string>? lines, string fallback)

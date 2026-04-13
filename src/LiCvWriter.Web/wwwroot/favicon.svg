@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#122040"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Board background -->
+  <rect width="64" height="64" rx="8" fill="url(#bg)"/>
+
+  <!-- Circuit traces -->
+  <g stroke="#1a5c3a" stroke-width="0.7" fill="none" opacity="0.6">
+    <!-- Horizontal traces -->
+    <line x1="0" y1="8" x2="18" y2="8"/>
+    <line x1="46" y1="8" x2="64" y2="8"/>
+    <line x1="0" y1="56" x2="14" y2="56"/>
+    <line x1="50" y1="56" x2="64" y2="56"/>
+    <line x1="0" y1="32" x2="6" y2="32"/>
+    <line x1="58" y1="32" x2="64" y2="32"/>
+    <!-- Vertical traces -->
+    <line x1="8" y1="0" x2="8" y2="12"/>
+    <line x1="56" y1="0" x2="56" y2="12"/>
+    <line x1="8" y1="52" x2="8" y2="64"/>
+    <line x1="56" y1="52" x2="56" y2="64"/>
+    <!-- Diagonal traces -->
+    <line x1="18" y1="8" x2="22" y2="14"/>
+    <line x1="46" y1="8" x2="42" y2="14"/>
+    <line x1="14" y1="56" x2="20" y2="50"/>
+    <line x1="50" y1="56" x2="44" y2="50"/>
+    <!-- Inner frame traces -->
+    <line x1="6" y1="32" x2="12" y2="20"/>
+    <line x1="58" y1="32" x2="52" y2="20"/>
+    <line x1="12" y1="44" x2="6" y2="32"/>
+    <line x1="52" y1="44" x2="58" y2="32"/>
+  </g>
+
+  <!-- Solder pads / nodes -->
+  <g fill="#2ecc71" opacity="0.7">
+    <circle cx="8" cy="8" r="1.8"/>
+    <circle cx="56" cy="8" r="1.8"/>
+    <circle cx="8" cy="56" r="1.8"/>
+    <circle cx="56" cy="56" r="1.8"/>
+    <circle cx="6" cy="32" r="1.4"/>
+    <circle cx="58" cy="32" r="1.4"/>
+    <circle cx="32" cy="4" r="1"/>
+    <circle cx="32" cy="60" r="1"/>
+  </g>
+
+  <!-- Glowing pads -->
+  <g fill="#3dff8a" opacity="0.35">
+    <circle cx="8" cy="8" r="3.5"/>
+    <circle cx="56" cy="8" r="3.5"/>
+    <circle cx="8" cy="56" r="3.5"/>
+    <circle cx="56" cy="56" r="3.5"/>
+  </g>
+
+  <!-- Small vias -->
+  <g fill="none" stroke="#2ecc71" stroke-width="0.5" opacity="0.4">
+    <circle cx="16" cy="16" r="2"/>
+    <circle cx="48" cy="16" r="2"/>
+    <circle cx="16" cy="48" r="2"/>
+    <circle cx="48" cy="48" r="2"/>
+    <circle cx="32" cy="14" r="1.5"/>
+    <circle cx="32" cy="50" r="1.5"/>
+  </g>
+
+  <!-- Center chip outline -->
+  <rect x="14" y="18" width="36" height="28" rx="3" fill="#0d1f35" stroke="#1a5c3a" stroke-width="0.8"/>
+
+  <!-- Chip pin traces -->
+  <g stroke="#1a5c3a" stroke-width="0.6" opacity="0.5">
+    <line x1="14" y1="24" x2="10" y2="24"/>
+    <line x1="14" y1="28" x2="10" y2="28"/>
+    <line x1="14" y1="36" x2="10" y2="36"/>
+    <line x1="14" y1="40" x2="10" y2="40"/>
+    <line x1="50" y1="24" x2="54" y2="24"/>
+    <line x1="50" y1="28" x2="54" y2="28"/>
+    <line x1="50" y1="36" x2="54" y2="36"/>
+    <line x1="50" y1="40" x2="54" y2="40"/>
+    <line x1="22" y1="18" x2="22" y2="14"/>
+    <line x1="32" y1="18" x2="32" y2="14"/>
+    <line x1="42" y1="18" x2="42" y2="14"/>
+    <line x1="22" y1="46" x2="22" y2="50"/>
+    <line x1="32" y1="46" x2="32" y2="50"/>
+    <line x1="42" y1="46" x2="42" y2="50"/>
+  </g>
+
+  <!-- Text: Alex -->
+  <text x="32" y="30" text-anchor="middle" font-family="'IBM Plex Mono','Consolas',monospace" font-size="9" font-weight="700" fill="#3dff8a" letter-spacing="0.5">Alex</text>
+
+  <!-- Text: 101010 -->
+  <text x="32" y="42" text-anchor="middle" font-family="'IBM Plex Mono','Consolas',monospace" font-size="9" font-weight="400" fill="#2ecc71" letter-spacing="1.5" opacity="0.85">101010</text>
+</svg>

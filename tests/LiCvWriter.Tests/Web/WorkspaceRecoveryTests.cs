@@ -38,7 +38,7 @@ public sealed class WorkspaceRecoveryTests
             Assert.Equal(OutputLanguage.Danish, restoredSession.ActiveJobSet.OutputLanguage);
             Assert.Equal(JobSetProgressState.Done, restoredSession.ActiveJobSet.ProgressState);
             Assert.Single(restoredSession.ActiveJobSet.Exports);
-            Assert.Empty(restoredSession.ActiveJobSet.GeneratedDocuments);
+            Assert.Single(restoredSession.ActiveJobSet.GeneratedDocuments);
         }
         finally
         {
