@@ -10,6 +10,29 @@ public sealed class JobFitWorkspaceRefreshService(
     public bool RefreshActiveJobSet()
         => RefreshJobSet(workspace.ActiveJobSetId);
 
+    /// <summary>
+    /// Re-runs evidence selection for the active job set using its current fit assessment.
+    /// Call after the LLM enhancement pass has updated the fit assessment in-place.
+    /// </summary>
+    public void RefreshActiveJobSetEvidence()
+    {
+        var candidateProfile = workspace.CandidateProfile;
+        var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == workspace.ActiveJobSetId);
+        if (candidateProfile is null || jobSet?.JobPosting is null || jobSet.JobFitAssessment is null)
+        {
+            return;
+        }
+
+        var evidenceSelection = evidenceSelectionService.Build(
+            candidateProfile,
+            jobSet.JobPosting,
+            jobSet.CompanyProfile,
+            jobSet.JobFitAssessment,
+            workspace.ApplicantDifferentiatorProfile);
+
+        workspace.SetJobSetEvidenceSelection(workspace.ActiveJobSetId, evidenceSelection);
+    }
+
     public int RefreshAllJobSets()
     {
         var refreshed = 0;

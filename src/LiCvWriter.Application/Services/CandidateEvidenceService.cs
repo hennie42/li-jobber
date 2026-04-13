@@ -72,16 +72,6 @@ public sealed class CandidateEvidenceService
                 certification.Period.DisplayValue));
         }
 
-        foreach (var skill in candidateProfile.Skills)
-        {
-            evidence.Add(new CandidateEvidenceItem(
-                $"skill:{NormalizeId(skill.Name)}",
-                CandidateEvidenceType.Skill,
-                skill.Name,
-                skill.Name,
-                BuildTags(skill.Name, skill.Name)));
-        }
-
         foreach (var pair in candidateProfile.ManualSignals)
         {
             if (string.IsNullOrWhiteSpace(pair.Value))

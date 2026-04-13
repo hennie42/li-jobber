@@ -252,6 +252,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
+    public void UpdateCandidateProfile(CandidateProfile updatedProfile)
+    {
+        CandidateProfile = updatedProfile;
+
+        if (ImportResult is not null)
+        {
+            ImportResult = ImportResult with { Profile = updatedProfile };
+        }
+
+        NotifyChanged();
+    }
+
     public void SetApplicantDifferentiatorProfile(ApplicantDifferentiatorProfile differentiatorProfile)
     {
         ApplicantDifferentiatorProfile = differentiatorProfile;

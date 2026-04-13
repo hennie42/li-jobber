@@ -33,6 +33,9 @@ public sealed record JobRequirementAssessment(
     string? SourceSnippet = null,
     int? SourceConfidence = null)
 {
+    /// <summary>Whether this requirement assessment was upgraded by the LLM enhancement pass.</summary>
+    public bool IsLlmEnhanced { get; init; }
+
     public bool HasSourceContext => !string.IsNullOrWhiteSpace(SourceLabel) || !string.IsNullOrWhiteSpace(SourceSnippet) || SourceConfidence is not null;
 }
 
@@ -43,6 +46,9 @@ public sealed record JobFitAssessment(
     IReadOnlyList<string> Strengths,
     IReadOnlyList<string> Gaps)
 {
+    /// <summary>Whether this assessment includes results from the LLM enhancement pass.</summary>
+    public bool IsLlmEnhanced { get; init; }
+
     public static JobFitAssessment Empty { get; } = new(
         0,
         JobFitRecommendation.InsufficientData,

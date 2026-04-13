@@ -41,6 +41,7 @@ builder.Services.AddSingleton(provider =>
 builder.Services.AddSingleton<WorkspaceRecoveryStore>();
 builder.Services.AddScoped<OperationStatusService>();
 builder.Services.AddScoped<LlmTechnologyGapAnalysisService>();
+builder.Services.AddScoped<LlmFitEnhancementService>();
 builder.Services.AddScoped<InsightsDiscoveryApplicantDifferentiatorDraftingService>();
 builder.Services.AddScoped<WorkspaceSession>();
 builder.Services.AddScoped<JobFitWorkspaceRefreshService>();
