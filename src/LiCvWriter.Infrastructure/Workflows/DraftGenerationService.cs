@@ -54,7 +54,8 @@ public sealed class DraftGenerationService(
                 outputLanguage,
                 request.JobFitAssessment,
                 request.ApplicantDifferentiatorProfile,
-                request.EvidenceSelection), cancellationToken);
+                request.EvidenceSelection,
+                request.TechnologyGapAssessment), cancellationToken);
 
             var document = (string.IsNullOrWhiteSpace(request.ExportFolder)
                 ? renderedDocument
@@ -154,7 +155,7 @@ public sealed class DraftGenerationService(
         var focus = kind switch
         {
             DocumentKind.Cv =>
-                $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements.",
+                $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements. Weave as many of the job's key technologies and themes into the professional profile as truthfully possible. If any recommendation text is not in {lang}, translate it to {lang} and append '(translated from <original language>)' after the translated text.",
             DocumentKind.CoverLetter =>
                 $"Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule} Keep the tone credible, practical, and specific to the target employer and role.",
             DocumentKind.ProfileSummary =>
@@ -179,7 +180,11 @@ public sealed class DraftGenerationService(
             : string.Empty;
         var experience = string.Join(Environment.NewLine, experienceEntries.Select(FormatExperience)) + experienceTruncationNote;
         var certifications = string.Join(", ", candidate.Certifications.Select(static cert => cert.Name));
-        var recommendations = string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Take(3).Select(static recommendation =>
+        var projects = candidate.Projects.Count > 0
+            ? string.Join(Environment.NewLine, candidate.Projects.Select(static project =>
+                $"- {project.Title} ({project.Period.DisplayValue}). {project.Description}"))
+            : "none";
+        var recommendations = string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Select(static recommendation =>
             $"Recommendation from {recommendation.Author.FullName}{FormatOptional($" at {recommendation.Company}")}: {recommendation.Text}"));
         var fitSummary = BuildFitSummary(request.JobFitAssessment);
         var differentiators = FormatLines(request.ApplicantDifferentiatorProfile?.ToSummaryLines(), "- No applicant differentiator profile is stored for this session.");
@@ -210,6 +215,9 @@ Certifications: {certifications}
 
 Experience:
 {experience}
+
+Projects:
+{projects}
 
 Company context:
 {request.CompanyContext}

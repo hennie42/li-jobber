@@ -1,0 +1,186 @@
+using LiCvWriter.Application.Models;
+using LiCvWriter.Core.Documents;
+using LiCvWriter.Core.Jobs;
+using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.Documents;
+
+namespace LiCvWriter.Tests.Infrastructure;
+
+public sealed class MarkdownDocumentRendererTests
+{
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesProfileOverviewSection()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(generatedBody: "Cloud-native architect with deep Azure experience.");
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("## Professional Profile", result.Markdown);
+        Assert.Contains("Cloud-native architect with deep Azure experience.", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesExperienceSection()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("## Professional Experience", result.Markdown);
+        Assert.Contains("### Lead Architect | Contoso", result.Markdown);
+        Assert.Contains("### Senior Developer | Fabrikam", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesProjectsSection()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("## Projects", result.Markdown);
+        Assert.Contains("### Cloud Migration Portal", result.Markdown);
+        Assert.Contains("Built a self-service migration portal.", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesAllRecommendations()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("## Recommendations", result.Markdown);
+        Assert.Contains("**Jane Smith**", result.Markdown);
+        Assert.Contains("**Lars Nielsen**", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_AnnotatesDanishRecommendationForEnglishOutput()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.English);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("(translated from Danish)", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_AnnotatesEnglishRecommendationForDanishOutput()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.Danish);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("(translated from English)", result.Markdown);
+    }
+
+    [Fact]
+    public void DetectDanish_ReturnsTrueForDanishText()
+    {
+        var danishText = "Han har altid været en dygtig og pålidelig kollega som er med til at løfte teamet og har stor erfaring med softwareudvikling.";
+
+        Assert.True(MarkdownDocumentRenderer.DetectDanish(danishText));
+    }
+
+    [Fact]
+    public void DetectDanish_ReturnsFalseForEnglishText()
+    {
+        var englishText = "An exceptional architect who consistently delivers impactful solutions with strong technical leadership and clear communication.";
+
+        Assert.False(MarkdownDocumentRenderer.DetectDanish(englishText));
+    }
+
+    [Fact]
+    public void DetectDanish_ReturnsFalseForShortText()
+    {
+        Assert.False(MarkdownDocumentRenderer.DetectDanish("Hej"));
+    }
+
+    [Fact]
+    public void GetTranslationAnnotation_ReturnsEmptyWhenLanguagesMatch()
+    {
+        var annotation = MarkdownDocumentRenderer.GetTranslationAnnotation(
+            "An exceptional architect who delivers great results.", OutputLanguage.English);
+
+        Assert.Equal(string.Empty, annotation);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesKeywordLine()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            mustHaveThemes: ["Azure", "Kubernetes"],
+            evidenceTags: ["Azure", "Kubernetes", "Docker"]);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("Key Technologies & Competencies", result.Markdown);
+        Assert.Contains("Azure", result.Markdown);
+        Assert.Contains("Kubernetes", result.Markdown);
+    }
+
+    private static DocumentRenderRequest BuildCvRequest(
+        string? generatedBody = "Experienced cloud architect.",
+        OutputLanguage outputLanguage = OutputLanguage.English,
+        IReadOnlyList<string>? mustHaveThemes = null,
+        IReadOnlyList<string>? evidenceTags = null)
+    {
+        var candidate = new CandidateProfile
+        {
+            Name = new PersonName("Alex", "Taylor"),
+            Headline = "Senior Cloud Architect",
+            Experience =
+            [
+                new ExperienceEntry("Contoso", "Lead Architect", "Led cloud migration.", "Seattle", new DateRange()),
+                new ExperienceEntry("Fabrikam", "Senior Developer", "Built microservices.", "London", new DateRange())
+            ],
+            Projects =
+            [
+                new ProjectEntry("Cloud Migration Portal", "Built a self-service migration portal.", null, new DateRange())
+            ],
+            Recommendations =
+            [
+                new RecommendationEntry(
+                    new PersonName("Jane", "Smith"), "Contoso", "CTO",
+                    "An exceptional architect who consistently delivers impactful solutions with strong technical leadership.", "VISIBLE"),
+                new RecommendationEntry(
+                    new PersonName("Lars", "Nielsen"), "Fabrikam", "Director",
+                    "Han har altid været en dygtig og pålidelig kollega som er med til at løfte teamet og har stor erfaring med softwareudvikling.", "VISIBLE")
+            ]
+        };
+
+        var jobPosting = new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Cloud Architect",
+            CompanyName = "Northwind Traders",
+            Summary = "Lead our cloud platform.",
+            MustHaveThemes = mustHaveThemes ?? Array.Empty<string>(),
+            NiceToHaveThemes = Array.Empty<string>()
+        };
+
+        var tags = evidenceTags ?? Array.Empty<string>();
+        var evidence = tags.Count > 0
+            ? new EvidenceSelectionResult([
+                new RankedEvidenceItem(
+                    new CandidateEvidenceItem("exp-1", CandidateEvidenceType.Experience, "Lead Architect @ Contoso", "Led cloud migration.", tags),
+                    50, ["Supports role"], true)])
+            : EvidenceSelectionResult.Empty;
+
+        return new DocumentRenderRequest(
+            DocumentKind.Cv,
+            candidate,
+            jobPosting,
+            null,
+            generatedBody,
+            outputLanguage,
+            EvidenceSelection: evidence);
+    }
+}
