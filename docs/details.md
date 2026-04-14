@@ -75,30 +75,30 @@ The three pages share `WorkspaceSession` for state and `OperationStatusService` 
 
 | Record | Fields |
 | --- | --- |
-| `CandidateProfile` | Name, Headline, Summary, Location, Industry, Experience, Education, Skills, Certifications, Projects, Recommendations, ManualSignals |
-| `ExperienceEntry` | Title, CompanyName, Description, Period, Location |
-| `ProjectEntry` | Title, Description, Period, Url |
-| `RecommendationEntry` | Author (PersonName), Company, JobTitle, Text |
-| `CertificationEntry` | Name, Authority, Period |
-| `EducationEntry` | School, Degree, FieldOfStudy, Period |
-| `ApplicantDifferentiatorProfile` | WorkStyle, Communication, Leadership, Stakeholders, Motivators, TargetNarrative, Watchouts, SupportingProofPoints |
-| `EvidenceSelectionResult` | RankedEvidence, SelectedEvidence, SelectedEvidenceIds |
+| `CandidateProfile` | Name, Headline, Summary, Location, Industry, PublicProfileUrl, PrimaryEmail, Experience, Education, Skills, Certifications, Projects, Recommendations, ManualSignals |
+| `ExperienceEntry` | CompanyName, Title, Description, Location, Period, Highlights |
+| `ProjectEntry` | Title, Description, Url, Period |
+| `RecommendationEntry` | Author (PersonName), Company, JobTitle, Text, VisibilityStatus, CreatedOn |
+| `CertificationEntry` | Name, Authority, Url, Period, LicenseNumber |
+| `EducationEntry` | SchoolName, DegreeName, Notes, Activities, Period |
+| `ApplicantDifferentiatorProfile` | WorkStyle, CommunicationStyle, LeadershipStyle, StakeholderStyle, Motivators, TargetNarrative, Watchouts, AboutApplicantBasis |
+| `EvidenceSelectionResult` | RankedEvidence, SelectedEvidence |
 
 ### Core/Jobs
 
 | Record | Fields |
 | --- | --- |
-| `JobPostingAnalysis` | RoleTitle, CompanyName, Summary, MustHaveThemes, NiceToHaveThemes, Requirements, Responsibilities |
-| `CompanyResearchProfile` | CompanyName, Industry, Summary, Signals |
-| `JobFitAssessment` | OverallScore, Recommendation, Strengths, Gaps, RequirementMatches, HasSignals |
-| `TechnologyGapAssessment` | DetectedTechnologies, PossiblyUnderrepresentedTechnologies, HasSignals, HasGaps |
+| `JobPostingAnalysis` | SourceUrl, RoleTitle, CompanyName, Summary, MustHaveThemes, NiceToHaveThemes, CulturalSignals, Signals |
+| `CompanyResearchProfile` | Name, Summary, SourceUrls, GuidingPrinciples, CulturalSignals, Differentiators, Signals |
+| `JobFitAssessment` | OverallScore, Recommendation, Requirements, Strengths, Gaps |
+| `TechnologyGapAssessment` | DetectedTechnologies, PossiblyUnderrepresentedTechnologies |
 
 ### Core/Documents
 
 | Record | Fields |
 | --- | --- |
 | `DocumentKind` | Cv, CoverLetter, ProfileSummary, InterviewNotes |
-| `GeneratedDocument` | Kind, Title, Markdown, Body, GeneratedAtUtc, OutputPath, LlmDuration, PromptTokens, CompletionTokens, Model |
+| `GeneratedDocument` | Kind, Title, Markdown, PlainText, GeneratedAtUtc, OutputPath, LlmDuration, PromptTokens, CompletionTokens, Model |
 
 ---
 
@@ -255,7 +255,7 @@ Implemented in [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Works
 
 ### Per-Tab State
 
-Each job tab owns: target job URL, company-context URLs, parsed `JobPostingAnalysis`, `CompanyResearchProfile`, `JobFitAssessment`, `EvidenceSelectionResult`, `TechnologyGapAssessment`, output language, generated documents, and exported file paths (.md and .docx).
+See [State Ownership](#state-ownership) for the full field list per job tab (`JobSetSessionState`).
 
 ### End-to-End Pipeline
 
@@ -530,7 +530,7 @@ The diagnostics page carries verbose operational detail: live LLM progress, toke
 | Ollama verification | `ILlmClient.VerifyModelAvailabilityAsync()` | No | Checks service reachability |
 | Job parsing | `HttpJobResearchService.AnalyzeAsync()` | Yes | LLM structured parsing |
 | Company parsing | `HttpJobResearchService.BuildCompanyProfileAsync()` | Yes | LLM structured parsing |
-| Insights PDF drafting | `InsightsDiscoveryDraftingService.DraftAsync()` | Yes | LLM extraction + field drafting |
+| Insights PDF drafting | `InsightsDiscoveryApplicantDifferentiatorDraftingService.DraftAsync()` | Yes | LLM extraction + field drafting |
 | Fit review | `JobFitAnalysisService.Analyze()` | No | Deterministic once context exists |
 | Evidence ranking | `EvidenceSelectionService.Build()` | No | Deterministic once context exists |
 | Technology gap | `LlmTechnologyGapAnalysisService.AnalyzeAsync()` | Yes (primary) | Deterministic fallback in analyzer layer |
@@ -558,21 +558,4 @@ The diagnostics page carries verbose operational detail: live LLM progress, toke
 
 ---
 
-## Cross-References
-
-| File | Role |
-| --- | --- |
-| [README.md](../README.md) | User-facing overview |
-| [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor) | Start / Setup |
-| [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor) | Job Workbench |
-| [WorkspaceSession.cs](../src/LiCvWriter.Web/Services/WorkspaceSession.cs) | Session state |
-| [LinkedInMemberSnapshotImporter.cs](../src/LiCvWriter.Infrastructure/LinkedIn/LinkedInMemberSnapshotImporter.cs) | DMA import |
-| [LinkedInExportImporter.cs](../src/LiCvWriter.Infrastructure/LinkedIn/LinkedInExportImporter.cs) | CSV → profile mapping |
-| [JobFitAnalysisService.cs](../src/LiCvWriter.Application/Services/JobFitAnalysisService.cs) | Fit scoring |
-| [EvidenceSelectionService.cs](../src/LiCvWriter.Application/Services/EvidenceSelectionService.cs) | Evidence ranking |
-| [CandidateEvidenceService.cs](../src/LiCvWriter.Application/Services/CandidateEvidenceService.cs) | Evidence cataloguing |
-| [DraftGenerationService.cs](../src/LiCvWriter.Infrastructure/Workflows/DraftGenerationService.cs) | Generation orchestration |
-| [MarkdownDocumentRenderer.cs](../src/LiCvWriter.Infrastructure/Documents/MarkdownDocumentRenderer.cs) | Markdown rendering |
-| [LocalDocumentExportService.cs](../src/LiCvWriter.Infrastructure/Documents/LocalDocumentExportService.cs) | .md + .docx export |
-| [SessionDiagnostics.razor](../src/LiCvWriter.Web/Components/Pages/Diagnostics/SessionDiagnostics.razor) | Diagnostics |
-| [Verify-GitHubPushSafety.ps1](../scripts/Verify-GitHubPushSafety.ps1) | Pre-push safety check |
+For the primary files index, see [§1 Primary Files](#primary-files).
