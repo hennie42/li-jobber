@@ -511,11 +511,15 @@ else if (CanRunFitReview)
 @if (Workspace.Exports.Count > 0)
 {
     <details class="card-panel stack-gap" open>
-        <summary><h3>Exported markdown files</h3></summary>
+        <summary><h3>Exported files</h3></summary>
         <ul class="feature-list">
             @foreach (var export in Workspace.Exports)
             {
                 <li>@export.Kind: @export.MarkdownPath</li>
+                @if (!string.IsNullOrWhiteSpace(export.WordPath))
+                {
+                    <li>@export.Kind (Word): @export.WordPath</li>
+                }
             }
         </ul>
     </details>
