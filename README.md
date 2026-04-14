@@ -19,9 +19,8 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 | LLM inference | Ollama (local, `http://localhost:11434`) |
 | Architecture | Domain-Driven Design — Core → Application → Infrastructure → Web |
 | Profile import | LinkedIn DMA Portability API (`r_dma_portability_self_serve`) |
-| Word export | OpenXml SDK + HtmlToOpenXml + Markdig (Markdown → HTML → DOCX) |
-| Document styling | Built-in Word heading styles, Calibri, single-column ATS layout |
-| Testing | xUnit, 125+ tests |
+| Word export | OpenXml SDK + HtmlToOpenXml + Markdig — built-in heading styles, Calibri, single-column ATS layout |
+| Testing | xUnit |
 
 ## Key Features
 
