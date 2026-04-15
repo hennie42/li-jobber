@@ -111,9 +111,12 @@ public sealed class OllamaClientTests
         Assert.Equal(TimeSpan.FromSeconds(2), result.Duration);
         Assert.NotEmpty(progress);
         Assert.Contains(progress, update => update.Message == "Waiting for Ollama response");
+        Assert.Contains(progress, update => update.ResponseContent == "Hel");
         Assert.Contains(progress, update => update.PromptTokens == 12 && update.CompletionTokens == 34);
         Assert.Contains(progress, update => update.ThinkingPreview is not null && update.ThinkingPreview.Contains("Reasoning about", StringComparison.Ordinal));
+        Assert.Contains(progress, update => update.ThinkingContent == "Reasoning about the response");
         Assert.Contains(progress, update => update.EstimatedRemaining == TimeSpan.Zero && update.Completed);
+        Assert.True(progress[^1].Sequence > progress[0].Sequence);
         Assert.Contains(progress, update => update.Completed);
     }
 

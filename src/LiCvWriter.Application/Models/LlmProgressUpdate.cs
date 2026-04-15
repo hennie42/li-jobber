@@ -10,4 +10,6 @@ public sealed record LlmProgressUpdate(
     long? CompletionTokens = null,
     TimeSpan? EstimatedRemaining = null,
     string? ThinkingPreview = null,
-    string? ResponseContent = null);
+    string? ResponseContent = null,
+    string? ThinkingContent = null,
+    long Sequence = 0);

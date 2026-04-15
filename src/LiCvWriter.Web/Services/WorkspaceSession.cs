@@ -10,58 +10,74 @@ namespace LiCvWriter.Web.Services;
 public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecoveryStore? recoveryStore = null)
 {
     private static readonly string[] SupportedThinkingLevels = ["low", "medium", "high"];
+    private readonly object gate = new();
     private readonly WorkspaceRecoveryStore? recoveryStateStore = recoveryStore;
     private readonly List<JobSetSessionState> jobSets = LoadRecoveredJobSets(recoveryStore);
+    private string exportPath = Path.Combine(Environment.CurrentDirectory, "LI-export");
+    private CandidateProfile? candidateProfile = LoadCandidateProfile(recoveryStore);
+    private LinkedInExportImportResult? importResult;
+    private ApplicantDifferentiatorProfile applicantDifferentiatorProfile = LoadApplicantDifferentiatorProfile(recoveryStore);
+    private string activeJobSetId = LoadActiveJobSetId(recoveryStore);
+    private LinkedInAuthorizationStatus linkedInAuthorizationStatus = new(false, "DMA member snapshot not loaded.", null, null, null);
+    private OllamaModelAvailability? ollamaAvailability;
+    private string selectedLlmModel = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
+    private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
+    private bool isLlmSessionConfigured;
+    private bool hasStartedLlmWork;
 
     public event Action? Changed;
 
-    public string ExportPath { get; private set; } = Path.Combine(Environment.CurrentDirectory, "LI-export");
+    public string ExportPath => Read(() => exportPath);
 
-    public CandidateProfile? CandidateProfile { get; private set; } = LoadCandidateProfile(recoveryStore);
+    public CandidateProfile? CandidateProfile => Read(() => candidateProfile);
 
-    public LinkedInExportImportResult? ImportResult { get; private set; }
+    public LinkedInExportImportResult? ImportResult => Read(() => importResult);
 
-    public ApplicantDifferentiatorProfile ApplicantDifferentiatorProfile { get; private set; } = LoadApplicantDifferentiatorProfile(recoveryStore);
+    public ApplicantDifferentiatorProfile ApplicantDifferentiatorProfile => Read(() => applicantDifferentiatorProfile);
 
-    public IReadOnlyList<JobSetSessionState> JobSets => jobSets;
+    public IReadOnlyList<JobSetSessionState> JobSets => Read(() => jobSets.ToArray());
 
-    public string ActiveJobSetId { get; private set; } = LoadActiveJobSetId(recoveryStore);
+    public string ActiveJobSetId => Read(() => activeJobSetId);
 
-    public JobSetSessionState ActiveJobSet => jobSets.First(jobSet => jobSet.Id == ActiveJobSetId);
+    public JobSetSessionState ActiveJobSet => Read(GetActiveJobSetUnsafe);
 
-    public JobPostingAnalysis? JobPosting => ActiveJobSet.JobPosting;
+    public JobPostingAnalysis? JobPosting => Read(() => GetActiveJobSetUnsafe().JobPosting);
 
-    public CompanyResearchProfile? CompanyProfile => ActiveJobSet.CompanyProfile;
+    public CompanyResearchProfile? CompanyProfile => Read(() => GetActiveJobSetUnsafe().CompanyProfile);
 
-    public JobFitAssessment JobFitAssessment => ActiveJobSet.JobFitAssessment;
+    public JobFitAssessment JobFitAssessment => Read(() => GetActiveJobSetUnsafe().JobFitAssessment);
 
-    public LinkedInAuthorizationStatus LinkedInAuthorizationStatus { get; private set; } = new(false, "DMA member snapshot not loaded.", null, null, null);
+    public LinkedInAuthorizationStatus LinkedInAuthorizationStatus => Read(() => linkedInAuthorizationStatus);
 
-    public OllamaModelAvailability? OllamaAvailability { get; private set; }
+    public OllamaModelAvailability? OllamaAvailability => Read(() => ollamaAvailability);
 
-    public string SelectedLlmModel { get; private set; } = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
+    public string SelectedLlmModel => Read(() => selectedLlmModel);
 
-    public string SelectedThinkingLevel { get; private set; } = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
+    public string SelectedThinkingLevel => Read(() => selectedThinkingLevel);
 
-    public bool IsLlmSessionConfigured { get; private set; }
+    public bool IsLlmSessionConfigured => Read(() => isLlmSessionConfigured);
 
-    public bool HasStartedLlmWork { get; private set; }
+    public bool HasStartedLlmWork => Read(() => hasStartedLlmWork);
 
-    public IReadOnlyList<GeneratedDocument> GeneratedDocuments => ActiveJobSet.GeneratedDocuments;
+    public IReadOnlyList<GeneratedDocument> GeneratedDocuments => Read(() => GetActiveJobSetUnsafe().GeneratedDocuments);
 
-    public IReadOnlyList<DocumentExportResult> Exports => ActiveJobSet.Exports;
+    public IReadOnlyList<DocumentExportResult> Exports => Read(() => GetActiveJobSetUnsafe().Exports);
 
-    public EvidenceSelectionResult EvidenceSelection => ActiveJobSet.EvidenceSelection;
+    public EvidenceSelectionResult EvidenceSelection => Read(() => GetActiveJobSetUnsafe().EvidenceSelection);
 
-    public bool CanGenerate => CandidateProfile is not null && ActiveJobSet.JobPosting is not null;
+    public bool CanGenerate => Read(() => candidateProfile is not null && GetActiveJobSetUnsafe().JobPosting is not null);
 
-    public bool IsLlmReady => OllamaAvailability is not null
-        && IsLlmSessionConfigured
-        && OllamaAvailability.AvailableModels.Any(model => model.Equals(SelectedLlmModel, StringComparison.OrdinalIgnoreCase));
+    public bool IsLlmReady => Read(() => ollamaAvailability is not null
+        && isLlmSessionConfigured
+        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
-    public bool CanEditLlmSessionSettings => !HasStartedLlmWork;
+    public bool CanEditLlmSessionSettings => true;
 
-    public bool CanStartDraftGeneration => CanGenerate && IsLlmReady;
+    public bool CanStartDraftGeneration => Read(() => candidateProfile is not null
+        && GetActiveJobSetUnsafe().JobPosting is not null
+        && ollamaAvailability is not null
+        && isLlmSessionConfigured
+        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
     public void SetActiveJobSetOutputLanguage(OutputLanguage outputLanguage)
     {
@@ -69,8 +85,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void MarkActiveJobSetRunning(string detail)
+        => MarkJobSetRunning(ActiveJobSetId, detail);
+
+    public void MarkJobSetRunning(string jobSetId, string detail)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.Running,
             ProgressDetail = detail
@@ -78,8 +97,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void MarkActiveJobSetFailed(string detail)
+        => MarkJobSetFailed(ActiveJobSetId, detail);
+
+    public void MarkJobSetFailed(string jobSetId, string detail)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.Failed,
             ProgressDetail = detail
@@ -87,8 +109,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void ResetActiveJobSetProgress(string detail = "LLM work not started for this job set.")
+        => ResetJobSetProgress(ActiveJobSetId, detail);
+
+    public void ResetJobSetProgress(string jobSetId, string detail = "LLM work not started for this job set.")
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.NotStarted,
             ProgressDetail = detail
@@ -96,8 +121,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void SetActiveJobSetTechnologyGapAssessment(TechnologyGapAssessment technologyGapAssessment)
+        => SetJobSetTechnologyGapAssessment(ActiveJobSetId, technologyGapAssessment);
+
+    public void SetJobSetTechnologyGapAssessment(string jobSetId, TechnologyGapAssessment technologyGapAssessment)
     {
-        UpdateActiveJobSet(jobSet => jobSet with { TechnologyGapAssessment = technologyGapAssessment });
+        UpdateJobSet(jobSetId, jobSet => jobSet with { TechnologyGapAssessment = technologyGapAssessment });
     }
 
     public void SetActiveJobSetJobFitAssessment(JobFitAssessment jobFitAssessment)
@@ -186,33 +214,40 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls)
     {
-        var nextSortOrder = GetNextSortOrder();
-        var jobSet = CreateJobSet(nextSortOrder, inputMode);
+        lock (gate)
+        {
+            var nextSortOrder = GetNextSortOrderUnsafe();
+            var jobSet = CreateJobSet(nextSortOrder, inputMode);
 
-        jobSets.Add(jobSet);
-        ActiveJobSetId = jobSet.Id;
+            jobSets.Add(jobSet);
+            activeJobSetId = jobSet.Id;
+        }
+
         NotifyChanged();
     }
 
     public void DeleteJobSet(string jobSetId)
     {
-        var index = jobSets.FindIndex(jobSet => jobSet.Id == jobSetId);
-        if (index < 0)
+        lock (gate)
         {
-            throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
-        }
+            var index = jobSets.FindIndex(jobSet => jobSet.Id == jobSetId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
+            }
 
-        if (jobSets.Count == 1)
-        {
-            throw new InvalidOperationException("At least one job set must remain in the workspace.");
-        }
+            if (jobSets.Count == 1)
+            {
+                throw new InvalidOperationException("At least one job set must remain in the workspace.");
+            }
 
-        var wasActive = jobSets[index].Id == ActiveJobSetId;
-        jobSets.RemoveAt(index);
+            var wasActive = jobSets[index].Id == activeJobSetId;
+            jobSets.RemoveAt(index);
 
-        if (wasActive)
-        {
-            ActiveJobSetId = jobSets[Math.Min(index, jobSets.Count - 1)].Id;
+            if (wasActive)
+            {
+                activeJobSetId = jobSets[Math.Min(index, jobSets.Count - 1)].Id;
+            }
         }
 
         NotifyChanged();
@@ -220,12 +255,16 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SelectJobSet(string jobSetId)
     {
-        if (!jobSets.Any(jobSet => jobSet.Id == jobSetId))
+        lock (gate)
         {
-            throw new InvalidOperationException($"Job set '{jobSetId}' does not exist in this session.");
+            if (!jobSets.Any(jobSet => jobSet.Id == jobSetId))
+            {
+                throw new InvalidOperationException($"Job set '{jobSetId}' does not exist in this session.");
+            }
+
+            activeJobSetId = jobSetId;
         }
 
-        ActiveJobSetId = jobSetId;
         NotifyChanged();
     }
 
@@ -247,23 +286,30 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SetImportResult(string exportPath, LinkedInExportImportResult importResult)
     {
-        ClearAllGeneratedArtifacts(notifyChanged: false);
-        ExportPath = exportPath;
-        ImportResult = importResult;
-        CandidateProfile = importResult.Profile;
-        ClearJobFitAssessments(notifyChanged: false);
-        ClearTechnologyGapAssessments(notifyChanged: false);
-        ClearEvidenceSelections(notifyChanged: false);
+        lock (gate)
+        {
+            ClearAllGeneratedArtifactsUnsafe();
+            this.exportPath = exportPath;
+            this.importResult = importResult;
+            candidateProfile = importResult.Profile;
+            ClearJobFitAssessmentsUnsafe();
+            ClearTechnologyGapAssessmentsUnsafe();
+            ClearEvidenceSelectionsUnsafe();
+        }
+
         NotifyChanged();
     }
 
     public void UpdateCandidateProfile(CandidateProfile updatedProfile)
     {
-        CandidateProfile = updatedProfile;
-
-        if (ImportResult is not null)
+        lock (gate)
         {
-            ImportResult = ImportResult with { Profile = updatedProfile };
+            candidateProfile = updatedProfile;
+
+            if (importResult is not null)
+            {
+                importResult = importResult with { Profile = updatedProfile };
+            }
         }
 
         NotifyChanged();
@@ -271,15 +317,22 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SetApplicantDifferentiatorProfile(ApplicantDifferentiatorProfile differentiatorProfile)
     {
-        ApplicantDifferentiatorProfile = differentiatorProfile;
-        ClearJobFitAssessments(notifyChanged: false);
-        ClearEvidenceSelections(notifyChanged: false, clearSelectedIds: false);
+        lock (gate)
+        {
+            applicantDifferentiatorProfile = differentiatorProfile;
+            ClearJobFitAssessmentsUnsafe();
+            ClearEvidenceSelectionsUnsafe(clearSelectedIds: false);
+        }
+
         NotifyChanged();
     }
 
     public void SetJobPosting(JobPostingAnalysis jobPosting)
+        => SetJobSetJobPosting(ActiveJobSetId, jobPosting);
+
+    public void SetJobSetJobPosting(string jobSetId, JobPostingAnalysis jobPosting)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             JobPosting = jobPosting,
             JobUrl = jobPosting.SourceUrl?.ToString() ?? jobSet.JobUrl,
@@ -296,8 +349,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void SetCompanyProfile(CompanyResearchProfile companyProfile)
+        => SetJobSetCompanyProfile(ActiveJobSetId, companyProfile);
+
+    public void SetJobSetCompanyProfile(string jobSetId, CompanyResearchProfile companyProfile)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             CompanyProfile = companyProfile,
             JobFitAssessment = JobFitAssessment.Empty,
@@ -312,22 +368,29 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SetLinkedInAuthorizationStatus(LinkedInAuthorizationStatus status)
     {
-        LinkedInAuthorizationStatus = status;
+        lock (gate)
+        {
+            linkedInAuthorizationStatus = status;
+        }
+
         NotifyChanged();
     }
 
     public void SetOllamaAvailability(OllamaModelAvailability availability)
     {
-        OllamaAvailability = availability;
+        lock (gate)
+        {
+            ollamaAvailability = availability;
 
-        if (!availability.AvailableModels.Any(model => model.Equals(SelectedLlmModel, StringComparison.OrdinalIgnoreCase)))
-        {
-            SelectedLlmModel = ResolvePreferredModel(availability.AvailableModels, ollamaOptions.Model);
-            IsLlmSessionConfigured = false;
-        }
-        else if (!IsLlmSessionConfigured && CanEditLlmSessionSettings)
-        {
-            IsLlmSessionConfigured = true;
+            if (!availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)))
+            {
+                selectedLlmModel = ResolvePreferredModel(availability.AvailableModels, ollamaOptions.Model);
+                isLlmSessionConfigured = false;
+            }
+            else if (!isLlmSessionConfigured)
+            {
+                isLlmSessionConfigured = true;
+            }
         }
 
         NotifyChanged();
@@ -335,47 +398,56 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public void SetLlmSessionSettings(string model, string thinkingLevel)
     {
-        if (!CanEditLlmSessionSettings)
+        lock (gate)
         {
-            throw new InvalidOperationException("LLM session settings are locked after LLM-backed work starts.");
+            if (ollamaAvailability is null)
+            {
+                throw new InvalidOperationException("Check Ollama access before selecting the session model.");
+            }
+
+            var normalizedModel = model.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedModel))
+            {
+                throw new ArgumentException("A session model is required.", nameof(model));
+            }
+
+            if (!ollamaAvailability.AvailableModels.Any(value => value.Equals(normalizedModel, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"The selected model '{normalizedModel}' is not available from Ollama in this session.");
+            }
+
+            selectedLlmModel = normalizedModel;
+            selectedThinkingLevel = NormalizeThinkingLevel(thinkingLevel);
+            isLlmSessionConfigured = true;
         }
 
-        if (OllamaAvailability is null)
-        {
-            throw new InvalidOperationException("Check Ollama access before selecting the session model.");
-        }
-
-        var normalizedModel = model.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedModel))
-        {
-            throw new ArgumentException("A session model is required.", nameof(model));
-        }
-
-        if (!OllamaAvailability.AvailableModels.Any(value => value.Equals(normalizedModel, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException($"The selected model '{normalizedModel}' is not available from Ollama in this session.");
-        }
-
-        SelectedLlmModel = normalizedModel;
-        SelectedThinkingLevel = NormalizeThinkingLevel(thinkingLevel);
-        IsLlmSessionConfigured = true;
         NotifyChanged();
     }
 
     public void MarkLlmWorkStarted()
     {
-        if (HasStartedLlmWork)
+        var shouldNotify = false;
+        lock (gate)
         {
-            return;
+            if (!hasStartedLlmWork)
+            {
+                hasStartedLlmWork = true;
+                shouldNotify = true;
+            }
         }
 
-        HasStartedLlmWork = true;
-        NotifyChanged();
+        if (shouldNotify)
+        {
+            NotifyChanged();
+        }
     }
 
     public void SetGeneratedDocuments(IReadOnlyList<GeneratedDocument> documents, IReadOnlyList<DocumentExportResult> exports)
+        => SetJobSetGeneratedDocuments(ActiveJobSetId, documents, exports);
+
+    public void SetJobSetGeneratedDocuments(string jobSetId, IReadOnlyList<GeneratedDocument> documents, IReadOnlyList<DocumentExportResult> exports)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.Done,
             ProgressDetail = "Markdown drafts generated for this job set.",
@@ -385,8 +457,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     public void ClearGeneratedArtifacts(bool notifyChanged = true)
+        => ClearJobSetGeneratedArtifacts(ActiveJobSetId, notifyChanged);
+
+    public void ClearJobSetGeneratedArtifacts(string jobSetId, bool notifyChanged = true)
     {
-        UpdateActiveJobSet(jobSet => jobSet with
+        UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.NotStarted,
             ProgressDetail = "LLM work not started for this job set.",
@@ -396,6 +471,19 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     private void ClearAllGeneratedArtifacts(bool notifyChanged = true)
+    {
+        lock (gate)
+        {
+            ClearAllGeneratedArtifactsUnsafe();
+        }
+
+        if (notifyChanged)
+        {
+            NotifyChanged();
+        }
+    }
+
+    private void ClearAllGeneratedArtifactsUnsafe()
     {
         for (var index = 0; index < jobSets.Count; index++)
         {
@@ -407,6 +495,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 Exports = Array.Empty<DocumentExportResult>()
             };
         }
+    }
+
+    private void ClearTechnologyGapAssessments(bool notifyChanged = true)
+    {
+        lock (gate)
+        {
+            ClearTechnologyGapAssessmentsUnsafe();
+        }
 
         if (notifyChanged)
         {
@@ -414,12 +510,20 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    private void ClearTechnologyGapAssessments(bool notifyChanged = true)
+    private void ClearTechnologyGapAssessmentsUnsafe()
     {
         for (var index = 0; index < jobSets.Count; index++)
         {
             jobSets[index] = jobSets[index] with { TechnologyGapAssessment = TechnologyGapAssessment.Empty };
         }
+    }
+
+    private void ClearJobFitAssessments(bool notifyChanged = true)
+    {
+        lock (gate)
+        {
+            ClearJobFitAssessmentsUnsafe();
+        }
 
         if (notifyChanged)
         {
@@ -427,12 +531,20 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    private void ClearJobFitAssessments(bool notifyChanged = true)
+    private void ClearJobFitAssessmentsUnsafe()
     {
         for (var index = 0; index < jobSets.Count; index++)
         {
             jobSets[index] = jobSets[index] with { JobFitAssessment = JobFitAssessment.Empty };
         }
+    }
+
+    private void ClearEvidenceSelections(bool notifyChanged = true, bool clearSelectedIds = true)
+    {
+        lock (gate)
+        {
+            ClearEvidenceSelectionsUnsafe(clearSelectedIds);
+        }
 
         if (notifyChanged)
         {
@@ -440,7 +552,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    private void ClearEvidenceSelections(bool notifyChanged = true, bool clearSelectedIds = true)
+    private void ClearEvidenceSelectionsUnsafe(bool clearSelectedIds = true)
     {
         for (var index = 0; index < jobSets.Count; index++)
         {
@@ -449,11 +561,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 EvidenceSelection = EvidenceSelectionResult.Empty,
                 SelectedEvidenceIds = clearSelectedIds ? Array.Empty<string>() : jobSets[index].SelectedEvidenceIds
             };
-        }
-
-        if (notifyChanged)
-        {
-            NotifyChanged();
         }
     }
 
@@ -471,7 +578,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         return configuredMatch ?? availableModels.FirstOrDefault() ?? string.Empty;
     }
 
-    private int GetNextSortOrder()
+    private int GetNextSortOrderUnsafe()
         => jobSets.Count == 0 ? 1 : jobSets.Max(jobSet => jobSet.SortOrder) + 1;
 
     private static List<JobSetSessionState> LoadRecoveredJobSets(WorkspaceRecoveryStore? recoveryStore)
@@ -547,18 +654,32 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         return NormalizeThinkingLevel(string.IsNullOrWhiteSpace(recoveredThinkingLevel) ? configuredThinkingLevel : recoveredThinkingLevel);
     }
 
+    private T Read<T>(Func<T> read)
+    {
+        lock (gate)
+        {
+            return read();
+        }
+    }
+
+    private JobSetSessionState GetActiveJobSetUnsafe()
+        => jobSets.First(jobSet => jobSet.Id == activeJobSetId);
+
     private void UpdateActiveJobSet(Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
         => UpdateJobSet(ActiveJobSetId, update, notifyChanged);
 
     private void UpdateJobSet(string jobSetId, Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
     {
-        var index = jobSets.FindIndex(jobSet => jobSet.Id == jobSetId);
-        if (index < 0)
+        lock (gate)
         {
-            throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
-        }
+            var index = jobSets.FindIndex(jobSet => jobSet.Id == jobSetId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
+            }
 
-        jobSets[index] = update(jobSets[index]);
+            jobSets[index] = update(jobSets[index]);
+        }
 
         if (notifyChanged)
         {
@@ -619,8 +740,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
 
     private WorkspaceRecoverySnapshot CreateRecoverySnapshot()
+        => Read(CreateRecoverySnapshotUnsafe);
+
+    private WorkspaceRecoverySnapshot CreateRecoverySnapshotUnsafe()
         => new(
-            ActiveJobSetId,
+            activeJobSetId,
             jobSets.Select(static jobSet => new JobSetRecoveryState(
                 jobSet.Id,
                 jobSet.SortOrder,
@@ -643,10 +767,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.EvidenceSelection,
                 jobSet.GeneratedDocuments,
                 jobSet.AdditionalInstructions)).ToArray(),
-            ApplicantDifferentiatorProfile,
-            CandidateProfile,
-            SelectedLlmModel,
-            SelectedThinkingLevel);
+            applicantDifferentiatorProfile,
+            candidateProfile,
+            selectedLlmModel,
+            selectedThinkingLevel);
 
     private void NotifyChanged()
     {

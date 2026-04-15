@@ -6,6 +6,9 @@
   --muted: #52606d;
   --accent: #bf6b39;
   --accent-soft: #e3b489;
+  --signal-green: #2f7d46;
+  --signal-green-soft: rgba(87, 170, 104, 0.18);
+  --signal-green-line: rgba(67, 141, 83, 0.4);
   --line: rgba(31, 41, 51, 0.12);
   --shadow: 0 20px 60px rgba(40, 32, 21, 0.09);
 }
@@ -37,7 +40,7 @@ a {
 
 .shell {
   display: grid;
-  grid-template-columns: 1fr 310px;
+  grid-template-columns: 1fr 404px;
   grid-template-areas: "content sidebar";
   min-height: 100vh;
   position: relative;
@@ -78,6 +81,118 @@ a {
   border-radius: 1.2rem;
   border: 1px solid var(--line);
   background: rgba(255, 252, 246, 0.64);
+}
+
+.sidebar-floating-stack {
+  position: sticky;
+  top: 1rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.sidebar-floating-stack .sidebar-panel {
+  margin-bottom: 0;
+}
+
+.sidebar-monitor-panel,
+.sidebar-navigation-panel {
+  box-shadow: 0 16px 36px rgba(40, 32, 21, 0.12);
+}
+
+.sidebar-crt-monitor {
+  width: 100%;
+}
+
+.sidebar-status-monitor-panel {
+  padding-top: 0.9rem;
+}
+
+.sidebar-status-crt-monitor {
+  width: 100%;
+}
+
+.sidebar-crt-bezel {
+  padding: 0.8rem 0.85rem 0.65rem;
+  border-radius: 1.45rem;
+  background:
+    linear-gradient(180deg, rgba(88, 92, 88, 0.96), rgba(34, 38, 34, 0.98)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.1), transparent 40%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -14px 28px rgba(0, 0, 0, 0.42),
+    0 18px 32px rgba(26, 28, 21, 0.18);
+}
+
+.crt-monitor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.crt-monitor-led {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.92), rgba(118, 255, 151, 0.88) 40%, rgba(18, 102, 41, 0.9) 100%);
+  box-shadow: 0 0 8px rgba(110, 255, 154, 0.45);
+  flex: 0 0 auto;
+}
+
+.sidebar-crt-screen {
+  height: 11.6rem;
+  min-height: 11.6rem;
+  max-height: 11.6rem;
+  font-size: 0.64rem;
+  line-height: 1.32;
+  border-radius: 1.05rem;
+}
+
+.sidebar-status-crt-screen {
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  padding-top: 0.85rem;
+  padding-bottom: 0.95rem;
+  font-size: 0.62rem;
+  line-height: 1.38;
+}
+
+.crt-monitor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
+  padding: 0.18rem 0.1rem 0;
+  border-top: 1px solid rgba(210, 217, 226, 0.12);
+}
+
+.crt-monitor-model-label {
+  color: rgba(227, 232, 238, 0.8);
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.08);
+}
+
+.crt-monitor-vent {
+  width: 3.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(236, 239, 243, 0.42) 0,
+      rgba(236, 239, 243, 0.42) 2px,
+      rgba(53, 58, 61, 0.55) 2px,
+      rgba(53, 58, 61, 0.55) 5px);
+  opacity: 0.8;
 }
 
 .sidebar-metric {
@@ -142,7 +257,6 @@ a {
 .brand-text,
 .hero-copy,
 .muted-text,
-.page-header p,
 .card-panel p,
 .timeline-card p {
   color: var(--muted);
@@ -159,14 +273,26 @@ a {
   padding: 0.9rem 1rem;
   border-radius: 1rem;
   border: 1px solid transparent;
-  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
 }
 
-.nav-item:hover,
-.nav-item.active {
-  background: rgba(191, 107, 57, 0.08);
-  border-color: rgba(191, 107, 57, 0.18);
+.nav-item:hover {
+  background: rgba(87, 170, 104, 0.08);
+  border-color: rgba(67, 141, 83, 0.16);
   transform: translateX(-4px);
+}
+
+.nav-item.active {
+  background:
+    linear-gradient(180deg, rgba(223, 247, 229, 0.96), rgba(198, 235, 207, 0.94));
+  border-color: var(--signal-green-line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 10px 24px rgba(47, 125, 70, 0.16),
+    0 0 0 1px rgba(129, 196, 144, 0.22);
+  color: #153d22;
+  font-weight: 700;
+  transform: translateX(-6px);
 }
 
 .hero-panel,
@@ -224,16 +350,6 @@ details.card-panel summary .status-chip {
   line-height: 1.08;
 }
 
-.page-header h1,
-.page-header h2 {
-  margin: 0;
-  font-family: "Aptos Display", "Segoe UI", sans-serif;
-  font-size: clamp(1.85rem, 3.1vw, 2.85rem);
-  line-height: 1.06;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-
 .status-grid,
 .content-grid,
 .timeline-grid {
@@ -275,22 +391,6 @@ details.card-panel summary .status-chip {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: flex-start;
-}
-
-.page-header > div {
-  max-width: min(52rem, 100%);
-}
-
-.page-header p {
-  margin: 0;
-  max-width: 44rem;
 }
 
 .stack-gap {
@@ -495,6 +595,23 @@ details.card-panel summary .status-chip {
   font-weight: 600;
 }
 
+.stream-preview-card,
+.thinking-monitor-details {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.stream-preview-box {
+  max-height: 18rem;
+}
+
+.thinking-monitor-details summary {
+  width: fit-content;
+}
+
+.thinking-monitor-shell {
+  width: min(100%, 28rem);
+}
+
 .response-box {
   margin: 0;
   white-space: pre-wrap;
@@ -504,6 +621,114 @@ details.card-panel summary .status-chip {
   border-radius: 1rem;
   padding: 1rem;
   overflow-x: auto;
+}
+
+.crt-monitor {
+  width: min(100%, 31.5rem);
+}
+
+.crt-monitor-bezel {
+  position: relative;
+  padding: 0.7rem;
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(180deg, rgba(77, 83, 75, 0.92), rgba(39, 43, 39, 0.96)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 36%);
+  border: 1px solid rgba(22, 25, 22, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -10px 24px rgba(0, 0, 0, 0.36),
+    0 18px 30px rgba(26, 28, 21, 0.16);
+}
+
+.crt-monitor-badge {
+  width: fit-content;
+  margin: 0 0 0.55rem auto;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(14, 18, 14, 0.72);
+  border: 1px solid rgba(132, 151, 120, 0.24);
+  color: rgba(180, 202, 169, 0.85);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.crt-monitor-screen {
+  position: relative;
+  margin: 0;
+  min-height: 9rem;
+  max-height: 15rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  border-radius: 1rem;
+  padding: 1rem 1rem 1.1rem;
+  border: 1px solid rgba(76, 95, 76, 0.5);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(70, 133, 76, 0.18), transparent 55%),
+    radial-gradient(circle at 50% 50%, rgba(6, 16, 8, 0.3), rgba(3, 9, 4, 0.9) 78%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.28));
+  box-shadow:
+    inset 0 0 20px rgba(70, 255, 126, 0.08),
+    inset 0 0 48px rgba(0, 0, 0, 0.56),
+    inset 0 1px 0 rgba(214, 255, 214, 0.06);
+  color: #89ff9b;
+  font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 0.78rem;
+  line-height: 1.48;
+  scrollbar-gutter: stable;
+  text-shadow: 0 0 5px rgba(98, 255, 137, 0.32);
+}
+
+.crt-monitor-screen-placeholder {
+  color: rgba(137, 255, 155, 0.62);
+  font-style: italic;
+}
+
+.crt-monitor-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    repeating-linear-gradient(
+      180deg,
+      rgba(182, 255, 194, 0.035) 0,
+      rgba(182, 255, 194, 0.035) 1px,
+      rgba(0, 0, 0, 0.12) 1px,
+      rgba(0, 0, 0, 0.12) 3px);
+  pointer-events: none;
+}
+
+.crt-monitor-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at center, transparent 58%, rgba(0, 0, 0, 0.34) 100%);
+  pointer-events: none;
+}
+
+.crt-monitor-screen::-webkit-scrollbar {
+  width: 0.7rem;
+}
+
+.crt-monitor-screen::-webkit-scrollbar-track {
+  background: rgba(8, 14, 8, 0.72);
+}
+
+.crt-monitor-screen::-webkit-scrollbar-thumb {
+  background: rgba(108, 164, 116, 0.45);
+  border-radius: 999px;
+  border: 2px solid rgba(8, 14, 8, 0.9);
+}
+
+.sidebar-status-crt-screen::-webkit-scrollbar {
+  display: none;
 }
 
 .source-snippet {
@@ -905,6 +1130,10 @@ textarea.inline-edit-input {
     border-bottom: 1px solid var(--line);
   }
 
+  .sidebar-floating-stack {
+    position: static;
+  }
+
   .hero-panel,
   .content-grid,
   .timeline-grid,
@@ -919,11 +1148,6 @@ textarea.inline-edit-input {
     padding: 1rem;
   }
 
-  .page-header h1 {
-    font-size: clamp(1.75rem, 9vw, 2.25rem);
-    line-height: 1.08;
-  }
-
   .fit-header,
   .fit-card-header,
   .evidence-selection-card {
@@ -933,5 +1157,24 @@ textarea.inline-edit-input {
 
   .key-value-grid {
     grid-template-columns: 1fr;
+  }
+
+  .thinking-monitor-shell,
+  .crt-monitor {
+    width: 100%;
+  }
+
+  .crt-monitor-screen {
+    min-height: 8rem;
+    max-height: 12rem;
+    font-size: 0.74rem;
+  }
+
+  .sidebar-crt-screen {
+    height: 10.4rem;
+    min-height: 10.4rem;
+    max-height: 10.4rem;
+    font-size: 0.62rem;
+    line-height: 1.3;
   }
 }

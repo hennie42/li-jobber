@@ -34,17 +34,18 @@ graph TB
 | Concern | Primary files | Purpose |
 | --- | --- | --- |
 | Bootstrap | [Program.cs](../src/LiCvWriter.Web/Program.cs), [App.razor](../src/LiCvWriter.Web/Components/App.razor), [Routes.razor](../src/LiCvWriter.Web/Components/Routes.razor) | DI, routing, HTTP client configuration |
-| Shell | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [NavMenu.razor](../src/LiCvWriter.Web/Components/Layout/NavMenu.razor) | Sidebar, top-level navigation, shared layout |
+| Shell | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [NavMenu.razor](../src/LiCvWriter.Web/Components/Layout/NavMenu.razor) | Floating navigation, dual CRT monitors, completed-activity sidebar |
+| Streaming transport | [Program.cs](../src/LiCvWriter.Web/Program.cs), [LlmOperationBroker.cs](../src/LiCvWriter.Web/Services/LlmOperationBroker.cs), [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js) | Start/status/events/cancel endpoints, per-job-tab operation broker, browser `EventSource` bridge |
 | Session state | [WorkspaceSession.cs](../src/LiCvWriter.Web/Services/WorkspaceSession.cs), [WorkspaceRecoveryStore.cs](../src/LiCvWriter.Web/Services/WorkspaceRecoveryStore.cs) | In-memory state container, recovery persistence |
 | Setup flow | [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor) | Ollama check, model selection, DMA import, differentiators |
-| Workbench flow | [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor) | Job research, fit review, evidence, technology gap, generation |
+| Workbench flow | [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor) | Brokered job research, fit review, evidence, technology gap, refresh-all, generation |
 | LinkedIn import | [LinkedInMemberSnapshotImporter.cs](../src/LiCvWriter.Infrastructure/LinkedIn/LinkedInMemberSnapshotImporter.cs), [LinkedInExportImporter.cs](../src/LiCvWriter.Infrastructure/LinkedIn/LinkedInExportImporter.cs) | DMA fetch, domain routing, CSV staging, profile assembly |
 | Deterministic scoring | [JobFitAnalysisService.cs](../src/LiCvWriter.Application/Services/JobFitAnalysisService.cs), [EvidenceSelectionService.cs](../src/LiCvWriter.Application/Services/EvidenceSelectionService.cs), [CandidateEvidenceService.cs](../src/LiCvWriter.Application/Services/CandidateEvidenceService.cs) | Fit assessment, evidence ranking, evidence cataloguing |
-| LLM research | [HttpJobResearchService.cs](../src/LiCvWriter.Infrastructure/Research/HttpJobResearchService.cs), [LlmTechnologyGapAnalysisService.cs](../src/LiCvWriter.Web/Services/LlmTechnologyGapAnalysisService.cs) | Structured job/company parsing, technology gap analysis |
+| LLM research | [HttpJobResearchService.cs](../src/LiCvWriter.Infrastructure/Research/HttpJobResearchService.cs), [LlmTechnologyGapAnalysisService.cs](../src/LiCvWriter.Web/Services/LlmTechnologyGapAnalysisService.cs), [LlmFitEnhancementService.cs](../src/LiCvWriter.Infrastructure/Workflows/LlmFitEnhancementService.cs) | Structured job/company parsing, technology gap analysis, semantic fit enhancement |
 | Generation | [DraftGenerationService.cs](../src/LiCvWriter.Infrastructure/Workflows/DraftGenerationService.cs) | Orchestrates LLM call → render → export → audit per document kind |
 | Document rendering | [MarkdownDocumentRenderer.cs](../src/LiCvWriter.Infrastructure/Documents/MarkdownDocumentRenderer.cs) | Shapes LLM output into structured Markdown with ATS sections |
 | Document export | [LocalDocumentExportService.cs](../src/LiCvWriter.Infrastructure/Documents/LocalDocumentExportService.cs) | Writes .md and .docx files via Markdig + HtmlToOpenXml pipeline |
-| Diagnostics | [SessionDiagnostics.razor](../src/LiCvWriter.Web/Components/Pages/Diagnostics/SessionDiagnostics.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Live telemetry, import diagnostics, session inspection |
+| Diagnostics | [SessionDiagnostics.razor](../src/LiCvWriter.Web/Components/Pages/Diagnostics/SessionDiagnostics.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Sidebar telemetry feeds, import diagnostics, session inspection |
 
 ---
 
@@ -65,7 +66,7 @@ graph TB
     F --> H
 ```
 
-The three pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. Pages subscribe to `WorkspaceSession.Changed` to rerender when upstream state mutates.
+The three pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, status monitor, and completed-activity list in sync while long-running work streams in.
 
 ---
 
@@ -141,7 +142,7 @@ These rules prevent stale outputs by clearing downstream results when upstream i
 | `SetJobPosting()` | Active tab | Replaces job posting, resets fit review, technology gap, evidence, progress, generated docs, exports |
 | `SetCompanyProfile()` | Active tab | Replaces company profile, resets fit review, technology gap, evidence, progress, generated docs, exports |
 | `SetOllamaAvailability()` | Session-global | Updates model availability, clears `IsLlmSessionConfigured` if selected model is no longer available |
-| `MarkLlmWorkStarted()` | Session-global | Locks LLM session settings for the remainder of the session |
+| `MarkLlmWorkStarted()` | Session-global | Records that the session has performed LLM-backed work so the setup UI can warn that later model/thinking changes affect only future operations |
 | `SetGeneratedDocuments()` | Active tab | Marks tab done, stores generated documents and file exports |
 
 ---
@@ -184,9 +185,9 @@ sequenceDiagram
 
 ### Step 1: Ollama and Session Model
 
-The page checks Ollama through `ILlmClient.VerifyModelAvailabilityAsync()`. The returned `OllamaModelAvailability` determines which models the user can select. The model and thinking level are session-scoped and remain editable only until LLM-backed work begins (`MarkLlmWorkStarted()`).
+The page checks Ollama through `ILlmClient.VerifyModelAvailabilityAsync()`. The returned `OllamaModelAvailability` determines which models the user can select. The model and thinking level are session-scoped and remain editable throughout the session. After LLM-backed work begins, the setup page warns that later changes apply to future operations only, so completed analyses or generated drafts need to be rerun if the user wants them refreshed with the new settings.
 
-The panel is collapsible — after `UseSessionLlmSettingsAsync()`, the controls collapse into a compact shell. Clicking `CheckOllamaAsync()` expands them again if the session is still editable.
+The panel is collapsible — after `UseSessionLlmSettingsAsync()`, the controls collapse into a compact shell. Clicking `CheckOllamaAsync()` expands them again and refreshes model availability.
 
 ### Step 2: LinkedIn DMA Import
 
@@ -194,7 +195,7 @@ Takes a runtime DMA portability token, calls the LinkedIn importer pipeline, upd
 
 ### Step 3: Applicant Differentiators
 
-Optional session-global notes (work style, communication, leadership, stakeholders, motivators, target narrative, watchouts, proof points). The manual path is immediate. The PDF path sends extracted text through the session model and locks LLM settings because it calls `MarkLlmWorkStarted()`.
+Optional session-global notes (work style, communication, leadership, stakeholders, motivators, target narrative, watchouts, proof points). The manual path is immediate. The PDF path sends extracted text through the session model and calls `MarkLlmWorkStarted()`, which records that the session has used LLM-backed work but does not prevent later model/thinking changes.
 
 ---
 
@@ -257,6 +258,20 @@ Implemented in [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Works
 
 See [State Ownership](#state-ownership) for the full field list per job tab (`JobSetSessionState`).
 
+### Brokered Streaming Transport
+
+Most LLM-backed workbench actions no longer execute as page-local long-running calls. The page starts a brokered operation through Minimal API endpoints, receives an operation id plus snapshot/events/cancel URLs, and subscribes to `/api/llm/operations/{operationId}/events` via `EventSource` in [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js).
+
+`LlmOperationBroker` enforces one active LLM operation per job tab, updates `WorkspaceSession` / `OperationStatusService`, and publishes SSE events for:
+
+- `job-context`
+- `fit-review`
+- `technology-gap`
+- `refresh-all`
+- `generate-drafts`
+
+The shared sidebar consumes those telemetry updates through `OperationStatusService`: the reasoning monitor shows current or last captured model thinking, the status monitor shows the current or last streaming status detail, and the activity panel keeps only finished entries.
+
 ### End-to-End Pipeline
 
 ```mermaid
@@ -280,7 +295,7 @@ graph LR
 
 ### Research
 
-The workbench uses one combined action: `AnalyzeAndBuildContextAsync()`. It validates URLs, persists input fields, marks LLM work as started, then runs two sequential steps:
+The workbench starts job-context analysis through the broker, then streams updates back into the page and shared sidebar. Inside the operation, the broker validates inputs, persists input fields, marks LLM work as started, then runs two sequential steps:
 
 1. `ExecuteJobAnalysisAsync()` → `IJobResearchService.AnalyzeAsync()` — fetches and strips HTML from the job URL, sends to LLM for structured parsing, returns `JobPostingAnalysis`
 2. `ExecuteCompanyContextAsync()` → `IJobResearchService.BuildCompanyProfileAsync()` — fetches all company-context URLs, sends to LLM, returns `CompanyResearchProfile`
@@ -308,6 +323,8 @@ graph TD
 ```
 
 **Fit scoring** — `JobFitAnalysisService` compares the candidate profile against job requirements. Evidence is weighted by type (Experience: 60, Project: 55, Recommendation: 50, Certification: 40, Summary: 20, Headline: 18, Note: 14). Requirements are categorized as must-have, nice-to-have, or cultural, and matched as strong, partial, or missing. The output is a `JobFitAssessment` with an overall score (0–100) and apply/stretch/skip recommendation.
+
+**Optional LLM enhancement** — the broker can pass the deterministic fit output through `LlmFitEnhancementService` to add semantic evidence matching and stronger recommendation text. When enhancement is used, the workbench labels the result as LLM-enhanced while still relying on the deterministic fit pipeline as the base layer.
 
 **Evidence cataloguing** — `CandidateEvidenceService.BuildCatalog()` transforms the `CandidateProfile` into a flat catalog of evidence items across seven types: Headline, Summary, Experience, Project, Recommendation, Certification, and Note (manual signals). Deduplication groups by ID and selects the richest variant.
 
@@ -504,22 +521,35 @@ Experience is capped at 8 entries in the prompt with a truncation note. Recommen
 
 ## 10. Telemetry and Diagnostics
 
-`OperationStatusService` is the global activity and LLM telemetry feed. Pages call into it through `RunAsync()` and LLM progress callbacks.
+`OperationStatusService` is the global activity and LLM telemetry feed. Pages and the broker call into it through `RunAsync()` and LLM progress callbacks.
 
 ```mermaid
 graph LR
-    A[Page actions + LLM progress callbacks] --> B[OperationStatusService]
-    C[WorkspaceSession] --> D[SessionDiagnostics.razor]
-    B --> D
-    E[LinkedInImportDiagnosticsFormatter] --> D
-    D --> F[Current telemetry]
-    D --> G[Session context]
-    D --> H[LinkedIn import details]
-    D --> I[Thinking preview]
-    D --> J[Recent activity]
+    A[Page actions + broker progress callbacks] --> B[OperationStatusService]
+    B --> C[MainLayout.razor]
+    C --> D[Reasoning monitor]
+    C --> E[Status monitor]
+    C --> F[Finished activity list]
+    G[WorkspaceSession] --> H[SessionDiagnostics.razor]
+    B --> H
+    I[LinkedInImportDiagnosticsFormatter] --> H
+    H --> J[Current telemetry]
+    H --> K[Session context]
+    H --> L[LinkedIn import details]
+    H --> M[Thinking preview]
+    H --> N[Recent activity]
 ```
 
-The diagnostics page carries verbose operational detail: live LLM progress, token counts, per-import file inventories, and the current thinking preview when available. The setup and workbench pages stay lighter.
+The telemetry model carries message/detail text, selected model, elapsed time, token counts, estimated remaining time, thinking preview, full thinking content, final response content, completion flag, and an event sequence number.
+
+The shared sidebar surfaces the operational summary continuously:
+
+- Floating navigation with the active page highlighted
+- A reasoning monitor that auto-scrolls while new thinking arrives
+- A compact status monitor that shows streaming status detail without scrolling
+- An activity panel that lists only finished entries
+
+The diagnostics page remains the deeper inspection surface for verbose telemetry, response capture, import diagnostics, and session-level state.
 
 ---
 
@@ -531,13 +561,14 @@ The diagnostics page carries verbose operational detail: live LLM progress, toke
 | Job parsing | `HttpJobResearchService.AnalyzeAsync()` | Yes | LLM structured parsing |
 | Company parsing | `HttpJobResearchService.BuildCompanyProfileAsync()` | Yes | LLM structured parsing |
 | Insights PDF drafting | `InsightsDiscoveryApplicantDifferentiatorDraftingService.DraftAsync()` | Yes | LLM extraction + field drafting |
-| Fit review | `JobFitAnalysisService.Analyze()` | No | Deterministic once context exists |
+| Fit review | `JobFitWorkspaceRefreshService` + optional `LlmFitEnhancementService` via `LlmOperationBroker` | Optional | Deterministic core with semantic enhancement when requested or triggered by broker flow |
 | Evidence ranking | `EvidenceSelectionService.Build()` | No | Deterministic once context exists |
 | Technology gap | `LlmTechnologyGapAnalysisService.AnalyzeAsync()` | Yes (primary) | Deterministic fallback in analyzer layer |
-| Draft generation | `DraftGenerationService.GenerateAsync()` | Yes | Uses session model + thinking level |
+| Refresh all | `LlmOperationBroker.StartRefreshAllAnalysis()` | Yes | Orchestrates job context, fit review, and technology gap as one streamed operation |
+| Draft generation | `DraftGenerationService.GenerateAsync()` via `LlmOperationBroker` | Yes | Uses session model + thinking level; broker owns pre-flight fit refresh |
 | Document rendering | `MarkdownDocumentRenderer.RenderAsync()` | No | Deterministic Markdown shaping |
 | Word export | `LocalDocumentExportService.ExportAsync()` | No | Deterministic Markdown → HTML → DOCX |
-| Diagnostics | `SessionDiagnostics.razor` + formatters | No | Reads stored state and telemetry |
+| Diagnostics | `MainLayout.razor`, `SessionDiagnostics.razor`, and formatters | No | Shared sidebar for live summary, diagnostics page for deep inspection |
 
 ---
 
@@ -550,11 +581,12 @@ The diagnostics page carries verbose operational detail: live LLM progress, toke
 - First-class typed domains: `PROFILE`, `POSITIONS`, `EDUCATION`, `SKILLS`, `CERTIFICATIONS`, `PROJECTS`, `RECOMMENDATIONS`.
 - Enrichment domains preserved as notes: `VOLUNTEERING_EXPERIENCES`, `LANGUAGES`, `PUBLICATIONS`, `PATENTS`, `HONORS`, `COURSES`, `ORGANIZATIONS`.
 - Explicitly ignored: `ARTICLES`, `LEARNING`, `WHATSAPP_NUMBERS`, `PROFILE_SUMMARY`, `PHONE_NUMBERS`, `EMAIL_ADDRESSES`.
-- Fit review and evidence ranking are fully deterministic.
-- Session LLM settings lock after the first LLM-backed operation.
+- Evidence ranking is deterministic; fit review starts from deterministic scoring and can be optionally LLM-enhanced.
+- Session model and thinking settings remain editable after LLM-backed work starts; changes apply to future operations until the user reruns affected analyses or drafts.
+- Brokered SSE endpoints exist for job-context, fit-review, technology-gap, refresh-all, and draft-generation operations.
 - Document export produces both .md and .docx for every generated document.
 - CV rendering includes all recommendations (not just selected evidence) with language detection.
-- The diagnostics page is the verbose inspection surface; workflow pages stay clean.
+- The shared sidebar carries floating navigation, two CRT monitors, and finished activity history; the diagnostics page remains the verbose inspection surface.
 
 ---
 

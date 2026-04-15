@@ -8,13 +8,6 @@
 
 <PageTitle>Session Diagnostics</PageTitle>
 
-<section class="page-header">
-    <div>
-        <h2>Session diagnostics</h2>
-        <p>Inspect LLM telemetry, imported data, and captured prompts for this session.</p>
-    </div>
-</section>
-
 <section class="card-panel stack-gap">
     <div class="field-label">Current telemetry</div>
         @if (GetMostRelevantTelemetry() is { } telemetry)
@@ -223,15 +216,6 @@
                 </div>
             </details>
         }
-    </section>
-}
-
-@if (GetMostRelevantTelemetry()?.HasThinkingPreview == true)
-{
-    <section class="card-panel stack-gap">
-        <h2>Thinking preview</h2>
-        <p class="muted-text">This stays in diagnostics only and is intentionally hidden from the default workflow UI.</p>
-        <pre class="response-box">@GetMostRelevantTelemetry()!.ThinkingPreview</pre>
     </section>
 }
 

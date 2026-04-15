@@ -1,0 +1,448 @@
+using LiCvWriter.Application.Abstractions;
+using LiCvWriter.Application.Models;
+using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
+using LiCvWriter.Core.Documents;
+using LiCvWriter.Core.Jobs;
+using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.Workflows;
+using LiCvWriter.Web.Services;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace LiCvWriter.Tests.Web;
+
+public sealed class LlmOperationBrokerTests
+{
+    [Fact]
+    public async Task StartDraftGeneration_CompletesAndPublishesFinalSnapshot()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<IDraftGenerationService, FakeDraftGenerationService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobPosting(new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive Azure delivery and transformation leadership.",
+            MustHaveThemes = ["Azure", "Transformation leadership"]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartDraftGeneration(new StartDraftGenerationOperationRequest("job-set-01", ["Cv"]));
+
+        LlmOperationSnapshot? finalSnapshot = null;
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            finalSnapshot = broker.GetSnapshot(startResult.OperationId);
+            if (finalSnapshot is { Status: "completed" })
+            {
+                break;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.NotNull(finalSnapshot);
+        Assert.Equal("completed", finalSnapshot!.Status);
+        Assert.True(finalSnapshot.Completed);
+        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
+        Assert.True(workspace.EvidenceSelection.HasSignals);
+        Assert.Equal("Generated content (enhanced fit)", workspace.GeneratedDocuments[0].Markdown);
+        Assert.Equal(JobSetProgressState.Done, workspace.ActiveJobSet.ProgressState);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_CompletesAndStoresJobAndCompanyContext()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, FakeJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateActiveJobSetInputs(
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
+        Assert.Equal("Contoso summary", workspace.CompanyProfile!.Summary);
+    }
+
+    [Fact]
+    public async Task StartTechnologyGapAnalysis_CompletesAndStoresAssessment()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
+        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<ILlmClient, FakeTechnologyGapLlmClient>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect"
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobPosting(new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Build resilient systems"
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartTechnologyGapAnalysis(new StartTechnologyGapOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Contains("Azure", workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies);
+        Assert.Contains("Kubernetes", workspace.ActiveJobSet.TechnologyGapAssessment.PossiblyUnderrepresentedTechnologies);
+    }
+
+    [Fact]
+    public async Task StartFitReviewAnalysis_CompletesAndStoresEnhancedAssessment()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
+        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobPosting(new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive Azure delivery and transformation leadership.",
+            MustHaveThemes = ["Azure", "Transformation leadership"]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartFitReviewAnalysis(new StartFitReviewOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
+        Assert.Contains(workspace.JobFitAssessment.Requirements, requirement =>
+            requirement.Requirement == "Transformation leadership"
+            && requirement.IsLlmEnhanced
+            && requirement.Match == JobRequirementMatch.Strong);
+        Assert.True(workspace.EvidenceSelection.HasSignals);
+    }
+
+    [Fact]
+    public async Task StartRefreshAllAnalysis_CompletesAndRefreshesResearchFitAndTechnologyGap()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
+        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, FakeJobResearchService>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.UpdateActiveJobSetInputs(
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartRefreshAllAnalysis(new StartRefreshAllOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
+        Assert.Equal("Contoso summary", workspace.CompanyProfile!.Summary);
+        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
+        Assert.True(workspace.EvidenceSelection.HasSignals);
+        Assert.Contains("Azure", workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies);
+    }
+
+    private static async Task<LlmOperationSnapshot> WaitForTerminalSnapshotAsync(LlmOperationBroker broker, string operationId)
+    {
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            var snapshot = broker.GetSnapshot(operationId);
+            if (snapshot is { IsTerminal: true })
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new Xunit.Sdk.XunitException($"Operation '{operationId}' did not reach a terminal state.");
+    }
+
+    private sealed class FakeDraftGenerationService : IDraftGenerationService
+    {
+        public Task<DraftGenerationResult> GenerateAsync(
+            DraftGenerationRequest request,
+            Action<LlmProgressUpdate>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var content = request.JobFitAssessment?.IsLlmEnhanced == true ? "Generated content (enhanced fit)" : "Generated content";
+            progress?.Invoke(new LlmProgressUpdate(
+                "Generating Cv",
+                "Streaming draft content.",
+                request.LlmModel ?? "configured-model",
+                TimeSpan.FromMilliseconds(200),
+                PromptTokens: 12,
+                CompletionTokens: 18,
+                ResponseContent: content,
+                ThinkingPreview: "Reasoning",
+                ThinkingContent: "Reasoning in full",
+                Sequence: 1));
+
+            return Task.FromResult(new DraftGenerationResult(
+                [new GeneratedDocument(DocumentKind.Cv, "CV", content, content, DateTimeOffset.UtcNow)],
+                Array.Empty<DocumentExportResult>()));
+        }
+    }
+
+    private sealed class FakeJobResearchService : IJobResearchService
+    {
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke(new LlmProgressUpdate(
+                "Parsing job posting",
+                "Structured job parsing is running.",
+                selectedModel ?? "configured-model",
+                TimeSpan.FromMilliseconds(100),
+                ResponseContent: "{\"roleTitle\":\"Lead Architect\"}",
+                Sequence: 1));
+
+            return Task.FromResult(new JobPostingAnalysis
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                MustHaveThemes = ["Azure", "Transformation leadership"],
+                SourceUrl = jobPostingUrl
+            });
+        }
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new CompanyResearchProfile
+            {
+                Summary = "Contoso summary",
+                SourceUrls = sourceUrls.ToArray()
+            });
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, cancellationToken);
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new CompanyResearchProfile { Summary = companyContextText });
+    }
+
+    private sealed class FakeTechnologyGapLlmClient : ILlmClient
+    {
+        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke(new LlmProgressUpdate(
+                "Analyzing technology gaps",
+                "Technology gap analysis is running.",
+                request.Model,
+                TimeSpan.FromMilliseconds(120),
+                ResponseContent: "{\"detectedTechnologies\":[\"Azure\",\"Kubernetes\"],\"possiblyUnderrepresentedTechnologies\":[\"Kubernetes\"]}",
+                ThinkingPreview: "Comparing technology evidence",
+                ThinkingContent: "Comparing technology evidence",
+                Sequence: 1));
+
+            return Task.FromResult(new LlmResponse(
+                request.Model,
+                "{\"detectedTechnologies\":[\"Azure\",\"Kubernetes\"],\"possiblyUnderrepresentedTechnologies\":[\"Kubernetes\"]}",
+                null,
+                true,
+                12,
+                18,
+                TimeSpan.FromSeconds(1)));
+        }
+    }
+
+    private sealed class FakeCompositeLlmClient : ILlmClient
+    {
+        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            var isFitEnhancement = request.SystemPrompt?.Contains("semantic evidence matcher", StringComparison.OrdinalIgnoreCase) == true;
+            var content = isFitEnhancement
+                ? "{\"enhancedRequirements\":[{\"requirement\":\"Transformation leadership\",\"newMatch\":\"Strong\",\"evidence\":[\"Led Azure platform delivery and modernization programs\"],\"rationale\":\"Modernization delivery demonstrates transformation leadership.\"}]}"
+                : "{\"detectedTechnologies\":[\"Azure\",\"Kubernetes\"],\"possiblyUnderrepresentedTechnologies\":[\"Kubernetes\"]}";
+            var message = isFitEnhancement ? "Enhancing fit review with LLM" : "Analyzing technology gaps";
+            var thinking = isFitEnhancement ? "Comparing semantic fit evidence" : "Comparing technology evidence";
+
+            progress?.Invoke(new LlmProgressUpdate(
+                message,
+                $"{message} is running.",
+                request.Model,
+                TimeSpan.FromMilliseconds(120),
+                ResponseContent: content,
+                ThinkingPreview: thinking,
+                ThinkingContent: thinking,
+                Sequence: 1));
+
+            return Task.FromResult(new LlmResponse(
+                request.Model,
+                content,
+                null,
+                true,
+                12,
+                18,
+                TimeSpan.FromSeconds(1)));
+        }
+    }
+}

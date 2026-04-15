@@ -45,7 +45,7 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
-    public void MarkLlmWorkStarted_LocksFurtherChanges()
+    public void SetLlmSessionSettings_AfterLlmWorkStarts_UpdatesSettings()
     {
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
 
@@ -57,10 +57,29 @@ public sealed class WorkspaceSessionTests
         session.SetLlmSessionSettings("configured-model", "medium");
         session.MarkLlmWorkStarted();
 
-        var exception = Assert.Throws<InvalidOperationException>(() => session.SetLlmSessionSettings("session-model", "high"));
+        session.SetLlmSessionSettings("session-model", "high");
 
-        Assert.False(session.CanEditLlmSessionSettings);
-        Assert.Contains("locked", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(session.CanEditLlmSessionSettings);
+        Assert.Equal("session-model", session.SelectedLlmModel);
+        Assert.Equal("high", session.SelectedThinkingLevel);
+    }
+
+    [Fact]
+    public void SetOllamaAvailability_AfterLlmWorkStarts_AutoConfirmsWhenConfiguredModelMatches()
+    {
+        var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
+
+        session.MarkLlmWorkStarted();
+        session.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.9.0",
+            "configured-model",
+            true,
+            ["configured-model", "other-model"]));
+
+        Assert.True(session.CanEditLlmSessionSettings);
+        Assert.True(session.IsLlmSessionConfigured);
+        Assert.True(session.IsLlmReady);
+        Assert.Equal("configured-model", session.SelectedLlmModel);
     }
 
     [Fact]
@@ -377,5 +396,18 @@ public sealed class WorkspaceSessionTests
 
         session.SelectJobSet("job-set-03");
         Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+    }
+
+    [Fact]
+    public void JobSets_ReturnsSnapshotThatIsSafeAfterFurtherMutations()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        var snapshot = session.JobSets;
+        session.AddJobSet();
+
+        Assert.Single(snapshot);
+        Assert.Equal("job-set-01", snapshot[0].Id);
+        Assert.Equal(2, session.JobSets.Count);
     }
 }

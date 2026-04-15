@@ -1,23 +1,21 @@
 @page "/workspace/job-workbench"
 @implements IDisposable
+@implements IAsyncDisposable
+@using System.Net.Http.Json
+@using System.Text.Json
 @using LiCvWriter.Application.Models
 @inject ILlmClient LlmClient
 @inject JobFitWorkspaceRefreshService JobFitWorkspaceRefreshService
 @inject IJobResearchService JobResearchService
-@inject IDraftGenerationService DraftGenerationService
 @inject LlmTechnologyGapAnalysisService GapAnalysisService
 @inject LlmFitEnhancementService FitEnhancementService
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Job Workbench</PageTitle>
-
-<section class="page-header">
-    <div>
-        <h2>Job workbench</h2>
-        <p>Each tab holds a target role with its own research, fit review, and drafts.</p>
-    </div>
-</section>
 
 <section class="card-panel stack-gap">
     <div class="field-label">Job tabs</div>
@@ -27,6 +25,7 @@
             <button type="button"
                     class="@(jobSet.Id == Workspace.ActiveJobSetId ? "primary-button" : "secondary-button")"
                     title="@jobSet.ProgressDetail"
+                    disabled="@isBusy"
                     @onclick="() => SelectJobSet(jobSet.Id)">
                 <span class="job-set-button-label">
                     <span class="@GetProgressIndicatorClass(jobSet.ProgressState)" aria-hidden="true"></span>
@@ -35,8 +34,8 @@
             </button>
         }
 
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)">Add job tab (URLs)</button>
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)">Add job tab (paste text)</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)" disabled="@isBusy">Add job tab (URLs)</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)" disabled="@isBusy">Add job tab (paste text)</button>
         <button type="button" class="secondary-button" @onclick="DeleteActiveJobSet" disabled="@(isBusy || Workspace.JobSets.Count <= 1)">Delete active job tab</button>
     </div>
     @if (Workspace.JobSets.Count == 1)
@@ -476,6 +475,14 @@ else if (CanRunFitReview)
         </div>
     }
 
+    @if (GetActiveDraftStreamSnapshot() is { } draftSnapshot && !string.IsNullOrWhiteSpace(draftSnapshot.ResponseContent))
+    {
+        <div class="details-card stack-gap stream-preview-card">
+            <div class="field-label">Live draft preview</div>
+            <pre class="response-box stream-preview-box">@draftSnapshot.ResponseContent</pre>
+        </div>
+    }
+
     <p class="muted-text">Job parsing, company parsing, technology gap analysis, and generation use the session model you selected on Start / Setup. Fit scoring and evidence ranking stay deterministic after that context is stored.</p>
 
     @if (!CanRunFitReview)
@@ -533,6 +540,7 @@ else if (CanRunFitReview)
     private const string GenerateDraftsMessage = "Generating targeted drafts";
     private const string GenerateDraftTelemetryPrefix = "Generating ";
     private const string RefreshFitReviewMessage = "Analyzing job fit";
+    private const string EnhanceFitReviewTelemetryMessage = "Enhancing fit review with LLM";
     private const string RefreshTechnologyGapMessage = "Analyzing technology gaps";
     private string jobUrl = string.Empty;
     private string companyUrls = string.Empty;
@@ -549,6 +557,10 @@ else if (CanRunFitReview)
     private bool generateCoverLetter = true;
     private bool generateSummary = true;
     private bool generateInterviewNotes = true;
+    private string? activeStreamOperationId;
+    private LlmOperationSnapshot? activeStreamSnapshot;
+    private DotNetObjectReference<JobWorkbench>? streamCallbackReference;
+    private bool disposed;
     private bool isBusy => isResearching || isGenerating || isRefreshingFitReview || isRefreshingTechnologyGap || isRefreshingAll;
     private bool isResearching => currentOperation == BusyOperation.AnalyzeAndBuildContext || isAnalyzing || isBuildingCompanyContext;
     private bool isAnalyzing => currentOperation == BusyOperation.AnalyzeJob
@@ -580,9 +592,22 @@ else if (CanRunFitReview)
 
     public void Dispose()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
         uiRefreshTimer?.Dispose();
         Operations.Changed -= HandleChanged;
         Workspace.Changed -= HandleWorkspaceChanged;
+        streamCallbackReference?.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeActiveStreamAsync(clearSnapshot: false);
+        Dispose();
     }
 
     private void StartOperationTimer()
@@ -612,6 +637,7 @@ else if (CanRunFitReview)
 
         if (!TryEnsureResearchReadiness())
         {
+            StopOperationTimer();
             return;
         }
 
@@ -621,38 +647,30 @@ else if (CanRunFitReview)
             return;
         }
 
-        if (!TryGetJobUri(out var jobUri))
+        if (!TryGetJobUri(out _))
         {
+            StopOperationTimer();
             return;
         }
 
-        if (!TryGetCompanyContextUris(out var companyContextUris))
+        if (!TryGetCompanyContextUris(out _))
         {
+            StopOperationTimer();
             return;
         }
 
         try
         {
             currentOperation = BusyOperation.AnalyzeAndBuildContext;
-            Workspace.MarkLlmWorkStarted();
-
-            if (!await ExecuteJobAnalysisAsync(jobUri, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
-            {
-                return;
-            }
-
-            if (!await ExecuteCompanyContextAsync(companyContextUris, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
-            {
-                return;
-            }
-
-            Operations.Success("Job and company context updated.", "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.");
-            SetAdditionalInstructions(BuildResearchInstructions());
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/job-context",
+                new StartJobContextOperationRequest(Workspace.ActiveJobSetId));
         }
-        finally
+        catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
+            errorMessage = exception.Message;
         }
     }
 
@@ -661,34 +679,22 @@ else if (CanRunFitReview)
         if (string.IsNullOrWhiteSpace(jobPostingText))
         {
             errorMessage = "Paste the job posting text before analyzing.";
+            StopOperationTimer();
             return;
         }
 
         try
         {
             currentOperation = BusyOperation.AnalyzeAndBuildContext;
-            Workspace.MarkLlmWorkStarted();
-
-            if (!await ExecuteJobTextAnalysisAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(companyContextText))
-            {
-                if (!await ExecuteCompanyContextFromTextAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
-                {
-                    return;
-                }
-            }
-
-            Operations.Success("Job and company context updated.", "The job tab now has the latest target role context" + (string.IsNullOrWhiteSpace(companyContextText) ? "." : " and company context.") + " Fit review and generation are still idle until you run them.");
-            SetAdditionalInstructions(BuildResearchInstructions());
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/job-context",
+                new StartJobContextOperationRequest(Workspace.ActiveJobSetId));
         }
-        finally
+        catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
+            errorMessage = exception.Message;
         }
     }
 
@@ -953,12 +959,16 @@ else if (CanRunFitReview)
             if (!Workspace.IsLlmReady)
             {
                 errorMessage = "Complete Start / Setup first: check Ollama, choose a session model, and choose a thinking level.";
+                currentOperation = BusyOperation.None;
+                StopOperationTimer();
                 return;
             }
 
             if (Workspace.CandidateProfile is null || Workspace.JobPosting is null)
             {
                 errorMessage = "Load a LinkedIn profile and analyze a target job before generating drafts.";
+                currentOperation = BusyOperation.None;
+                StopOperationTimer();
                 return;
             }
 
@@ -971,44 +981,20 @@ else if (CanRunFitReview)
             if (kinds.Count == 0)
             {
                 errorMessage = "Select at least one document type.";
+                currentOperation = BusyOperation.None;
+                StopOperationTimer();
                 return;
             }
 
             Workspace.ClearGeneratedArtifacts();
-            await TryRefreshFitReviewAsync(throwOnMissingReadiness: false);
-            Workspace.MarkLlmWorkStarted();
-            Workspace.MarkActiveJobSetRunning("Draft generation is running for this tab.");
-
-            var result = await Operations.RunAsync(
-                GenerateDraftsMessage,
-                $"{kinds.Count} document types via {Workspace.SelectedLlmModel} into {Workspace.ActiveJobSet.OutputFolderName}",
-                () => DraftGenerationService.GenerateAsync(new DraftGenerationRequest(
-                    Workspace.CandidateProfile,
-                    Workspace.JobPosting,
-                    Workspace.CompanyProfile?.Summary,
-                    additionalInstructions,
-                    kinds,
-                    ExportToFiles: true,
-                    LlmModel: Workspace.SelectedLlmModel,
-                    LlmThinkingLevel: Workspace.SelectedThinkingLevel,
-                    ExportFolder: Workspace.ActiveJobSet.OutputFolderName,
-                    OutputLanguage: Workspace.ActiveJobSet.OutputLanguage,
-                    JobFitAssessment: Workspace.JobFitAssessment,
-                    ApplicantDifferentiatorProfile: Workspace.ApplicantDifferentiatorProfile,
-                        EvidenceSelection: Workspace.EvidenceSelection,
-                        TechnologyGapAssessment: Workspace.ActiveJobSet.TechnologyGapAssessment),
-                        ReportLlmProgress));
-
-            Workspace.SetGeneratedDocuments(result.Documents, result.Exports);
-                    await RefreshOllamaAvailabilitySilentlyAsync();
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/generate-drafts",
+                new StartDraftGenerationOperationRequest(Workspace.ActiveJobSetId, kinds.Select(static kind => kind.ToString()).ToArray()));
         }
         catch (Exception exception)
         {
             errorMessage = exception.Message;
             Workspace.MarkActiveJobSetFailed("Draft generation failed for this tab.");
-        }
-        finally
-        {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
         }
@@ -1018,6 +1004,7 @@ else if (CanRunFitReview)
     {
         Workspace.AddJobSet(inputMode);
         errorMessage = null;
+        ClearRetainedStreamState();
         SyncFromWorkspace();
     }
 
@@ -1027,6 +1014,7 @@ else if (CanRunFitReview)
         {
             Workspace.DeleteJobSet(Workspace.ActiveJobSetId);
             errorMessage = null;
+            ClearRetainedStreamState();
             SyncFromWorkspace();
         }
         catch (Exception exception)
@@ -1039,6 +1027,7 @@ else if (CanRunFitReview)
     {
         Workspace.SelectJobSet(jobSetId);
         errorMessage = null;
+        ClearRetainedStreamState();
         SyncFromWorkspace();
     }
 
@@ -1122,12 +1111,15 @@ else if (CanRunFitReview)
 
         try
         {
-            await TryRefreshFitReviewAsync(throwOnMissingReadiness: true);
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/fit-review",
+                new StartFitReviewOperationRequest(Workspace.ActiveJobSetId));
         }
-        finally
+        catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
+            errorMessage = exception.Message;
         }
     }
 
@@ -1145,13 +1137,116 @@ else if (CanRunFitReview)
 
         try
         {
-            await TryRefreshTechnologyGapAsync(throwOnMissingReadiness: true);
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/technology-gap",
+                new StartTechnologyGapOperationRequest(Workspace.ActiveJobSetId));
         }
-        finally
+        catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
+            errorMessage = exception.Message;
         }
+    }
+
+    [JSInvokable]
+    public async Task HandleLlmOperationEvent(string eventType, string payload)
+    {
+        var operationEvent = JsonSerializer.Deserialize<LlmOperationEvent>(payload);
+        if (operationEvent is null || !string.Equals(operationEvent.Snapshot.OperationId, activeStreamOperationId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        activeStreamSnapshot = operationEvent.Snapshot;
+
+        if (!string.Equals(activeStreamSnapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (activeStreamSnapshot.IsTerminal)
+        {
+            currentOperation = BusyOperation.None;
+            StopOperationTimer();
+            SyncFromWorkspace();
+
+            if (activeStreamSnapshot.Kind is "analyze-job-context" or "refresh-all" && activeStreamSnapshot.Status == "completed")
+            {
+                SetAdditionalInstructions(BuildResearchInstructions());
+            }
+
+            if (activeStreamSnapshot.Status == "completed")
+            {
+                await RefreshOllamaAvailabilitySilentlyAsync();
+            }
+
+            if (activeStreamSnapshot.Status == "failed")
+            {
+                errorMessage = activeStreamSnapshot.Error ?? activeStreamSnapshot.Detail;
+            }
+
+            await DisposeActiveStreamAsync(clearSnapshot: false);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StartStreamedOperationAsync<TRequest>(string relativePath, TRequest request)
+    {
+        await DisposeActiveStreamAsync();
+
+        var client = HttpClientFactory.CreateClient();
+        using var response = await client.PostAsJsonAsync(Navigation.ToAbsoluteUri(relativePath), request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
+                ? $"Operation start failed with status {(int)response.StatusCode}."
+                : error.Trim().Trim('"'));
+        }
+
+        var startResult = await response.Content.ReadFromJsonAsync<LlmOperationStartResult>()
+            ?? throw new InvalidOperationException("The operation start response was empty.");
+
+        activeStreamOperationId = startResult.OperationId;
+        activeStreamSnapshot = null;
+        streamCallbackReference ??= DotNetObjectReference.Create(this);
+
+        await JS.InvokeVoidAsync(
+            "liCvWriterLlmStream.subscribe",
+            startResult.OperationId,
+            Navigation.ToAbsoluteUri(startResult.EventsPath).ToString(),
+            streamCallbackReference);
+    }
+
+    private async Task DisposeActiveStreamAsync(bool clearSnapshot = true)
+    {
+        if (!string.IsNullOrWhiteSpace(activeStreamOperationId))
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("liCvWriterLlmStream.dispose", activeStreamOperationId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Ignore disconnects during teardown.
+            }
+        }
+
+        activeStreamOperationId = null;
+
+        if (clearSnapshot)
+        {
+            activeStreamSnapshot = null;
+        }
+    }
+
+    private void ClearRetainedStreamState()
+    {
+        activeStreamOperationId = null;
+        activeStreamSnapshot = null;
     }
 
     private async Task RefreshAllAnalysisAsync()
@@ -1169,60 +1264,15 @@ else if (CanRunFitReview)
 
         try
         {
-            Workspace.MarkLlmWorkStarted();
-
-            if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText)
-            {
-                if (!string.IsNullOrWhiteSpace(jobPostingText))
-                {
-                    if (!await ExecuteJobTextAnalysisAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
-                    {
-                        return;
-                    }
-                }
-
-                if (!string.IsNullOrWhiteSpace(companyContextText))
-                {
-                    if (!await ExecuteCompanyContextFromTextAsync(manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
-                    {
-                        return;
-                    }
-                }
-            }
-            else
-            {
-                if (TryGetJobUri(out var jobUri))
-                {
-                    if (!await ExecuteJobAnalysisAsync(jobUri, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Job analysis"))
-                    {
-                        return;
-                    }
-                }
-
-                if (TryGetCompanyContextUris(out var companyContextUris))
-                {
-                    if (!await ExecuteCompanyContextAsync(companyContextUris, manageCurrentOperation: false, markLlmWorkStarted: false, emitSuccess: false, userErrorPrefix: "Company context"))
-                    {
-                        return;
-                    }
-                }
-            }
-
-            await TryRefreshFitReviewAsync();
-            await TryRefreshTechnologyGapAsync();
-
-            additionalInstructions = BuildResearchInstructions();
-            Operations.Success("All analysis refreshed.", "Job, company, fit review, technology gap and evidence are current for this tab.");
+            await StartStreamedOperationAsync(
+                "/api/llm/operations/refresh-all",
+                new StartRefreshAllOperationRequest(Workspace.ActiveJobSetId));
         }
         catch (Exception exception)
         {
-            errorMessage = exception.Message;
-            Operations.Error("Refresh all failed.", exception.Message);
-        }
-        finally
-        {
             currentOperation = BusyOperation.None;
             StopOperationTimer();
+            errorMessage = exception.Message;
         }
     }
 
@@ -1459,6 +1509,12 @@ else if (CanRunFitReview)
     private static string FormatTokenCount(long? tokens)
         => tokens?.ToString("N0") ?? "Pending";
 
+    private LlmOperationSnapshot? GetActiveDraftStreamSnapshot()
+        => activeStreamSnapshot is { Kind: "generate-drafts" } snapshot
+            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase)
+            ? snapshot
+            : null;
+
     private LlmOperationTelemetry? GetCurrentLlmTelemetry()
         => IsWorkbenchTelemetryActive() ? Operations.ActiveLlmTelemetry : null;
 
@@ -1470,11 +1526,15 @@ else if (CanRunFitReview)
             return false;
         }
 
-        return string.Equals(telemetryMessage, ParseJobTelemetryMessage, StringComparison.Ordinal)
+        return IsWorkbenchTelemetryMessage(telemetryMessage);
+    }
+
+    private static bool IsWorkbenchTelemetryMessage(string telemetryMessage)
+        => string.Equals(telemetryMessage, ParseJobTelemetryMessage, StringComparison.Ordinal)
             || string.Equals(telemetryMessage, ParseCompanyTelemetryMessage, StringComparison.Ordinal)
+            || string.Equals(telemetryMessage, EnhanceFitReviewTelemetryMessage, StringComparison.Ordinal)
             || string.Equals(telemetryMessage, RefreshTechnologyGapMessage, StringComparison.Ordinal)
             || telemetryMessage.StartsWith(GenerateDraftTelemetryPrefix, StringComparison.Ordinal);
-    }
 
     private bool IsCurrentWorkbenchOperation(string message)
         => Operations.IsBusy && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
