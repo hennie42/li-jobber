@@ -13,13 +13,6 @@
 
 <PageTitle>Start / Setup</PageTitle>
 
-<section class="page-header">
-    <div>
-        <h2>Start / Setup</h2>
-        <p>Choose the local AI model, load your LinkedIn profile, and optionally add personal differentiators.</p>
-    </div>
-</section>
-
 <div class="stepper-container">
 <section class="content-grid">
     <article class="card-panel stack-gap step-card @Step1StateClass">
@@ -54,7 +47,7 @@
                 @if (availability.AvailableModels.Count > 0)
                 {
                     <label class="field-label" for="sessionModel">Session model</label>
-                    <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@(!Workspace.CanEditLlmSessionSettings || isCheckingOllama)">
+                    <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@isCheckingOllama">
                         @foreach (var model in availability.AvailableModels.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
                         {
                             <option value="@model">@model</option>
@@ -62,7 +55,7 @@
                     </select>
 
                     <label class="field-label" for="thinkingLevel">Thinking level</label>
-                    <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@(!Workspace.CanEditLlmSessionSettings || isCheckingOllama)">
+                    <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@isCheckingOllama">
                         @foreach (var level in ThinkingLevels)
                         {
                             <option value="@level">@FormatThinkingLevel(level)</option>
@@ -83,9 +76,9 @@
                 <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
             }
 
-            @if (!Workspace.CanEditLlmSessionSettings)
+            @if (Workspace.HasStartedLlmWork)
             {
-                <p class="muted-text">The session model and thinking level are locked because LLM-backed work has already started in this session.</p>
+                <p class="muted-text">Updated session model and thinking changes apply to future LLM operations. Re-run any completed analysis or draft generation that you want refreshed with the new settings.</p>
             }
 
             @if (!string.IsNullOrWhiteSpace(llmErrorMessage))
@@ -562,7 +555,6 @@
     private LinkedInExportImportResult? result;
 
     private bool CanSaveSessionLlmSettings => !isCheckingOllama
-        && Workspace.CanEditLlmSessionSettings
         && availability is not null
         && availability.AvailableModels.Count > 0
         && !string.IsNullOrWhiteSpace(selectedModel);

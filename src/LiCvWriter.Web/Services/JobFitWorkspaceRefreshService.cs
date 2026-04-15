@@ -15,9 +15,12 @@ public sealed class JobFitWorkspaceRefreshService(
     /// Call after the LLM enhancement pass has updated the fit assessment in-place.
     /// </summary>
     public void RefreshActiveJobSetEvidence()
+        => RefreshJobSetEvidence(workspace.ActiveJobSetId);
+
+    public void RefreshJobSetEvidence(string jobSetId)
     {
         var candidateProfile = workspace.CandidateProfile;
-        var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == workspace.ActiveJobSetId);
+        var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == jobSetId);
         if (candidateProfile is null || jobSet?.JobPosting is null || jobSet.JobFitAssessment is null)
         {
             return;
@@ -30,7 +33,7 @@ public sealed class JobFitWorkspaceRefreshService(
             jobSet.JobFitAssessment,
             workspace.ApplicantDifferentiatorProfile);
 
-        workspace.SetJobSetEvidenceSelection(workspace.ActiveJobSetId, evidenceSelection);
+        workspace.SetJobSetEvidenceSelection(jobSetId, evidenceSelection);
     }
 
     public int RefreshAllJobSets()
@@ -50,7 +53,7 @@ public sealed class JobFitWorkspaceRefreshService(
         return refreshed;
     }
 
-    private bool RefreshJobSet(string jobSetId)
+    public bool RefreshJobSet(string jobSetId)
     {
         var candidateProfile = workspace.CandidateProfile;
         var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == jobSetId);

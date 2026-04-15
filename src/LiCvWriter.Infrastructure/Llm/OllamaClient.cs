@@ -10,7 +10,7 @@ namespace LiCvWriter.Infrastructure.Llm;
 
 public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) : ILlmClient
 {
-    private static readonly TimeSpan ProgressUpdateInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ProgressUpdateInterval = TimeSpan.FromMilliseconds(75);
 
     public async Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
     {
@@ -186,7 +186,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             $"{fallbackModel} request sent to Ollama.",
             fallbackModel,
             TimeSpan.Zero,
-            completed: false);
+            completed: false,
+            sequence: 1);
 
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -196,9 +197,11 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         var content = new StringBuilder();
         var thinking = new StringBuilder();
         var stopwatch = Stopwatch.StartNew();
-        var nextProgressAt = ProgressUpdateInterval;
+        var nextProgressAt = TimeSpan.Zero;
         var chunkCount = 0;
-        var sawOutput = false;
+        var lastReportedContentLength = 0;
+        var lastReportedThinkingLength = 0;
+        long sequence = 1;
         var model = fallbackModel;
         var completed = false;
         long? promptTokens = null;
@@ -229,7 +232,6 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
 
             if (!string.IsNullOrWhiteSpace(chunk.ContentDelta))
             {
-                sawOutput = true;
                 content.Append(chunk.ContentDelta);
             }
 
@@ -256,7 +258,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completed |= chunk.Done;
             chunkCount++;
 
-            if (sawOutput && stopwatch.Elapsed >= nextProgressAt)
+            var hasStreamedVisibleContent = content.Length > 0 || thinking.Length > 0;
+            var hasNewVisibleContent = content.Length != lastReportedContentLength || thinking.Length != lastReportedThinkingLength;
+            if (hasStreamedVisibleContent && hasNewVisibleContent && (stopwatch.Elapsed >= nextProgressAt || chunk.Done))
             {
                 ReportProgress(
                     progress,
@@ -268,9 +272,14 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
                     promptTokens: promptTokens,
                     completionTokens: completionTokens,
                     estimatedRemaining: null,
-                    thinkingPreview: BuildThinkingPreview(thinking));
+                    thinkingPreview: BuildThinkingPreview(thinking),
+                    responseContent: content.ToString(),
+                    thinkingContent: thinking.Length == 0 ? null : thinking.ToString(),
+                    sequence: ++sequence);
 
-                nextProgressAt += ProgressUpdateInterval;
+                lastReportedContentLength = content.Length;
+                lastReportedThinkingLength = thinking.Length;
+                nextProgressAt = stopwatch.Elapsed + ProgressUpdateInterval;
             }
         }
 
@@ -287,7 +296,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completionTokens: completionTokens,
             estimatedRemaining: TimeSpan.Zero,
             thinkingPreview: BuildThinkingPreview(thinking),
-            responseContent: content.ToString());
+            responseContent: content.ToString(),
+            thinkingContent: thinking.Length == 0 ? null : thinking.ToString(),
+            sequence: ++sequence);
 
         return new LlmResponse(
             model,
@@ -367,7 +378,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         long? completionTokens = null,
         TimeSpan? estimatedRemaining = null,
         string? thinkingPreview = null,
-        string? responseContent = null)
+        string? responseContent = null,
+        string? thinkingContent = null,
+        long sequence = 0)
         => progress?.Invoke(new LlmProgressUpdate(
             message,
             detail,
@@ -378,7 +391,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completionTokens,
             estimatedRemaining,
             thinkingPreview,
-            responseContent));
+            responseContent,
+            thinkingContent,
+            sequence));
 
     private static string? BuildThinkingPreview(StringBuilder thinking)
     {

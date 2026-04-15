@@ -4,27 +4,33 @@ namespace LiCvWriter.Web.Services;
 
 public sealed class OperationStatusService
 {
+    private readonly object gate = new();
     private readonly List<OperationStatusEntry> entries = [];
     private int busyDepth;
+    private DateTimeOffset? busyStartedAt;
+    private string currentMessage = "Idle";
+    private string? currentDetail;
+    private LlmOperationTelemetry? currentLlmTelemetry;
+    private LlmOperationTelemetry? lastCompletedLlmTelemetry;
 
     public event Action? Changed;
 
-    public bool IsBusy => busyDepth > 0;
+    public bool IsBusy => Read(() => busyDepth > 0);
 
-    public DateTimeOffset? BusyStartedAt { get; private set; }
+    public DateTimeOffset? BusyStartedAt => Read(() => busyStartedAt);
 
-    public string CurrentMessage { get; private set; } = "Idle";
+    public string CurrentMessage => Read(() => currentMessage);
 
-    public string? CurrentDetail { get; private set; }
+    public string? CurrentDetail => Read(() => currentDetail);
 
-    public LlmOperationTelemetry? CurrentLlmTelemetry { get; private set; }
+    public LlmOperationTelemetry? CurrentLlmTelemetry => Read(() => currentLlmTelemetry);
 
     public LlmOperationTelemetry? ActiveLlmTelemetry
-        => CurrentLlmTelemetry is { Completed: false } telemetry ? telemetry : null;
+        => Read(() => currentLlmTelemetry is { Completed: false } telemetry ? telemetry : null);
 
-    public LlmOperationTelemetry? LastCompletedLlmTelemetry { get; private set; }
+    public LlmOperationTelemetry? LastCompletedLlmTelemetry => Read(() => lastCompletedLlmTelemetry);
 
-    public IReadOnlyList<OperationStatusEntry> Entries => entries;
+    public IReadOnlyList<OperationStatusEntry> Entries => Read(() => entries.ToArray());
 
     public async Task RunAsync(string message, string? detail, Func<Task> action)
     {
@@ -71,90 +77,122 @@ public sealed class OperationStatusService
 
     public void Info(string message, string? detail = null)
     {
-        ResetCurrentLlmTelemetry();
-        CurrentMessage = message;
-        CurrentDetail = detail;
-        AddEntry("info", message, detail);
+        lock (gate)
+        {
+            ResetCurrentLlmTelemetryUnsafe();
+            currentMessage = message;
+            currentDetail = detail;
+            AddEntryUnsafe("info", message, detail);
+        }
+
+        NotifyChanged();
     }
 
     public void Success(string message, string? detail = null, TimeSpan? duration = null)
     {
-        ResetCurrentLlmTelemetry();
-        CurrentMessage = message;
-        CurrentDetail = detail;
-        AddEntry("success", message, detail, duration);
+        lock (gate)
+        {
+            ResetCurrentLlmTelemetryUnsafe();
+            currentMessage = message;
+            currentDetail = detail;
+            AddEntryUnsafe("success", message, detail, duration);
+        }
+
+        NotifyChanged();
     }
 
     public void Error(string message, string? detail = null, TimeSpan? duration = null)
     {
-        ResetCurrentLlmTelemetry();
-        CurrentMessage = message;
-        CurrentDetail = detail;
-        AddEntry("error", message, detail, duration);
+        lock (gate)
+        {
+            ResetCurrentLlmTelemetryUnsafe();
+            currentMessage = message;
+            currentDetail = detail;
+            AddEntryUnsafe("error", message, detail, duration);
+        }
+
+        NotifyChanged();
     }
 
     public void UpdateCurrent(string message, string? detail = null)
     {
-        ResetCurrentLlmTelemetry();
-        CurrentMessage = message;
-        CurrentDetail = detail;
-        Changed?.Invoke();
+        lock (gate)
+        {
+            ResetCurrentLlmTelemetryUnsafe();
+            currentMessage = message;
+            currentDetail = detail;
+        }
+
+        NotifyChanged();
     }
 
     public void UpdateCurrent(LlmProgressUpdate update)
     {
-        CurrentMessage = update.Message;
-        CurrentDetail = update.Detail;
-        CurrentLlmTelemetry = new LlmOperationTelemetry(
-            DateTimeOffset.Now,
-            update.Message,
-            update.Detail,
-            update.Model,
-            update.Elapsed,
-            update.PromptTokens,
-            update.CompletionTokens,
-            update.EstimatedRemaining,
-            update.ThinkingPreview,
-            update.Completed,
-            update.ResponseContent);
-
-        if (update.Completed)
+        lock (gate)
         {
-            LastCompletedLlmTelemetry = CurrentLlmTelemetry;
+            currentMessage = update.Message;
+            currentDetail = update.Detail;
+            currentLlmTelemetry = new LlmOperationTelemetry(
+                DateTimeOffset.Now,
+                update.Message,
+                update.Detail,
+                update.Model,
+                update.Elapsed,
+                update.PromptTokens,
+                update.CompletionTokens,
+                update.EstimatedRemaining,
+                update.ThinkingPreview,
+                update.Completed,
+                update.ResponseContent,
+                update.ThinkingContent,
+                update.Sequence);
+
+            if (update.Completed)
+            {
+                lastCompletedLlmTelemetry = currentLlmTelemetry;
+            }
         }
 
-        Changed?.Invoke();
+        NotifyChanged();
     }
 
     private void Begin(string message, string? detail)
     {
-        ResetCurrentLlmTelemetry();
-        busyDepth++;
-        BusyStartedAt ??= DateTimeOffset.Now;
-        CurrentMessage = message;
-        CurrentDetail = detail;
-        AddEntry("busy", message, detail);
+        lock (gate)
+        {
+            ResetCurrentLlmTelemetryUnsafe();
+            busyDepth++;
+            busyStartedAt ??= DateTimeOffset.Now;
+            currentMessage = message;
+            currentDetail = detail;
+            AddEntryUnsafe("busy", message, detail);
+        }
+
+        NotifyChanged();
     }
 
     private void End()
     {
-        busyDepth = Math.Max(0, busyDepth - 1);
-        if (!IsBusy)
+        lock (gate)
         {
-            BusyStartedAt = null;
+            busyDepth = Math.Max(0, busyDepth - 1);
+            if (busyDepth == 0)
+            {
+                busyStartedAt = null;
+            }
+
+            if (busyDepth == 0 && currentMessage.StartsWith("Completed:", StringComparison.Ordinal))
+            {
+                currentDetail ??= "Ready for the next step.";
+            }
         }
 
-        if (!IsBusy && CurrentMessage.StartsWith("Completed:", StringComparison.Ordinal))
-        {
-            CurrentDetail ??= "Ready for the next step.";
-        }
-
-        Changed?.Invoke();
+        NotifyChanged();
     }
 
-    private void ResetCurrentLlmTelemetry() => CurrentLlmTelemetry = null;
+    private void ResetCurrentLlmTelemetryUnsafe() => currentLlmTelemetry = null;
 
-    private void AddEntry(string level, string message, string? detail, TimeSpan? duration = null)
+    private void AddEntryUnsafe(string level, string message, string? detail, TimeSpan? duration = null)
     {
         entries.Insert(0, new OperationStatusEntry(DateTimeOffset.Now, level, message, detail, duration));
 
@@ -162,9 +200,17 @@ public sealed class OperationStatusService
         {
             entries.RemoveAt(entries.Count - 1);
         }
-
-        Changed?.Invoke();
     }
+
+    private T Read<T>(Func<T> read)
+    {
+        lock (gate)
+        {
+            return read();
+        }
+    }
+
+    private void NotifyChanged() => Changed?.Invoke();
 }
 
 public sealed record OperationStatusEntry(DateTimeOffset Timestamp, string Level, string Message, string? Detail, TimeSpan? Duration = null);
@@ -180,11 +226,15 @@ public sealed record LlmOperationTelemetry(
     TimeSpan? EstimatedRemaining = null,
     string? ThinkingPreview = null,
     bool Completed = false,
-    string? ResponseContent = null)
+    string? ResponseContent = null,
+    string? ThinkingContent = null,
+    long Sequence = 0)
 {
     public bool HasTokenUsage => PromptTokens is not null || CompletionTokens is not null;
 
     public bool HasEstimatedRemaining => EstimatedRemaining is not null && EstimatedRemaining > TimeSpan.Zero;
 
     public bool HasThinkingPreview => !string.IsNullOrWhiteSpace(ThinkingPreview);
+
+    public bool HasThinkingContent => !string.IsNullOrWhiteSpace(ThinkingContent);
 }

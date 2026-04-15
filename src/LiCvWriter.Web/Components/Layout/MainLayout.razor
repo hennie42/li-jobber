@@ -1,117 +1,71 @@
 @inherits LayoutComponentBase
 @implements IDisposable
-@using LiCvWriter.Application.Models
+@inject IJSRuntime JS
 @inject OperationStatusService Operations
-@inject WorkspaceSession Workspace
 
 <div class="shell">
     <aside class="shell-sidebar">
-        <div class="brand-block">
-            <div class="brand-kicker">LI CV Writer</div>
-            <div class="brand-title">Local AI Resume Workbench</div>
-            <p class="brand-text">Set up the session, then work each target role inside a single tabbed job workbench with local Ollama models.</p>
+        <div class="sidebar-floating-stack">
+            <section class="sidebar-panel sidebar-navigation-panel">
+                <div class="field-label">Navigation</div>
+                <NavMenu />
+            </section>
+
+            <section class="sidebar-panel sidebar-monitor-panel">
+                <div class="field-label">Reasoning Monitor</div>
+                <div class="crt-monitor sidebar-crt-monitor">
+                    <div class="crt-monitor-bezel sidebar-crt-bezel">
+                        <div class="crt-monitor-header">
+                            <span class="crt-monitor-led" aria-hidden="true"></span>
+                            <div class="crt-monitor-badge">@GetSidebarMonitorBadgeText()</div>
+                        </div>
+                        <pre class="crt-monitor-screen sidebar-crt-screen @(HasSidebarThinkingText() ? null : "crt-monitor-screen-placeholder")" @ref="reasoningMonitorScreen">@GetSidebarThinkingText()</pre>
+                        <div class="crt-monitor-footer">
+                            <span class="crt-monitor-model-label">HN - Model 101010</span>
+                            <span class="crt-monitor-vent" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="sidebar-panel sidebar-monitor-panel sidebar-status-monitor-panel">
+                <div class="field-label">Status Monitor</div>
+                <div class="crt-monitor sidebar-crt-monitor sidebar-status-crt-monitor">
+                    <div class="crt-monitor-bezel sidebar-crt-bezel">
+                        <div class="crt-monitor-header">
+                            <span class="crt-monitor-led" aria-hidden="true"></span>
+                            <div class="crt-monitor-badge">@GetStatusMonitorBadgeText()</div>
+                        </div>
+                        <pre class="crt-monitor-screen sidebar-status-crt-screen @(HasStatusMonitorText() ? null : "crt-monitor-screen-placeholder")">@GetStatusMonitorText()</pre>
+                        <div class="crt-monitor-footer">
+                            <span class="crt-monitor-model-label">HN - Status 202020</span>
+                            <span class="crt-monitor-vent" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
 
         <section class="sidebar-panel">
-            <div class="field-label">Navigation</div>
-            <NavMenu />
-        </section>
-
-        <section class="sidebar-panel">
-            <div class="field-label">Workspace</div>
-            <div class="sidebar-metric">@(Workspace.CandidateProfile?.Name.FullName ?? "No profile loaded")</div>
-
-            <div class="sidebar-group">
-                <div class="sidebar-group-label">Session</div>
-                <dl class="sidebar-grid">
-                    <dt>LLM</dt>
-                    <dd>@(Workspace.IsLlmReady ? $"{Workspace.SelectedLlmModel} · {FormatThinkingLevel(Workspace.SelectedThinkingLevel)}" : "Pending setup")</dd>
-                    <dt>LinkedIn</dt>
-                    <dd>@FormatLinkedInDataState(Workspace.LinkedInAuthorizationStatus)</dd>
-                    <dt>Differentiators</dt>
-                    <dd>@(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Stored" : "Not set")</dd>
-                </dl>
-            </div>
-
-            <div class="sidebar-group">
-                <div class="sidebar-group-label">Active job</div>
-                <dl class="sidebar-grid">
-                    <dt>Tab</dt>
-                    <dd>@Workspace.ActiveJobSet.Title</dd>
-                    <dt>Role</dt>
-                    <dd>@(Workspace.JobPosting?.RoleTitle ?? "—")</dd>
-                    <dt>Language</dt>
-                    <dd>@Workspace.ActiveJobSet.OutputLanguage</dd>
-                    <dt>Evidence</dt>
-                    <dd>@Workspace.GetActiveSelectedEvidenceCount()</dd>
-                    <dt>Drafts</dt>
-                    <dd>@Workspace.GeneratedDocuments.Count</dd>
-                    <dt>Status</dt>
-                    <dd>@FormatProgressState(Workspace.ActiveJobSet.ProgressState)</dd>
-                </dl>
-            </div>
-        </section>
-
-        <section class="sidebar-panel">
             <div class="field-label">Activity</div>
-            <div class="sidebar-metric">@Operations.CurrentMessage</div>
-            <div class="status-chip @(Operations.IsBusy ? "status-pending" : "status-ok")">
-                @if (Operations.IsBusy)
+            <div class="activity-feed">
+                @if (GetFinishedActivityEntries() is { Count: > 0 } entries)
                 {
-                    <span>Running @GetActivityElapsed()</span>
+                    @foreach (var entry in entries)
+                    {
+                        <article class="activity-entry activity-@entry.Level">
+                            <div class="activity-message">@entry.Message</div>
+                            @if (!string.IsNullOrWhiteSpace(entry.Detail))
+                            {
+                                <div class="activity-detail">@entry.Detail</div>
+                            }
+                            <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")@(entry.Duration is { } d ? $" ({d.Minutes}:{d.Seconds:D2})" : "")</div>
+                        </article>
+                    }
                 }
                 else
                 {
-                    <span>App-level status feed only. The UI stays interactive.</span>
-                }
-            </div>
-            @if (!string.IsNullOrWhiteSpace(Operations.CurrentDetail))
-            {
-                <div class="sidebar-text">@Operations.CurrentDetail</div>
-            }
-
-            @{
-                var telemetry = Operations.CurrentLlmTelemetry ?? Operations.LastCompletedLlmTelemetry;
-            }
-            @if (telemetry is not null)
-            {
-                <div class="field-label">@(Operations.CurrentLlmTelemetry is not null ? "Live telemetry" : "Last completed")</div>
-                <dl class="key-value-grid compact-grid">
-                    <dt>Phase</dt>
-                    <dd>@telemetry.Message</dd>
-                    <dt>Model</dt>
-                    <dd>@telemetry.Model</dd>
-                    <dt>Elapsed</dt>
-                    <dd>@FormatDuration(telemetry.Elapsed)</dd>
-                    @if (telemetry.PromptTokens is not null)
-                    {
-                        <dt>Prompt</dt>
-                        <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
-                    }
-                    @if (telemetry.CompletionTokens is not null)
-                    {
-                        <dt>Completion</dt>
-                        <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
-                    }
-                    @if (telemetry.HasEstimatedRemaining)
-                    {
-                        <dt>ETA</dt>
-                        <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
-                    }
-                </dl>
-            }
-
-            <div class="activity-feed">
-                @foreach (var entry in Operations.Entries.Take(6))
-                {
-                    <article class="activity-entry activity-@entry.Level">
-                        <div class="activity-message">@entry.Message</div>
-                        @if (!string.IsNullOrWhiteSpace(entry.Detail))
-                        {
-                            <div class="activity-detail">@entry.Detail</div>
-                        }
-                        <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")@(entry.Duration is { } d ? $" ({d.Minutes}:{d.Seconds:D2})" : "")</div>
-                    </article>
+                    <div class="sidebar-text">Finished activities will appear here.</div>
                 }
             </div>
         </section>
@@ -125,81 +79,115 @@
 </div>
 
 @code {
-    private System.Threading.Timer? activityTimer;
-    private bool wasBusy;
+    private ElementReference reasoningMonitorScreen;
+    private string? lastScrolledThinkingText;
 
     protected override void OnInitialized()
     {
         Operations.Changed += HandleChanged;
-        Workspace.Changed += HandleChanged;
     }
 
     public void Dispose()
     {
-        activityTimer?.Dispose();
         Operations.Changed -= HandleChanged;
-        Workspace.Changed -= HandleChanged;
     }
 
-    private string GetActivityElapsed()
-        => Operations.BusyStartedAt is { } started
-            ? FormatDuration(DateTimeOffset.Now - started)
-            : string.Empty;
-
-    private void SyncActivityTimer()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (Operations.IsBusy && !wasBusy)
+        var currentThinkingText = GetSidebarThinkingRawText();
+        if (string.IsNullOrWhiteSpace(currentThinkingText))
         {
-            activityTimer?.Dispose();
-            activityTimer = new System.Threading.Timer(_ => _ = InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
-            wasBusy = true;
+            lastScrolledThinkingText = null;
+            return;
         }
-        else if (!Operations.IsBusy && wasBusy)
+
+        if (string.Equals(currentThinkingText, lastScrolledThinkingText, StringComparison.Ordinal))
         {
-            activityTimer?.Dispose();
-            activityTimer = null;
-            wasBusy = false;
+            return;
+        }
+
+        lastScrolledThinkingText = currentThinkingText;
+
+        try
+        {
+            await JS.InvokeVoidAsync("liCvWriterUi.scrollElementToBottom", reasoningMonitorScreen);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Ignore disconnects during live updates.
         }
     }
 
-    private static string FormatThinkingLevel(string value)
-        => string.IsNullOrWhiteSpace(value)
-            ? "Pending"
-            : char.ToUpperInvariant(value[0]) + value[1..];
+    private IReadOnlyList<OperationStatusEntry> GetFinishedActivityEntries()
+        => Operations.Entries
+            .Where(static entry => !string.Equals(entry.Level, "busy", StringComparison.OrdinalIgnoreCase))
+            .Take(6)
+            .ToArray();
 
-    private static string FormatProgressState(JobSetProgressState progressState)
-        => progressState switch
-        {
-            JobSetProgressState.Done => "Done",
-            JobSetProgressState.Running => "Running",
-            JobSetProgressState.Failed => "Needs attention",
-            _ => "Not started"
-        };
-
-    private static string FormatLinkedInDataState(LinkedInAuthorizationStatus status)
-        => status.IsAuthorized
-            ? "Loaded"
-            : "Pending DMA import";
-
-    private static string FormatDuration(TimeSpan? duration)
+    private string? GetSidebarThinkingRawText()
     {
-        if (duration is null)
+        if (!string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingContent)
+            || !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingPreview))
         {
-            return "Pending";
+            return Operations.CurrentLlmTelemetry?.ThinkingContent ?? Operations.CurrentLlmTelemetry?.ThinkingPreview;
         }
 
-        var value = duration.Value;
-        return value.TotalMinutes >= 1
-            ? value.ToString(@"m\:ss")
-            : value.ToString(@"s\.f\s");
+        return Operations.LastCompletedLlmTelemetry?.ThinkingContent ?? Operations.LastCompletedLlmTelemetry?.ThinkingPreview;
     }
 
-    private static string FormatTokenCount(long? tokens)
-        => tokens?.ToString("N0") ?? "Pending";
+    private bool HasSidebarThinkingText()
+        => !string.IsNullOrWhiteSpace(GetSidebarThinkingRawText());
+
+    private string GetSidebarThinkingText()
+        => GetSidebarThinkingRawText()
+            ?? "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.";
+
+    private string? GetStatusMonitorRawText()
+        => Operations.CurrentLlmTelemetry?.Detail
+            ?? Operations.LastCompletedLlmTelemetry?.Detail
+            ?? (Operations.IsBusy ? BuildBusyFallbackStatus() : null);
+
+    private bool HasStatusMonitorText()
+        => !string.IsNullOrWhiteSpace(GetStatusMonitorRawText());
+
+    private string GetStatusMonitorText()
+        => GetStatusMonitorRawText()
+            ?? "No streaming status captured yet. Run a streamed LLM operation to light up this monitor.";
+
+    private string GetStatusMonitorBadgeText()
+    {
+        if (!HasStatusMonitorText())
+        {
+            return "Standby";
+        }
+
+        return Operations.CurrentLlmTelemetry is not null
+            ? "Live status"
+            : "Last status";
+    }
+
+    private string? BuildBusyFallbackStatus()
+        => string.IsNullOrWhiteSpace(Operations.CurrentMessage)
+            ? null
+            : string.IsNullOrWhiteSpace(Operations.CurrentDetail)
+                ? Operations.CurrentMessage
+                : $"{Operations.CurrentMessage}\n{Operations.CurrentDetail}";
+
+    private string GetSidebarMonitorBadgeText()
+    {
+        if (!HasSidebarThinkingText())
+        {
+            return "Standby";
+        }
+
+        return !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingContent)
+            || !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingPreview)
+            ? "Live feed"
+            : "Last capture";
+    }
 
     private void HandleChanged()
     {
-        SyncActivityTimer();
         _ = InvokeAsync(StateHasChanged);
     }
 }
