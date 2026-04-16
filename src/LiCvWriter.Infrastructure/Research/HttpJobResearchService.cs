@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
 using LiCvWriter.Core.Jobs;
 
 namespace LiCvWriter.Infrastructure.Research;
@@ -13,6 +14,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
 {
     private const int MaxJobContextCharacters = 8_000;
     private const int MaxCompanyContextCharacters = 12_000;
+    private const string ParserThinkingLevel = "low";
     private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
@@ -196,6 +198,11 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
+            if (TryParseFallbackJobPostingAnalysis(content, jobPostingUrl, fallbackRoleTitle, jobText, out var fallbackAnalysis))
+            {
+                return fallbackAnalysis;
+            }
+
             var preview = content.Length > 200 ? content[..200] + "..." : content;
             throw new InvalidOperationException(
                 $"The model did not return parseable JSON for the job analysis. Try again or check the session model. Response preview: {preview}",
@@ -494,7 +501,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         => string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
 
     private string ResolveThinkingLevel(string? selectedThinkingLevel)
-        => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();
+        => ParserThinkingLevel;
 
     private static string BuildJobSystemPrompt()
         => """
@@ -620,14 +627,175 @@ Rules:
         // Fix period used instead of colon between JSON key and value ("key". "value" → "key": "value")
         trimmed = Regex.Replace(trimmed, @"(""\w+"")\s*\.\s*("")", "$1: $2");
 
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-        if (start >= 0 && end > start)
+        var balancedObject = TryExtractBalancedJsonObject(trimmed);
+        if (!string.IsNullOrWhiteSpace(balancedObject))
         {
-            return trimmed[start..(end + 1)];
+            return balancedObject;
         }
 
         return trimmed;
+    }
+
+    private static string? TryExtractBalancedJsonObject(string content)
+    {
+        var start = content.IndexOf('{');
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var isEscaped = false;
+
+        for (var index = start; index < content.Length; index++)
+        {
+            var current = content[index];
+
+            if (isEscaped)
+            {
+                isEscaped = false;
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                isEscaped = true;
+                continue;
+            }
+
+            if (current == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+            {
+                continue;
+            }
+
+            if (current == '{')
+            {
+                depth++;
+                continue;
+            }
+
+            if (current != '}')
+            {
+                continue;
+            }
+
+            depth--;
+            if (depth == 0)
+            {
+                return content[start..(index + 1)];
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryParseFallbackJobPostingAnalysis(
+        string content,
+        Uri? jobPostingUrl,
+        string fallbackRoleTitle,
+        string jobText,
+        out JobPostingAnalysis analysis)
+    {
+        var roleTitle = ExtractLooseJsonStringValue(content, "roleTitle");
+        var companyName = ExtractLooseJsonStringValue(content, "companyName");
+        var summary = ExtractLooseJsonStringValue(content, "summary");
+        var extractedSignals = JobSignalExtractor.Extract(jobText);
+
+        var hasUsefulStructuredFields = !string.IsNullOrWhiteSpace(roleTitle)
+            || !string.IsNullOrWhiteSpace(companyName)
+            || !string.IsNullOrWhiteSpace(summary);
+
+        if (!hasUsefulStructuredFields && extractedSignals.MustHaveThemes.Count == 0 && extractedSignals.NiceToHaveThemes.Count == 0 && extractedSignals.CulturalSignals.Count == 0)
+        {
+            analysis = null!;
+            return false;
+        }
+
+        var sourceLabel = jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "pasted text";
+        var signals = BuildFallbackSignals(jobText, sourceLabel, extractedSignals);
+
+        analysis = new JobPostingAnalysis
+        {
+            SourceUrl = jobPostingUrl,
+            RoleTitle = string.IsNullOrWhiteSpace(roleTitle) ? fallbackRoleTitle : roleTitle,
+            CompanyName = string.IsNullOrWhiteSpace(companyName)
+                ? jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "Unknown"
+                : companyName,
+            Summary = string.IsNullOrWhiteSpace(summary) ? Clip(jobText, 1_200) : Clip(summary, 1_200),
+            MustHaveThemes = extractedSignals.MustHaveThemes,
+            NiceToHaveThemes = extractedSignals.NiceToHaveThemes,
+            CulturalSignals = extractedSignals.CulturalSignals,
+            Signals = signals
+        };
+
+        return true;
+    }
+
+    private static JobContextSignal[] BuildFallbackSignals(string sourceText, string sourceLabel, JobSignalExtraction extraction)
+    {
+        var chunks = Regex.Split(sourceText, @"(?:\r?\n)+|(?<=[\.!?;:])\s+")
+            .Select(static chunk => chunk.Trim())
+            .Where(static chunk => !string.IsNullOrWhiteSpace(chunk))
+            .ToArray();
+
+        return extraction.MustHaveThemes
+            .Select(requirement => BuildFallbackSignal(requirement, "Must have", JobRequirementImportance.MustHave, chunks, sourceLabel, 68))
+            .Concat(extraction.NiceToHaveThemes.Select(requirement => BuildFallbackSignal(requirement, "Nice to have", JobRequirementImportance.NiceToHave, chunks, sourceLabel, 58)))
+            .Concat(extraction.CulturalSignals.Select(requirement => BuildFallbackSignal(requirement, "Culture", JobRequirementImportance.Cultural, chunks, sourceLabel, 54)))
+            .DistinctBy(static signal => $"{signal.Importance}:{signal.Requirement}", StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static JobContextSignal BuildFallbackSignal(
+        string requirement,
+        string category,
+        JobRequirementImportance importance,
+        IReadOnlyList<string> chunks,
+        string sourceLabel,
+        int confidence)
+    {
+        var aliases = JobSignalExtractor.GetAliases(requirement);
+        var sourceSnippet = chunks.FirstOrDefault(chunk => aliases.Any(alias => JobSignalExtractor.ContainsTermOrOverlap(JobSignalExtractor.NormalizeText(chunk), alias)))
+            ?? chunks.FirstOrDefault()
+            ?? requirement;
+
+        return new JobContextSignal(
+            category,
+            requirement,
+            importance,
+            sourceLabel,
+            Clip(sourceSnippet, 260),
+            confidence,
+            aliases.Where(alias => !alias.Equals(requirement, StringComparison.OrdinalIgnoreCase)).ToArray());
+    }
+
+    private static string? ExtractLooseJsonStringValue(string content, string propertyName)
+    {
+        var match = Regex.Match(
+            content,
+            $"\"{Regex.Escape(propertyName)}\"\\s*[:.]\\s*\"(?<value>(?:\\\\.|[^\"\\\\])*)\"",
+            RegexOptions.Singleline);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<string>($"\"{match.Groups["value"].Value}\"")?.Trim();
+        }
+        catch (JsonException)
+        {
+            return match.Groups["value"].Value.Trim();
+        }
     }
 
     private static string Clip(string value, int maxLength)

@@ -82,7 +82,7 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.Confidence == 97 && signal.SourceLabel == "jobs.example.test");
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.EffectiveAliases.Contains("azure platform"));
         Assert.Equal("session-model", llmClient.LastRequest!.Model);
-        Assert.Equal("high", llmClient.LastRequest.Think);
+        Assert.Equal("low", llmClient.LastRequest.Think);
     }
 
     [Fact]
@@ -375,6 +375,82 @@ public sealed class HttpJobResearchServiceTests
 
         Assert.Equal("Data Engineer", result.RoleTitle);
         Assert.Contains("Spark", result.MustHaveThemes);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_ParsesBalancedJsonWhenTrailingCommentaryFollows()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Senior IT Integration Architect",
+              "companyName": "Novo Nordisk",
+              "summary": "Lead enterprise integration architecture across global teams.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Enterprise integration",
+                  "sourceSnippet": "Lead the organization's technical and architectural direction for enterprise integration.",
+                  "confidence": 94
+                }
+              ]
+            }
+
+            Length: ~380 characters.
+            Perfect.
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync(
+            "Senior IT Integration Architect at Novo Nordisk. Lead the organization's technical and architectural direction for enterprise integration.",
+            "model",
+            "high");
+
+        Assert.Equal("Senior IT Integration Architect", result.RoleTitle);
+        Assert.Equal("Novo Nordisk", result.CompanyName);
+        Assert.Contains("Enterprise integration", result.MustHaveThemes);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_WhenJsonContainsPseudoJsonPlaceholders_FallsBackToLooseFieldParsingAndSignalExtraction()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Senior IT Integration Architect",
+              "companyName": "Novo Nordisk",
+              "summary": "Drive enterprise integration architecture across global teams.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Enterprise integration",
+                  "aliases": [...],
+                  "sourceSnippet": "...",
+                  "confidence": 100,
+                  "sourceUrl": "..."
+                }
+              ]
+            }
+            *Ready.*
+            """);
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync(
+            "Senior IT Integration Architect at Novo Nordisk. Lead enterprise integration architecture across global teams and standardize reuse across integration platforms.",
+            "model",
+            "high");
+
+        Assert.Equal("Senior IT Integration Architect", result.RoleTitle);
+        Assert.Equal("Novo Nordisk", result.CompanyName);
+        Assert.Equal("Drive enterprise integration architecture across global teams.", result.Summary);
+        Assert.NotEmpty(result.MustHaveThemes);
+        Assert.NotEmpty(result.Signals);
       }
 
       private static HttpResponseMessage CreateHtmlResponse(string html)

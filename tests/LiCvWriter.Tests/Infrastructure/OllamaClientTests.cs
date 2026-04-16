@@ -120,6 +120,44 @@ public sealed class OllamaClientTests
         Assert.Contains(progress, update => update.Completed);
     }
 
+    [Fact]
+    public async Task GenerateAsync_WithCumulativeStreamingChat_DeduplicatesRepeatedContent()
+    {
+        using var httpClient = CreateClient(request => request.RequestUri?.AbsolutePath switch
+        {
+            "/api/chat" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"model":"session-model","message":{"content":"Novo","thinking":"Thinking about Novo"},"done":false}
+                    {"model":"session-model","message":{"content":"Novo Nordisk","thinking":"Thinking about Novo Nordisk"},"done":false}
+                    {"model":"session-model","message":{"content":"Novo Nordisk Novo Nordisk","thinking":"Thinking about Novo Nordisk Novo Nordisk"},"done":false}
+                    {"model":"session-model","message":{"content":""},"done":true,"prompt_eval_count":11,"eval_count":22,"total_duration":1000000000}
+                    """,
+                    Encoding.UTF8,
+                    "application/x-ndjson")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions { Model = "session-model" });
+        var progress = new List<LlmProgressUpdate>();
+
+        var result = await client.GenerateAsync(
+            new LlmRequest(
+                "session-model",
+                null,
+                [new LlmChatMessage("user", "hi")],
+                UseChatEndpoint: true,
+                Stream: true),
+            progress.Add);
+
+        Assert.Equal("Novo Nordisk Novo Nordisk", result.Content);
+        Assert.Equal("Thinking about Novo Nordisk Novo Nordisk", result.Thinking);
+        Assert.Contains(progress, update => update.ResponseContent == "Novo Nordisk Novo Nordisk");
+        Assert.Contains(progress, update => update.ThinkingContent == "Thinking about Novo Nordisk Novo Nordisk");
+    }
+
     private static HttpClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         => new(new StubMessageHandler(responseFactory))
         {

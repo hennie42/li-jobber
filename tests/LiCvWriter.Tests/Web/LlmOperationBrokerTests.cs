@@ -95,8 +95,10 @@ public sealed class LlmOperationBrokerTests
     [Fact]
     public async Task StartJobContextAnalysis_CompletesAndStoresJobAndCompanyContext()
     {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
         var services = new ServiceCollection();
-        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<LlmOperationBroker>();
@@ -129,9 +131,10 @@ public sealed class LlmOperationBrokerTests
     [Fact]
     public async Task StartTechnologyGapAnalysis_CompletesAndStoresAssessment()
     {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
         var services = new ServiceCollection();
-        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
-        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<LlmOperationBroker>();
@@ -177,9 +180,10 @@ public sealed class LlmOperationBrokerTests
     [Fact]
     public async Task StartFitReviewAnalysis_CompletesAndStoresEnhancedAssessment()
     {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
         var services = new ServiceCollection();
-        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
-        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<CandidateEvidenceService>();
@@ -243,9 +247,10 @@ public sealed class LlmOperationBrokerTests
     [Fact]
     public async Task StartRefreshAllAnalysis_CompletesAndRefreshesResearchFitAndTechnologyGap()
     {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
         var services = new ServiceCollection();
-        services.AddSingleton(new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 });
-        services.AddSingleton(new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" }));
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<CandidateEvidenceService>();
@@ -305,9 +310,46 @@ public sealed class LlmOperationBrokerTests
         Assert.Contains("Azure", workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies);
     }
 
-    private static async Task<LlmOperationSnapshot> WaitForTerminalSnapshotAsync(LlmOperationBroker broker, string operationId)
+    [Fact]
+    public async Task StartJobContextAnalysis_WhenOperationExceedsTimeout_FailsWithTimedOutSnapshot()
     {
-        for (var attempt = 0; attempt < 200; attempt++)
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, SlowJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateActiveJobSetInputs(
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId, attempts: 350);
+
+        Assert.Equal("failed", finalSnapshot.Status);
+        Assert.Contains("timed out", finalSnapshot.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Lower the thinking level or choose a faster model", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(JobSetProgressState.Failed, workspace.ActiveJobSet.ProgressState);
+    }
+
+    private static async Task<LlmOperationSnapshot> WaitForTerminalSnapshotAsync(LlmOperationBroker broker, string operationId, int attempts = 200)
+    {
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             var snapshot = broker.GetSnapshot(operationId);
             if (snapshot is { IsTerminal: true })
@@ -381,6 +423,42 @@ public sealed class LlmOperationBrokerTests
 
         public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new CompanyResearchProfile { Summary = companyContextText });
+    }
+
+    private sealed class SlowJobResearchService : IJobResearchService
+    {
+        public async Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            progress?.Invoke(new LlmProgressUpdate(
+                "Parsing job posting",
+                "Structured job parsing is running.",
+                selectedModel ?? "configured-model",
+                TimeSpan.FromMilliseconds(100),
+                ThinkingContent: "Still thinking",
+                Sequence: 1));
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+
+            return new JobPostingAnalysis
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                SourceUrl = jobPostingUrl
+            };
+        }
+
+        public async Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return new CompanyResearchProfile { Summary = "Slow company summary", SourceUrls = sourceUrls.ToArray() };
+        }
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, cancellationToken);
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => BuildCompanyProfileAsync(Array.Empty<Uri>(), selectedModel, selectedThinkingLevel, progress, cancellationToken);
     }
 
     private sealed class FakeTechnologyGapLlmClient : ILlmClient
