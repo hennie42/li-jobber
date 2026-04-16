@@ -232,12 +232,12 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
 
             if (!string.IsNullOrWhiteSpace(chunk.ContentDelta))
             {
-                content.Append(chunk.ContentDelta);
+                AppendStreamingText(content, chunk.ContentDelta);
             }
 
             if (!string.IsNullOrWhiteSpace(chunk.ThinkingDelta))
             {
-                thinking.Append(chunk.ThinkingDelta);
+                AppendStreamingText(thinking, chunk.ThinkingDelta);
             }
 
             if (chunk.PromptTokens is not null)
@@ -418,6 +418,34 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         => elapsed.TotalMinutes >= 1
             ? elapsed.ToString(@"m\:ss")
             : elapsed.ToString(@"s\.f\s");
+
+    private static void AppendStreamingText(StringBuilder aggregate, string incoming)
+    {
+        if (string.IsNullOrEmpty(incoming))
+        {
+            return;
+        }
+
+        if (aggregate.Length == 0)
+        {
+            aggregate.Append(incoming);
+            return;
+        }
+
+        var existing = aggregate.ToString();
+        if (incoming.Equals(existing, StringComparison.Ordinal) || existing.StartsWith(incoming, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (incoming.StartsWith(existing, StringComparison.Ordinal))
+        {
+            aggregate.Append(incoming.AsSpan(existing.Length));
+            return;
+        }
+
+        aggregate.Append(incoming);
+    }
 
     private static long? ReadLong(JsonElement root, string propertyName)
         => root.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value) ? value : null;

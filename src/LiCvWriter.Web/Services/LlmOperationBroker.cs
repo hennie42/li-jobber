@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
+using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
@@ -15,6 +16,7 @@ public sealed class LlmOperationBroker(
     IServiceScopeFactory scopeFactory,
     WorkspaceSession workspace,
     OperationStatusService operations,
+    OllamaOptions ollamaOptions,
     TimeProvider timeProvider)
 {
     private readonly object gate = new();
@@ -205,7 +207,13 @@ public sealed class LlmOperationBroker(
 
     private LlmOperationState BeginOperation(string jobSetId, LlmOperationSnapshot initialSnapshot)
     {
-        var state = new LlmOperationState(initialSnapshot);
+        var operationTimeout = GetOperationTimeout();
+        var state = new LlmOperationState(initialSnapshot, operationTimeout is null ? null : initialSnapshot.StartedAt + operationTimeout.Value);
+
+        if (operationTimeout is not null)
+        {
+            state.Cancellation.CancelAfter(operationTimeout.Value);
+        }
 
         lock (gate)
         {
@@ -222,6 +230,30 @@ public sealed class LlmOperationBroker(
 
         return state;
     }
+
+    private TimeSpan? GetOperationTimeout()
+        => ollamaOptions.MaxOperationSeconds > 0 ? TimeSpan.FromSeconds(ollamaOptions.MaxOperationSeconds) : null;
+
+    private bool IsTimedOut(LlmOperationState state)
+        => state.TimeoutAt is { } timeoutAt && timeProvider.GetUtcNow() >= timeoutAt;
+
+    private string BuildTimeoutDetail(string operationLabel)
+    {
+        var timeout = GetOperationTimeout();
+        if (timeout is null)
+        {
+            return $"{operationLabel} timed out.";
+        }
+
+        return $"{operationLabel} exceeded the {FormatDuration(timeout.Value)} limit. Lower the thinking level or choose a faster model and try again.";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+        => duration.TotalMinutes >= 1
+            ? duration.TotalMinutes % 1 == 0
+                ? $"{duration.TotalMinutes:0} minute(s)"
+                : $"{duration.TotalMinutes:0.#} minute(s)"
+            : $"{Math.Max(1, duration.TotalSeconds):0} second(s)";
 
     private static LlmOperationStartResult BuildStartResult(string operationId)
         => new(
@@ -527,6 +559,25 @@ public sealed class LlmOperationBroker(
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
+            if (IsTimedOut(state))
+            {
+                var detail = BuildTimeoutDetail("Draft generation");
+                workspace.MarkJobSetFailed(input.JobSet.Id, detail);
+
+                var timedOutSnapshot = state.GetSnapshot() with
+                {
+                    Status = "failed",
+                    UpdatedAt = timeProvider.GetUtcNow(),
+                    Message = "Draft generation timed out",
+                    Detail = detail,
+                    Error = detail
+                };
+
+                Publish(state, "failed", timedOutSnapshot);
+                operations.Error("Draft generation timed out.", detail);
+                return;
+            }
+
             workspace.ResetJobSetProgress(input.JobSet.Id, "Draft generation was cancelled for this job set.");
 
             var cancelledSnapshot = state.GetSnapshot() with
@@ -639,6 +690,25 @@ public sealed class LlmOperationBroker(
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
+            if (IsTimedOut(state))
+            {
+                var detail = BuildTimeoutDetail("Job and company context analysis");
+                workspace.MarkJobSetFailed(input.JobSet.Id, detail);
+
+                var timedOutSnapshot = state.GetSnapshot() with
+                {
+                    Status = "failed",
+                    UpdatedAt = timeProvider.GetUtcNow(),
+                    Message = "Job and company context timed out",
+                    Detail = detail,
+                    Error = detail
+                };
+
+                Publish(state, "failed", timedOutSnapshot);
+                operations.Error("Job and company context timed out.", detail);
+                return;
+            }
+
             workspace.ResetJobSetProgress(input.JobSet.Id, "Job and company context analysis was cancelled for this job set.");
 
             var cancelledSnapshot = state.GetSnapshot() with
@@ -716,6 +786,25 @@ public sealed class LlmOperationBroker(
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
+            if (IsTimedOut(state))
+            {
+                var detail = BuildTimeoutDetail("Technology gap analysis");
+                workspace.MarkJobSetFailed(input.JobSet.Id, detail);
+
+                var timedOutSnapshot = state.GetSnapshot() with
+                {
+                    Status = "failed",
+                    UpdatedAt = timeProvider.GetUtcNow(),
+                    Message = "Technology gap analysis timed out",
+                    Detail = detail,
+                    Error = detail
+                };
+
+                Publish(state, "failed", timedOutSnapshot);
+                operations.Error("Technology gap analysis timed out.", detail);
+                return;
+            }
+
             workspace.ResetJobSetProgress(input.JobSet.Id, "Technology gap analysis was cancelled for this job set.");
 
             var cancelledSnapshot = state.GetSnapshot() with
@@ -794,6 +883,25 @@ public sealed class LlmOperationBroker(
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
+            if (IsTimedOut(state))
+            {
+                var detail = BuildTimeoutDetail("Fit review");
+                workspace.MarkJobSetFailed(input.JobSet.Id, detail);
+
+                var timedOutSnapshot = state.GetSnapshot() with
+                {
+                    Status = "failed",
+                    UpdatedAt = timeProvider.GetUtcNow(),
+                    Message = "Fit review timed out",
+                    Detail = detail,
+                    Error = detail,
+                };
+
+                Publish(state, "failed", timedOutSnapshot);
+                operations.Error("Fit review timed out.", detail);
+                return;
+            }
+
             workspace.ResetJobSetProgress(input.JobSet.Id, "Fit review was cancelled for this job set.");
 
             var cancelledSnapshot = state.GetSnapshot() with
@@ -962,6 +1070,25 @@ public sealed class LlmOperationBroker(
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
+            if (IsTimedOut(state))
+            {
+                var detail = BuildTimeoutDetail("Refresh all analysis");
+                workspace.MarkJobSetFailed(input.JobSet.Id, detail);
+
+                var timedOutSnapshot = state.GetSnapshot() with
+                {
+                    Status = "failed",
+                    UpdatedAt = timeProvider.GetUtcNow(),
+                    Message = "Refresh all analysis timed out",
+                    Detail = detail,
+                    Error = detail,
+                };
+
+                Publish(state, "failed", timedOutSnapshot);
+                operations.Error("Refresh all analysis timed out.", detail);
+                return;
+            }
+
             workspace.ResetJobSetProgress(input.JobSet.Id, "Refresh all analysis was cancelled for this job set.");
 
             var cancelledSnapshot = state.GetSnapshot() with
@@ -1161,7 +1288,7 @@ public sealed class LlmOperationBroker(
             .ToArray();
     }
 
-    private sealed class LlmOperationState(LlmOperationSnapshot snapshot)
+    private sealed class LlmOperationState(LlmOperationSnapshot snapshot, DateTimeOffset? timeoutAt)
     {
         private readonly object gate = new();
         private LlmOperationSnapshot snapshot = snapshot;
@@ -1169,6 +1296,8 @@ public sealed class LlmOperationBroker(
         public Channel<LlmOperationEvent> Events { get; } = Channel.CreateUnbounded<LlmOperationEvent>();
 
         public CancellationTokenSource Cancellation { get; } = new();
+
+        public DateTimeOffset? TimeoutAt { get; } = timeoutAt;
 
         public LlmOperationSnapshot GetSnapshot()
         {
