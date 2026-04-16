@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 
@@ -6,9 +5,20 @@ namespace LiCvWriter.Infrastructure.Llm;
 
 public sealed class PromptCapturingLlmClient(ILlmClient inner) : ILlmClient
 {
-    private readonly ConcurrentBag<LlmPromptSnapshot> capturedPrompts = [];
+    private const int MaxCapturedPrompts = 20;
+    private readonly object gate = new();
+    private readonly Queue<LlmPromptSnapshot> capturedPrompts = new();
 
-    public IReadOnlyList<LlmPromptSnapshot> CapturedPrompts => capturedPrompts.Reverse().ToList();
+    public IReadOnlyList<LlmPromptSnapshot> CapturedPrompts
+    {
+        get
+        {
+            lock (gate)
+            {
+                return capturedPrompts.Reverse().ToList();
+            }
+        }
+    }
 
     public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
         => inner.VerifyModelAvailabilityAsync(cancellationToken);
@@ -30,16 +40,30 @@ public sealed class PromptCapturingLlmClient(ILlmClient inner) : ILlmClient
 
         var response = await inner.GenerateAsync(request, wrappedProgress, cancellationToken);
 
-        capturedPrompts.Add(new LlmPromptSnapshot(
-            operationLabel ?? TruncateSystemPrompt(request.SystemPrompt),
-            request.SystemPrompt ?? string.Empty,
-            FormatUserMessages(request.Messages),
-            DateTimeOffset.UtcNow));
+        lock (gate)
+        {
+            capturedPrompts.Enqueue(new LlmPromptSnapshot(
+                operationLabel ?? TruncateSystemPrompt(request.SystemPrompt),
+                request.SystemPrompt ?? string.Empty,
+                FormatUserMessages(request.Messages),
+                DateTimeOffset.UtcNow));
+
+            while (capturedPrompts.Count > MaxCapturedPrompts)
+            {
+                capturedPrompts.Dequeue();
+            }
+        }
 
         return response;
     }
 
-    public void ClearPrompts() => capturedPrompts.Clear();
+    public void ClearPrompts()
+    {
+        lock (gate)
+        {
+            capturedPrompts.Clear();
+        }
+    }
 
     private static string TruncateSystemPrompt(string? systemPrompt)
     {

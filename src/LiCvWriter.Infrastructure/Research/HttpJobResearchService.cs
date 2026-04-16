@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,7 +15,6 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
 {
     private const int MaxJobContextCharacters = 8_000;
     private const int MaxCompanyContextCharacters = 12_000;
-    private const string ParserThinkingLevel = "low";
     private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
@@ -26,6 +26,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         Action<LlmProgressUpdate>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        await ValidatePublicHttpsUriAsync(jobPostingUrl, cancellationToken);
         var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
         var title = ExtractMatch(html, "<title[^>]*>(.*?)</title>") ?? jobPostingUrl.Host;
         var heading = ExtractMatch(html, "<h1[^>]*>(.*?)</h1>") ?? title;
@@ -75,6 +76,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
 
         foreach (var url in urls)
         {
+            await ValidatePublicHttpsUriAsync(url, cancellationToken);
             var html = await FetchHtmlAsync(url, cancellationToken);
             var text = StripHtml(html);
             if (!string.IsNullOrWhiteSpace(text))
@@ -250,6 +252,11 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
+            if (TryParseFallbackCompanyResearchProfile(content, sourceUrls, sourceDocuments, out var fallbackProfile))
+            {
+                return fallbackProfile;
+            }
+
             var preview = content.Length > 200 ? content[..200] + "..." : content;
             throw new InvalidOperationException(
                 $"The model did not return parseable JSON for the company analysis. Try again or check the session model. Response preview: {preview}",
@@ -265,8 +272,8 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             : "pasted text");
         var summary = ReadOptionalString(root, "summary");
         var name = ReadOptionalString(root, "name");
-        var guidingPrinciples = ReadStringArray(root, "guidingPrinciples", required: true);
-        var differentiators = ReadStringArray(root, "differentiators", required: true);
+        var guidingPrinciples = ReadStringArray(root, "guidingPrinciples", required: false);
+        var differentiators = ReadStringArray(root, "differentiators", required: false);
 
         return new CompanyResearchProfile
         {
@@ -311,6 +318,94 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
 
         return await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+
+    private static async Task ValidatePublicHttpsUriAsync(Uri sourceUrl, CancellationToken cancellationToken)
+    {
+        if (!sourceUrl.IsAbsoluteUri)
+        {
+            throw new InvalidOperationException($"Only absolute public HTTPS URLs are allowed: {sourceUrl}");
+        }
+
+        if (!string.Equals(sourceUrl.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Only public HTTPS URLs are allowed: {sourceUrl}");
+        }
+
+        if (string.IsNullOrWhiteSpace(sourceUrl.Host))
+        {
+            throw new InvalidOperationException($"The URL host is invalid: {sourceUrl}");
+        }
+
+        if (sourceUrl.IsLoopback || IsLocalHostName(sourceUrl.Host))
+        {
+            throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
+        }
+
+        if (IPAddress.TryParse(sourceUrl.Host, out var parsedAddress))
+        {
+            if (IsPrivateAddress(parsedAddress))
+            {
+                throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
+            }
+
+            return;
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = await Dns.GetHostAddressesAsync(sourceUrl.DnsSafeHost, cancellationToken);
+        }
+        catch (SocketException exception)
+        {
+            _ = exception;
+            return;
+        }
+
+        if (addresses.Any(IsPrivateAddress))
+        {
+            throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
+        }
+    }
+
+    private static bool IsLocalHostName(string host)
+        => host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPrivateAddress(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address))
+        {
+            return true;
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return address.IsIPv6LinkLocal
+                || address.IsIPv6SiteLocal
+                || address.IsIPv6Multicast
+                || address.Equals(IPAddress.IPv6Loopback)
+                || address.IsIPv6UniqueLocal;
+        }
+
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length != 4)
+        {
+            return true;
+        }
+
+        return bytes[0] switch
+        {
+            0 => true,
+            10 => true,
+            127 => true,
+            169 when bytes[1] == 254 => true,
+            172 when bytes[1] >= 16 && bytes[1] <= 31 => true,
+            192 when bytes[1] == 168 => true,
+            _ => false
+        };
     }
 
     private static HttpRequestMessage CreateHtmlRequest(Uri sourceUrl)
@@ -501,7 +596,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         => string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
 
     private string ResolveThinkingLevel(string? selectedThinkingLevel)
-        => ParserThinkingLevel;
+        => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();
 
     private static string BuildJobSystemPrompt()
         => """
@@ -733,6 +828,45 @@ Rules:
             NiceToHaveThemes = extractedSignals.NiceToHaveThemes,
             CulturalSignals = extractedSignals.CulturalSignals,
             Signals = signals
+        };
+
+        return true;
+    }
+
+    private static bool TryParseFallbackCompanyResearchProfile(
+        string content,
+        IReadOnlyList<Uri> sourceUrls,
+        IReadOnlyList<(Uri Url, string Text)> sourceDocuments,
+        out CompanyResearchProfile profile)
+    {
+        var name = ExtractLooseJsonStringValue(content, "name");
+        var summary = ExtractLooseJsonStringValue(content, "summary");
+
+        if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(summary))
+        {
+            profile = null!;
+            return false;
+        }
+
+        var fallbackName = string.IsNullOrWhiteSpace(name)
+            ? (sourceUrls.Count > 0
+                ? sourceUrls[0].Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase)
+                : "Unknown")
+            : name;
+
+        var fallbackSummary = string.IsNullOrWhiteSpace(summary)
+            ? Clip(string.Join(Environment.NewLine + Environment.NewLine, sourceDocuments.Select(static item => item.Text)), 2_000)
+            : Clip(summary, 2_000);
+
+        profile = new CompanyResearchProfile
+        {
+            Name = fallbackName,
+            Summary = fallbackSummary,
+            SourceUrls = sourceUrls,
+            GuidingPrinciples = Array.Empty<string>(),
+            CulturalSignals = Array.Empty<string>(),
+            Differentiators = Array.Empty<string>(),
+            Signals = Array.Empty<JobContextSignal>()
         };
 
         return true;

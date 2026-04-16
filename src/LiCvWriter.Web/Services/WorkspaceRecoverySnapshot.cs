@@ -2,6 +2,7 @@ using LiCvWriter.Application.Models;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.LinkedIn;
 
 namespace LiCvWriter.Web.Services;
 
@@ -11,7 +12,9 @@ public sealed record WorkspaceRecoverySnapshot(
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     CandidateProfile? CandidateProfile = null,
     string SelectedLlmModel = "",
-    string SelectedThinkingLevel = "");
+    string SelectedThinkingLevel = "",
+    LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics = null,
+    LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null);
 
 public sealed record JobSetRecoveryState(
     string Id,

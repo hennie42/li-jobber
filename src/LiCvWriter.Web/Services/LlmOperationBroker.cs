@@ -45,7 +45,7 @@ public sealed class LlmOperationBroker(
         workspace.MarkLlmWorkStarted();
         workspace.ClearJobSetGeneratedArtifacts(input.JobSet.Id);
         workspace.MarkJobSetRunning(input.JobSet.Id, "Draft generation is running for this tab.");
-        operations.UpdateCurrent(initialSnapshot.Message, initialSnapshot.Detail);
+        operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunDraftGenerationAsync(state, input);
 
@@ -76,7 +76,7 @@ public sealed class LlmOperationBroker(
 
         workspace.MarkLlmWorkStarted();
         workspace.MarkJobSetRunning(input.JobSet.Id, "Job and company context analysis is running for this tab.");
-        operations.UpdateCurrent(initialSnapshot.Message, initialSnapshot.Detail);
+        operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunJobContextAnalysisAsync(state, input);
 
@@ -104,7 +104,7 @@ public sealed class LlmOperationBroker(
 
         workspace.MarkLlmWorkStarted();
         workspace.MarkJobSetRunning(input.JobSet.Id, "Technology gap analysis is running for this tab.");
-        operations.UpdateCurrent(initialSnapshot.Message, initialSnapshot.Detail);
+        operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunTechnologyGapAnalysisAsync(state, input);
 
@@ -131,7 +131,7 @@ public sealed class LlmOperationBroker(
         var state = BeginOperation(input.JobSet.Id, initialSnapshot);
 
         workspace.MarkJobSetRunning(input.JobSet.Id, "Fit review is running for this tab.");
-        operations.UpdateCurrent(initialSnapshot.Message, initialSnapshot.Detail);
+        operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunFitReviewAnalysisAsync(state, input);
 
@@ -159,7 +159,7 @@ public sealed class LlmOperationBroker(
 
         workspace.MarkLlmWorkStarted();
         workspace.MarkJobSetRunning(input.JobSet.Id, "Refresh all analysis is running for this tab.");
-        operations.UpdateCurrent(initialSnapshot.Message, initialSnapshot.Detail);
+        operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunRefreshAllAnalysisAsync(state, input);
 

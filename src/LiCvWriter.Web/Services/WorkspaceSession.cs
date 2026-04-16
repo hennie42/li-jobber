@@ -4,6 +4,7 @@ using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.LinkedIn;
 
 namespace LiCvWriter.Web.Services;
 
@@ -16,9 +17,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private string exportPath = Path.Combine(Environment.CurrentDirectory, "LI-export");
     private CandidateProfile? candidateProfile = LoadCandidateProfile(recoveryStore);
     private LinkedInExportImportResult? importResult;
+    private LinkedInImportDiagnosticsSnapshot? linkedInImportDiagnostics = LoadLinkedInImportDiagnostics(recoveryStore);
     private ApplicantDifferentiatorProfile applicantDifferentiatorProfile = LoadApplicantDifferentiatorProfile(recoveryStore);
     private string activeJobSetId = LoadActiveJobSetId(recoveryStore);
-    private LinkedInAuthorizationStatus linkedInAuthorizationStatus = new(false, "DMA member snapshot not loaded.", null, null, null);
+    private LinkedInAuthorizationStatus linkedInAuthorizationStatus = LoadLinkedInAuthorizationStatus(recoveryStore);
     private OllamaModelAvailability? ollamaAvailability;
     private string selectedLlmModel = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
     private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
@@ -32,6 +34,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     public CandidateProfile? CandidateProfile => Read(() => candidateProfile);
 
     public LinkedInExportImportResult? ImportResult => Read(() => importResult);
+
+    public LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics => Read(() => linkedInImportDiagnostics);
 
     public ApplicantDifferentiatorProfile ApplicantDifferentiatorProfile => Read(() => applicantDifferentiatorProfile);
 
@@ -291,6 +295,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ClearAllGeneratedArtifactsUnsafe();
             this.exportPath = exportPath;
             this.importResult = importResult;
+            linkedInImportDiagnostics = LinkedInImportDiagnosticsFormatter.BuildSnapshot(importResult);
             candidateProfile = importResult.Profile;
             ClearJobFitAssessmentsUnsafe();
             ClearTechnologyGapAssessmentsUnsafe();
@@ -309,6 +314,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             if (importResult is not null)
             {
                 importResult = importResult with { Profile = updatedProfile };
+                linkedInImportDiagnostics = LinkedInImportDiagnosticsFormatter.BuildSnapshot(importResult);
             }
         }
 
@@ -642,6 +648,34 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private static CandidateProfile? LoadCandidateProfile(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.CandidateProfile;
 
+    private static LinkedInImportDiagnosticsSnapshot? LoadLinkedInImportDiagnostics(WorkspaceRecoveryStore? recoveryStore)
+    {
+        var snapshot = recoveryStore?.Load();
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        // Use the persisted diagnostics snapshot if present (modern recovery format).
+        if (snapshot.LinkedInImportDiagnostics is not null)
+        {
+            return snapshot.LinkedInImportDiagnostics;
+        }
+
+        // Backwards compatibility: recover the diagnostics view from the CandidateProfile when
+        // the recovery file predates the diagnostics snapshot field.
+        if (snapshot.CandidateProfile is { } profile)
+        {
+            return LinkedInImportDiagnosticsFormatter.BuildProfileOnlySnapshot(profile);
+        }
+
+        return null;
+    }
+
+    private static LinkedInAuthorizationStatus LoadLinkedInAuthorizationStatus(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.LinkedInAuthorizationStatus
+            ?? new LinkedInAuthorizationStatus(false, "DMA member snapshot not loaded.", null, null, null);
+
     private static string LoadSelectedLlmModel(WorkspaceRecoveryStore? recoveryStore, string configuredModel)
     {
         var recoveredModel = recoveryStore?.Load()?.SelectedLlmModel;
@@ -770,7 +804,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             applicantDifferentiatorProfile,
             candidateProfile,
             selectedLlmModel,
-            selectedThinkingLevel);
+            selectedThinkingLevel,
+            linkedInImportDiagnostics,
+            linkedInAuthorizationStatus);
 
     private void NotifyChanged()
     {

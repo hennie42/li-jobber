@@ -2,6 +2,7 @@
 @implements IDisposable
 @using LiCvWriter.Infrastructure.LinkedIn
 @using LiCvWriter.Infrastructure.Llm
+@inject IWebHostEnvironment Environment
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
 @inject PromptCapturingLlmClient PromptCapture
@@ -198,7 +199,7 @@
     }
 </section>
 
-@if (PromptCapture.CapturedPrompts.Count > 0)
+@if (Environment.IsDevelopment() && PromptCapture.CapturedPrompts.Count > 0)
 {
     <section class="card-panel stack-gap">
         <h2>LLM prompts</h2>
@@ -218,8 +219,15 @@
         }
     </section>
 }
+else if (!Environment.IsDevelopment())
+{
+    <section class="card-panel stack-gap">
+        <h2>LLM prompts</h2>
+        <p class="muted-text">Full prompts and raw responses are available only in Development.</p>
+    </section>
+}
 
-@if (!string.IsNullOrWhiteSpace(GetMostRelevantTelemetry()?.ResponseContent))
+@if (Environment.IsDevelopment() && !string.IsNullOrWhiteSpace(GetMostRelevantTelemetry()?.ResponseContent))
 {
     <section class="card-panel stack-gap">
         <h2>Last model response</h2>
@@ -262,9 +270,7 @@
         => Operations.CurrentLlmTelemetry ?? Operations.LastCompletedLlmTelemetry;
 
     private LinkedInImportDiagnosticsSnapshot? GetLinkedInImportDiagnostics()
-        => Workspace.ImportResult is null
-            ? null
-            : LinkedInImportDiagnosticsFormatter.BuildSnapshot(Workspace.ImportResult);
+        => Workspace.LinkedInImportDiagnostics;
 
     private static string FormatDuration(TimeSpan? duration)
     {

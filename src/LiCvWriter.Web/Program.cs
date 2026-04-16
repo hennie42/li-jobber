@@ -58,7 +58,7 @@ builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
 builder.Services.AddHttpClient<OllamaClient>(client =>
 {
     client.BaseAddress = NormalizeApiBase(ollamaOptions.BaseUrl);
-    client.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
+    client.Timeout = TimeSpan.FromSeconds(Math.Max(90, ollamaOptions.MaxOperationSeconds + 30));
 });
 builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
     new PromptCapturingLlmClient(provider.GetRequiredService<OllamaClient>()));
