@@ -11,3 +11,4 @@ outputs/
 *.userosscache
 *.sln.docstates
 LI-export/
+.playwright-mcp/
