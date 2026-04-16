@@ -73,4 +73,29 @@ public sealed class OperationStatusServiceTests
         Assert.Equal("First message", snapshot[0].Message);
         Assert.Equal(2, service.Entries.Count);
     }
+
+    [Fact]
+    public void BeginLlmOperation_WhenPreviousRunCompleted_ClearsStaleTelemetry()
+    {
+        var service = new OperationStatusService();
+
+        service.UpdateCurrent(new LlmProgressUpdate(
+            "Draft completed",
+            "The stream finished.",
+            "session-model",
+            TimeSpan.FromSeconds(5),
+            Completed: true,
+            ThinkingPreview: "Northwind Health",
+            ThinkingContent: "Northwind Health Northwind Health",
+            Sequence: 3));
+
+        Assert.NotNull(service.LastCompletedLlmTelemetry);
+
+        service.BeginLlmOperation("Analyzing job and company context", "Starting fresh stream.");
+
+        Assert.Null(service.CurrentLlmTelemetry);
+        Assert.Null(service.ActiveLlmTelemetry);
+        Assert.Null(service.LastCompletedLlmTelemetry);
+        Assert.Equal("Analyzing job and company context", service.CurrentMessage);
+    }
 }

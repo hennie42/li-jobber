@@ -38,6 +38,44 @@ public static class LinkedInImportDiagnosticsFormatter
                 .ToArray());
     }
 
+    /// <summary>
+    /// Reconstructs a diagnostics snapshot from a recovered <see cref="CandidateProfile"/> when
+    /// the full import result is no longer available (e.g. after an app restart using an older
+    /// recovery file that did not yet persist the diagnostics snapshot).
+    /// </summary>
+    public static LinkedInImportDiagnosticsSnapshot BuildProfileOnlySnapshot(
+        CandidateProfile profile,
+        string sourceDescription = "Recovered from saved session")
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return new LinkedInImportDiagnosticsSnapshot(
+            sourceDescription,
+            string.Empty,
+            Array.Empty<string>(),
+            Array.Empty<string>(),
+            new LinkedInImportProfileSummary(
+                profile.Name.FullName,
+                profile.Headline,
+                profile.Summary,
+                profile.Experience.Count,
+                profile.Education.Count,
+                profile.Certifications.Count,
+                profile.Projects.Count,
+                profile.Recommendations.Count,
+                profile.ManualSignals.Count),
+            profile.Experience.Select(static role => new LinkedInImportExperienceSnapshot(
+                $"{role.Title} @ {role.CompanyName}".Trim(' ', '@'),
+                role.Period.DisplayValue,
+                role.Location,
+                SplitLines(role.Description, fallback: "(none provided)")))
+                .ToArray(),
+            profile.ManualSignals
+                .OrderBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(static pair => new LinkedInImportManualSignalSnapshot(pair.Key, SplitLines(pair.Value)))
+                .ToArray());
+    }
+
     public static string BuildExperienceConsoleOutput(CandidateProfile profile)
     {
         ArgumentNullException.ThrowIfNull(profile);

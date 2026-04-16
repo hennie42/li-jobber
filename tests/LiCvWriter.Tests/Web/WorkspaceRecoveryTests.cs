@@ -3,6 +3,7 @@ using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.LinkedIn;
 using LiCvWriter.Web.Services;
 
 namespace LiCvWriter.Tests.Web;
@@ -282,6 +283,127 @@ public sealed class WorkspaceRecoveryTests
             restoredSession.SelectJobSet("job-set-01");
             Assert.Equal(JobSetInputMode.LinkToUrls, restoredSession.ActiveJobSet.InputMode);
             Assert.Equal(string.Empty, restoredSession.ActiveJobSet.JobPostingText);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresLinkedInDiagnosticsFromProfile_WhenOldRecoveryFileHasNoSnapshotField()
+    {
+        // Simulates an old workspace-recovery.json that was saved before the
+        // LinkedInImportDiagnostics field was added. Only CandidateProfile is present;
+        // the diagnostics snapshot must be reconstructed from it.
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            var recoveryPath = Path.Combine(root, "workspace-recovery.json");
+
+            // Write a recovery JSON that has candidateProfile but no linkedInImportDiagnostics.
+            File.WriteAllText(recoveryPath, """
+                {
+                  "candidateProfile": {
+                    "name": { "firstName": "Jordan", "lastName": "Blake" },
+                    "headline": "Senior Engineer",
+                    "summary": "Builds things.",
+                    "experience": [
+                      {
+                        "companyName": "Acme",
+                        "title": "Engineer",
+                        "description": "Built systems.",
+                        "location": null,
+                        "period": { "startDate": { "raw": "2022", "year": 2022 }, "endDate": null }
+                      }
+                    ],
+                    "education": [],
+                    "certifications": [],
+                    "projects": [],
+                    "recommendations": [],
+                    "manualSignals": {}
+                  },
+                  "linkedInAuthorizationStatus": null,
+                  "linkedInImportDiagnostics": null
+                }
+                """);
+
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+
+            // Diagnostics must be reconstructed from the profile despite being absent in the JSON.
+            Assert.NotNull(session.LinkedInImportDiagnostics);
+            Assert.Equal("Jordan Blake", session.LinkedInImportDiagnostics!.Profile.FullName);
+            Assert.Equal("Senior Engineer", session.LinkedInImportDiagnostics.Profile.Headline);
+            Assert.Equal(1, session.LinkedInImportDiagnostics.Profile.ExperienceCount);
+            Assert.Single(session.LinkedInImportDiagnostics.ExperienceEntries);
+            Assert.Equal("Engineer @ Acme", session.LinkedInImportDiagnostics.ExperienceEntries[0].Title);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresLinkedInDiagnosticsAndAuthorizationState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+            var authorizedAt = new DateTimeOffset(2026, 4, 16, 18, 0, 0, TimeSpan.Zero);
+
+            session.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                "DMA member snapshot loaded.",
+                authorizedAt,
+                authorizedAt.AddHours(1),
+                "r_dma_portability_self_serve"));
+            session.SetImportResult(
+                Path.Combine(root, "LI-export"),
+                new LinkedInExportImportResult(
+                    new CandidateProfile
+                    {
+                        Name = new PersonName("Alex", "Taylor"),
+                        Headline = "Lead Architect",
+                        Summary = "Builds pragmatic AI and cloud systems.",
+                        Experience =
+                        [
+                            new ExperienceEntry(
+                                "Contoso",
+                                "Lead Architect",
+                                "Led enterprise transformation work.",
+                                null,
+                                new DateRange(new PartialDate("2024", 2024)))
+                        ]
+                    },
+                    new LinkedInExportInspection(
+                        Path.Combine(root, "LI-export"),
+                        ["Positions.csv", "Profile.csv"],
+                        Array.Empty<string>()),
+                    Array.Empty<string>(),
+                    "DMA member snapshot"));
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            Assert.NotNull(restoredSession.LinkedInImportDiagnostics);
+            Assert.Equal("DMA member snapshot", restoredSession.LinkedInImportDiagnostics!.SourceDescription);
+            Assert.Equal("Alex Taylor", restoredSession.LinkedInImportDiagnostics.Profile.FullName);
+            Assert.Contains("Positions.csv", restoredSession.LinkedInImportDiagnostics.DiscoveredFiles);
+            Assert.True(restoredSession.LinkedInAuthorizationStatus.IsAuthorized);
+            Assert.Equal("DMA member snapshot loaded.", restoredSession.LinkedInAuthorizationStatus.Message);
+            Assert.Equal(authorizedAt, restoredSession.LinkedInAuthorizationStatus.AuthorizedAtUtc);
         }
         finally
         {

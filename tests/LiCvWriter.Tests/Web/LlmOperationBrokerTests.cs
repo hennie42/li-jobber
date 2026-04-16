@@ -347,6 +347,52 @@ public sealed class LlmOperationBrokerTests
         Assert.Equal(JobSetProgressState.Failed, workspace.ActiveJobSet.ProgressState);
     }
 
+    [Fact]
+    public void StartJobContextAnalysis_WhenPreviousTelemetryExists_ClearsLastCompletedTelemetryBeforeStreaming()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, FakeJobResearchService>();
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+        var operations = serviceProvider.GetRequiredService<OperationStatusService>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateActiveJobSetInputs(
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        operations.UpdateCurrent(new LlmProgressUpdate(
+            "Draft completed",
+            "The stream finished.",
+            "configured-model",
+            TimeSpan.FromSeconds(2),
+            Completed: true,
+            ThinkingPreview: "Northwind Health",
+            ThinkingContent: "Northwind Health Northwind Health",
+            Sequence: 7));
+
+        Assert.NotNull(operations.LastCompletedLlmTelemetry);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-01"));
+
+        Assert.Null(operations.LastCompletedLlmTelemetry);
+    }
+
     private static async Task<LlmOperationSnapshot> WaitForTerminalSnapshotAsync(LlmOperationBroker broker, string operationId, int attempts = 200)
     {
         for (var attempt = 0; attempt < attempts; attempt++)

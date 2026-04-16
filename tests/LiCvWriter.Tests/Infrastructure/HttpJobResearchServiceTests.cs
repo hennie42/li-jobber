@@ -204,6 +204,34 @@ public sealed class HttpJobResearchServiceTests
       }
 
       [Fact]
+      public async Task AnalyzeAsync_WhenUrlUsesHttp_Throws()
+      {
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called"))),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync(new Uri("http://jobs.example.test/lead-ai-architect")));
+
+        Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
+      [Fact]
+      public async Task AnalyzeAsync_WhenUrlTargetsLocalhost_Throws()
+      {
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called"))),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync(new Uri("https://localhost/job")));
+
+        Assert.Contains("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
+      [Fact]
       public async Task AnalyzeTextAsync_ParsesJobPostingFromPastedText()
       {
         var llmClient = new FakeLlmClient(

@@ -126,6 +126,18 @@ public sealed class OperationStatusService
         NotifyChanged();
     }
 
+    public void BeginLlmOperation(string message, string? detail = null)
+    {
+        lock (gate)
+        {
+            ResetAllLlmTelemetryUnsafe();
+            currentMessage = message;
+            currentDetail = detail;
+        }
+
+        NotifyChanged();
+    }
+
     public void UpdateCurrent(LlmProgressUpdate update)
     {
         lock (gate)
@@ -149,7 +161,12 @@ public sealed class OperationStatusService
 
             if (update.Completed)
             {
+                // Promote to lastCompleted and clear current so that the monitor
+                // transitions to "Last capture" between multi-step sub-calls rather
+                // than keeping the first sub-call's thinking visible as "Live feed"
+                // while the second sub-call has not yet produced any thinking output.
                 lastCompletedLlmTelemetry = currentLlmTelemetry;
+                currentLlmTelemetry = null;
             }
         }
 
@@ -191,6 +208,12 @@ public sealed class OperationStatusService
     }
 
     private void ResetCurrentLlmTelemetryUnsafe() => currentLlmTelemetry = null;
+
+    private void ResetAllLlmTelemetryUnsafe()
+    {
+        currentLlmTelemetry = null;
+        lastCompletedLlmTelemetry = null;
+    }
 
     private void AddEntryUnsafe(string level, string message, string? detail, TimeSpan? duration = null)
     {
