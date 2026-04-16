@@ -11,6 +11,8 @@
   --signal-green-line: rgba(67, 141, 83, 0.4);
   --line: rgba(31, 41, 51, 0.12);
   --shadow: 0 20px 60px rgba(40, 32, 21, 0.09);
+  --shell-sidebar-padding-block: 2rem;
+  --shell-sidebar-padding-inline: 1.5rem;
 }
 
 * {
@@ -21,6 +23,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  scrollbar-gutter: stable;
   background:
     radial-gradient(circle at top left, rgba(227, 180, 137, 0.32), transparent 30%),
     radial-gradient(circle at bottom right, rgba(74, 85, 104, 0.15), transparent 28%),
@@ -48,10 +51,26 @@ a {
 
 .shell-sidebar {
   grid-area: sidebar;
-  padding: 2rem 1.5rem;
+  padding: var(--shell-sidebar-padding-block) var(--shell-sidebar-padding-inline);
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+.shell-sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
   border-left: 1px solid var(--line);
   background: rgba(255, 248, 239, 0.82);
   backdrop-filter: blur(18px);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.shell-sidebar > * {
+  position: relative;
+  z-index: 1;
 }
 
 .shell-content {
@@ -85,7 +104,11 @@ a {
 
 .sidebar-floating-stack {
   position: sticky;
-  top: 1rem;
+  top: var(--shell-sidebar-padding-block);
+  align-self: start;
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -1127,6 +1150,10 @@ textarea.inline-edit-input {
 
   .shell-sidebar {
     border-left: 0;
+  }
+
+  .shell-sidebar::before {
+    border-left: 0;
     border-bottom: 1px solid var(--line);
   }
 
@@ -1143,9 +1170,14 @@ textarea.inline-edit-input {
 }
 
 @media (max-width: 700px) {
+  :root {
+    --shell-sidebar-padding-block: 1rem;
+    --shell-sidebar-padding-inline: 1rem;
+  }
+
   .shell-content,
   .shell-sidebar {
-    padding: 1rem;
+    padding: var(--shell-sidebar-padding-block) var(--shell-sidebar-padding-inline);
   }
 
   .fit-header,
