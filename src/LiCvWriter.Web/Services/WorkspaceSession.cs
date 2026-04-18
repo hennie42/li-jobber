@@ -83,6 +83,41 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         && isLlmSessionConfigured
         && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
+    public bool IsJobSetFitReviewCurrent(string jobSetId, string fingerprint, bool requiresLlmEnhancement)
+    {
+        return Read(() =>
+        {
+            var jobSet = jobSets.FirstOrDefault(job => job.Id.Equals(jobSetId, StringComparison.OrdinalIgnoreCase));
+            if (jobSet is null)
+            {
+                throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
+            }
+
+            if (!jobSet.JobFitAssessment.HasSignals || !jobSet.EvidenceSelection.HasSignals)
+            {
+                return false;
+            }
+
+            if (!string.Equals(jobSet.LastFitReviewFingerprint, fingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return !requiresLlmEnhancement
+                || jobSet.LastFitReviewIncludedLlmEnhancement
+                || jobSet.JobFitAssessment.Requirements.All(static requirement => requirement.Match == JobRequirementMatch.Strong);
+        });
+    }
+
+    public void RecordJobSetFitReviewRefresh(string jobSetId, string fingerprint, bool includedLlmEnhancement)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with
+        {
+            LastFitReviewFingerprint = fingerprint,
+            LastFitReviewIncludedLlmEnhancement = includedLlmEnhancement
+        });
+    }
+
     public void SetActiveJobSetOutputLanguage(OutputLanguage outputLanguage)
     {
         UpdateActiveJobSet(jobSet => jobSet with { OutputLanguage = outputLanguage });
@@ -216,7 +251,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     : item)
                 .ToArray());
 
-    public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls)
+    public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls, bool makeActive = true)
     {
         lock (gate)
         {
@@ -224,7 +259,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             var jobSet = CreateJobSet(nextSortOrder, inputMode);
 
             jobSets.Add(jobSet);
-            activeJobSetId = jobSet.Id;
+
+            if (makeActive)
+            {
+                activeJobSetId = jobSet.Id;
+            }
         }
 
         NotifyChanged();
@@ -316,6 +355,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 importResult = importResult with { Profile = updatedProfile };
                 linkedInImportDiagnostics = LinkedInImportDiagnosticsFormatter.BuildSnapshot(importResult);
             }
+
+            ClearAllGeneratedArtifactsUnsafe();
+            ClearJobFitAssessmentsUnsafe();
+            ClearTechnologyGapAssessmentsUnsafe();
+            ClearEvidenceSelectionsUnsafe();
         }
 
         NotifyChanged();
@@ -347,6 +391,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             TechnologyGapAssessment = TechnologyGapAssessment.Empty,
             SelectedEvidenceIds = Array.Empty<string>(),
             EvidenceSelection = EvidenceSelectionResult.Empty,
+            LastFitReviewFingerprint = null,
+            LastFitReviewIncludedLlmEnhancement = false,
             ProgressState = JobSetProgressState.NotStarted,
             ProgressDetail = "LLM work not started for this job set.",
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
@@ -365,6 +411,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             JobFitAssessment = JobFitAssessment.Empty,
             TechnologyGapAssessment = TechnologyGapAssessment.Empty,
             EvidenceSelection = EvidenceSelectionResult.Empty,
+            LastFitReviewFingerprint = null,
+            LastFitReviewIncludedLlmEnhancement = false,
             ProgressState = JobSetProgressState.NotStarted,
             ProgressDetail = "LLM work not started for this job set.",
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
@@ -541,7 +589,12 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     {
         for (var index = 0; index < jobSets.Count; index++)
         {
-            jobSets[index] = jobSets[index] with { JobFitAssessment = JobFitAssessment.Empty };
+            jobSets[index] = jobSets[index] with
+            {
+                JobFitAssessment = JobFitAssessment.Empty,
+                LastFitReviewFingerprint = null,
+                LastFitReviewIncludedLlmEnhancement = false
+            };
         }
     }
 
@@ -565,6 +618,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             jobSets[index] = jobSets[index] with
             {
                 EvidenceSelection = EvidenceSelectionResult.Empty,
+                LastFitReviewFingerprint = null,
+                LastFitReviewIncludedLlmEnhancement = false,
                 SelectedEvidenceIds = clearSelectedIds ? Array.Empty<string>() : jobSets[index].SelectedEvidenceIds
             };
         }
@@ -623,7 +678,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     GeneratedDocuments = jobSet.GeneratedDocuments ?? Array.Empty<GeneratedDocument>(),
                     TechnologyGapAssessment = jobSet.TechnologyGapAssessment ?? TechnologyGapAssessment.Empty,
                     SelectedEvidenceIds = jobSet.SelectedEvidenceIds ?? Array.Empty<string>(),
-                    EvidenceSelection = jobSet.EvidenceSelection ?? EvidenceSelectionResult.Empty
+                    EvidenceSelection = jobSet.EvidenceSelection ?? EvidenceSelectionResult.Empty,
+                    LastFitReviewFingerprint = jobSet.LastFitReviewFingerprint,
+                    LastFitReviewIncludedLlmEnhancement = jobSet.LastFitReviewIncludedLlmEnhancement
                 };
             })
             .ToList();
@@ -800,7 +857,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.TechnologyGapAssessment,
                 jobSet.EvidenceSelection,
                 jobSet.GeneratedDocuments,
-                jobSet.AdditionalInstructions)).ToArray(),
+                jobSet.AdditionalInstructions,
+                jobSet.LastFitReviewFingerprint,
+                jobSet.LastFitReviewIncludedLlmEnhancement)).ToArray(),
             applicantDifferentiatorProfile,
             candidateProfile,
             selectedLlmModel,

@@ -82,7 +82,7 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.Confidence == 97 && signal.SourceLabel == "jobs.example.test");
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.EffectiveAliases.Contains("azure platform"));
         Assert.Equal("session-model", llmClient.LastRequest!.Model);
-        Assert.Equal("low", llmClient.LastRequest.Think);
+        Assert.Equal("high", llmClient.LastRequest.Think);
     }
 
     [Fact]
@@ -479,6 +479,80 @@ public sealed class HttpJobResearchServiceTests
         Assert.Equal("Drive enterprise integration architecture across global teams.", result.Summary);
         Assert.NotEmpty(result.MustHaveThemes);
         Assert.NotEmpty(result.Signals);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_FiltersConversationalAndNavigationSignals()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Platform Engineer",
+              "companyName": "Contoso",
+              "summary": "Build and operate platform capabilities.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Links",
+                  "sourceSnippet": "Links to all departments and resources.",
+                  "confidence": 95
+                },
+                {
+                  "category": "Culture",
+                  "requirement": "Of course",
+                  "sourceSnippet": "Of course, we care about people.",
+                  "confidence": 90
+                },
+                {
+                  "category": "Must have",
+                  "requirement": "Kubernetes",
+                  "sourceSnippet": "Must have Kubernetes production experience.",
+                  "confidence": 92
+                }
+              ]
+            }
+            """);
+
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync("Platform Engineer role. Must have Kubernetes production experience.", "model", "low");
+
+        Assert.DoesNotContain(result.Signals, signal => signal.Requirement.Equals("Links", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Signals, signal => signal.Requirement.Equals("Of course", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.MustHaveThemes, theme => theme.Equals("Kubernetes", StringComparison.OrdinalIgnoreCase));
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_KeepsValidSingleTokenTechnicalSignal()
+      {
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Cloud Engineer",
+              "companyName": "Contoso",
+              "summary": "Build cloud workloads.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Azure",
+                  "sourceSnippet": "Must have Azure experience for production systems.",
+                  "confidence": 94
+                }
+              ]
+            }
+            """);
+
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+            llmClient,
+            new OllamaOptions());
+
+        var result = await service.AnalyzeTextAsync("Cloud Engineer role. Must have Azure experience for production systems.", "model", "low");
+
+        Assert.Contains(result.MustHaveThemes, theme => theme.Equals("Azure", StringComparison.OrdinalIgnoreCase));
       }
 
       private static HttpResponseMessage CreateHtmlResponse(string html)

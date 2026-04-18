@@ -37,4 +37,6 @@ public sealed record JobSetRecoveryState(
     TechnologyGapAssessment? TechnologyGapAssessment = null,
     EvidenceSelectionResult? EvidenceSelection = null,
     IReadOnlyList<GeneratedDocument>? GeneratedDocuments = null,
-    string AdditionalInstructions = "");
+    string AdditionalInstructions = "",
+    string? LastFitReviewFingerprint = null,
+    bool LastFitReviewIncludedLlmEnhancement = false);

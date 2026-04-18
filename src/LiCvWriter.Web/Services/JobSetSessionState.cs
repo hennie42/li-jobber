@@ -50,6 +50,10 @@ public sealed record JobSetSessionState
 
     public IReadOnlyList<DocumentExportResult> Exports { get; init; } = Array.Empty<DocumentExportResult>();
 
+    public string? LastFitReviewFingerprint { get; init; }
+
+    public bool LastFitReviewIncludedLlmEnhancement { get; init; }
+
     public string Title => JobPosting is not null
         ? $"{JobPosting.RoleTitle} @ {JobPosting.CompanyName}".Trim()
         : DefaultTitle;

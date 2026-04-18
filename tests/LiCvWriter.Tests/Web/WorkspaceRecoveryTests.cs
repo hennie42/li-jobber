@@ -310,7 +310,7 @@ public sealed class WorkspaceRecoveryTests
             File.WriteAllText(recoveryPath, """
                 {
                   "candidateProfile": {
-                    "name": { "firstName": "Jordan", "lastName": "Blake" },
+                                        "name": { "first": "Jordan", "last": "Blake" },
                     "headline": "Senior Engineer",
                     "summary": "Builds things.",
                     "experience": [
@@ -342,7 +342,7 @@ public sealed class WorkspaceRecoveryTests
             Assert.Equal("Senior Engineer", session.LinkedInImportDiagnostics.Profile.Headline);
             Assert.Equal(1, session.LinkedInImportDiagnostics.Profile.ExperienceCount);
             Assert.Single(session.LinkedInImportDiagnostics.ExperienceEntries);
-            Assert.Equal("Engineer @ Acme", session.LinkedInImportDiagnostics.ExperienceEntries[0].Title);
+            Assert.Equal("Engineer @ Acme", session.LinkedInImportDiagnostics.ExperienceEntries[0].DisplayTitle);
         }
         finally
         {

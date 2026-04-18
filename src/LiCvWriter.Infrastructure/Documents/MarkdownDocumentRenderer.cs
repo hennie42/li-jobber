@@ -12,6 +12,8 @@ namespace LiCvWriter.Infrastructure.Documents;
 /// </summary>
 public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 {
+    private const int EarlyCareerCutoffYear = 2008;
+
     /// <summary>Common Danish words used for language detection heuristic.</summary>
     private static readonly HashSet<string> DanishMarkers = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -48,10 +50,24 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         switch (request.Kind)
         {
             case DocumentKind.Cv:
+                var modernExperience = request.Candidate.Experience
+                    .Where(static role => !IsBeforeCutoff(role.Period, EarlyCareerCutoffYear))
+                    .ToArray();
+                var earlyCareerExperience = request.Candidate.Experience
+                    .Where(static role => IsBeforeCutoff(role.Period, EarlyCareerCutoffYear))
+                    .ToArray();
+                var modernProjects = request.Candidate.Projects
+                    .Where(static project => !IsBeforeCutoff(project.Period, EarlyCareerCutoffYear))
+                    .ToArray();
+                var earlyCareerProjects = request.Candidate.Projects
+                    .Where(static project => IsBeforeCutoff(project.Period, EarlyCareerCutoffYear))
+                    .ToArray();
+
                 AppendProfileOverview(builder, generatedBody, request, selectedEvidence, outputLanguage);
                 AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
-                AppendExperienceList(builder, request.Candidate, outputLanguage);
-                AppendProjects(builder, request.Candidate, outputLanguage);
+                AppendExperienceList(builder, modernExperience, outputLanguage);
+                AppendProjects(builder, modernProjects, outputLanguage);
+                AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
                 AppendAllRecommendations(builder, request.Candidate, outputLanguage);
                 if (HasSelectedCertifications(selectedEvidence))
                 {
@@ -160,9 +176,9 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     /// <summary>
     /// Renders all experience entries with ATS-standard section title and clear Title/Company/Date pattern.
     /// </summary>
-    private static void AppendExperienceList(StringBuilder builder, CandidateProfile candidate, OutputLanguage outputLanguage)
+    private static void AppendExperienceList(StringBuilder builder, IReadOnlyList<ExperienceEntry> experience, OutputLanguage outputLanguage)
     {
-        if (candidate.Experience.Count == 0)
+        if (experience.Count == 0)
         {
             return;
         }
@@ -170,7 +186,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         builder.AppendLine($"## {Translate(outputLanguage, "Professional Experience", "Erhvervserfaring")}");
         builder.AppendLine();
 
-        foreach (var role in candidate.Experience.Take(12))
+        foreach (var role in experience.Take(12))
         {
             builder.AppendLine($"### {role.Title} | {role.CompanyName}");
             if (!string.IsNullOrWhiteSpace(role.Period.DisplayValue))
@@ -191,9 +207,9 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     /// <summary>
     /// Renders candidate projects with title, period, description, and URL.
     /// </summary>
-    private static void AppendProjects(StringBuilder builder, CandidateProfile candidate, OutputLanguage outputLanguage)
+    private static void AppendProjects(StringBuilder builder, IReadOnlyList<ProjectEntry> projects, OutputLanguage outputLanguage)
     {
-        if (candidate.Projects.Count == 0)
+        if (projects.Count == 0)
         {
             return;
         }
@@ -201,7 +217,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         builder.AppendLine($"## {Translate(outputLanguage, "Projects", "Projekter")}");
         builder.AppendLine();
 
-        foreach (var project in candidate.Projects)
+        foreach (var project in projects)
         {
             builder.AppendLine($"### {project.Title}");
             if (!string.IsNullOrWhiteSpace(project.Period.DisplayValue))
@@ -223,6 +239,60 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
             builder.AppendLine();
         }
+    }
+
+    private static void AppendEarlyCareer(
+        StringBuilder builder,
+        IReadOnlyList<ExperienceEntry> earlyCareerExperience,
+        IReadOnlyList<ProjectEntry> earlyCareerProjects,
+        OutputLanguage outputLanguage)
+    {
+        if (earlyCareerExperience.Count == 0 && earlyCareerProjects.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine($"## {Translate(outputLanguage, "Early career", "Tidlig karriere")}");
+        builder.AppendLine();
+
+        var roleCount = earlyCareerExperience.Count;
+        var projectCount = earlyCareerProjects.Count;
+        var years = earlyCareerExperience
+            .Select(static role => GetReferenceYear(role.Period))
+            .Concat(earlyCareerProjects.Select(static project => GetReferenceYear(project.Period)))
+            .Where(static year => year.HasValue)
+            .Select(static year => year!.Value)
+            .ToArray();
+        var yearRange = years.Length > 0
+            ? $" ({years.Min()}-{years.Max()})"
+            : string.Empty;
+
+        var summaryLine = (roleCount, projectCount, outputLanguage) switch
+        {
+            (_, > 0, OutputLanguage.Danish) when roleCount > 0 =>
+                $"Fremhaevninger fra tidlig karriere paa tvaers af {roleCount} roller og {projectCount} projekter{yearRange}.",
+            (> 0, 0, OutputLanguage.Danish) =>
+                $"Fremhaevninger fra tidlig karriere paa tvaers af {roleCount} roller{yearRange}.",
+            (0, > 0, OutputLanguage.Danish) =>
+                $"Fremhaevninger fra tidlig karriere paa tvaers af {projectCount} projekter{yearRange}.",
+            (_, > 0, OutputLanguage.English) when roleCount > 0 =>
+                $"Early career highlights from {roleCount} roles and {projectCount} projects{yearRange}.",
+            (> 0, 0, OutputLanguage.English) =>
+                $"Early career highlights from {roleCount} roles{yearRange}.",
+            _ =>
+                $"Early career highlights from {projectCount} projects{yearRange}."
+        };
+
+        builder.AppendLine(summaryLine);
+        builder.AppendLine();
+
+        builder.AppendLine(outputLanguage == OutputLanguage.Danish
+            ? "- Etablerede et staerkt fundament gennem leverancer i varierede miljoeer og samarbejde paa tvaers af teams."
+            : "- Built a strong foundation through delivery in varied environments and cross-functional collaboration.");
+        builder.AppendLine(outputLanguage == OutputLanguage.Danish
+            ? "- Udviklede overfoerbare styrker inden for eksekvering, stakeholder-samarbejde og teknisk bredde."
+            : "- Developed transferable strengths in execution, stakeholder collaboration, and technical breadth.");
+        builder.AppendLine();
     }
 
     /// <summary>
@@ -297,6 +367,15 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         return ratio >= 0.08;
     }
+
+    private static bool IsBeforeCutoff(DateRange period, int cutoffYear)
+    {
+        var year = GetReferenceYear(period);
+        return year is not null && year.Value < cutoffYear;
+    }
+
+    private static int? GetReferenceYear(DateRange period)
+        => period.StartedOn?.Year ?? period.FinishedOn?.Year;
 
     private static void AppendSection(StringBuilder builder, string title, string? content)
     {

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Channels;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
@@ -212,7 +214,7 @@ public sealed class LlmOperationBroker(
 
         if (operationTimeout is not null)
         {
-            state.Cancellation.CancelAfter(operationTimeout.Value);
+            state.StartTimeoutCountdown(operationTimeout.Value);
         }
 
         lock (gate)
@@ -235,17 +237,17 @@ public sealed class LlmOperationBroker(
         => ollamaOptions.MaxOperationSeconds > 0 ? TimeSpan.FromSeconds(ollamaOptions.MaxOperationSeconds) : null;
 
     private bool IsTimedOut(LlmOperationState state)
-        => state.TimeoutAt is { } timeoutAt && timeProvider.GetUtcNow() >= timeoutAt;
+        => state.TimedOut || (state.TimeoutAt is { } timeoutAt && timeProvider.GetUtcNow() >= timeoutAt);
 
     private string BuildTimeoutDetail(string operationLabel)
     {
         var timeout = GetOperationTimeout();
         if (timeout is null)
         {
-            return $"{operationLabel} timed out.";
+            return $"{operationLabel} timed out because it exceeded the configured inactivity window or the request stalled.";
         }
 
-        return $"{operationLabel} exceeded the {FormatDuration(timeout.Value)} limit. Lower the thinking level or choose a faster model and try again.";
+        return $"{operationLabel} exceeded the configured {FormatDuration(timeout.Value)} limit. Lower the thinking level, choose a faster model, or disable the hard operation cap and try again.";
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -491,28 +493,48 @@ public sealed class LlmOperationBroker(
             var fitRefreshService = scope.ServiceProvider.GetRequiredService<JobFitWorkspaceRefreshService>();
             var fitEnhancementService = scope.ServiceProvider.GetRequiredService<LlmFitEnhancementService>();
             var draftGenerationService = scope.ServiceProvider.GetRequiredService<IDraftGenerationService>();
+            var currentJobSet = GetJobSetOrThrow(input.JobSet.Id);
+            var fitReviewFingerprint = BuildFitReviewFingerprint(
+                input.CandidateProfile,
+                currentJobSet,
+                workspace.ApplicantDifferentiatorProfile,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                useLlmEnhancement: true);
 
-            try
+            if (workspace.IsJobSetFitReviewCurrent(input.JobSet.Id, fitReviewFingerprint, requiresLlmEnhancement: true))
             {
-                await RefreshFitReviewCoreAsync(
+                PublishStage(
                     state,
                     input.JobSet.Id,
-                    input.JobSet.Title,
-                    input.CandidateProfile,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    useLlmEnhancement: true,
-                    fitRefreshService,
-                    fitEnhancementService,
-                    state.Cancellation.Token);
+                    "Reusing current fit review",
+                    $"Fit review is already current for {input.JobSet.Title}; skipping the preflight refresh.");
             }
-            catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+            else
             {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                operations.Error("Draft generation pre-flight fit review failed.", exception.Message);
+                try
+                {
+                    await RefreshFitReviewCoreAsync(
+                        state,
+                        input.JobSet.Id,
+                        input.JobSet.Title,
+                        input.CandidateProfile,
+                        input.SelectedModel,
+                        input.SelectedThinkingLevel,
+                        useLlmEnhancement: true,
+                        fitReviewFingerprint,
+                        fitRefreshService,
+                        fitEnhancementService,
+                        state.Cancellation.Token);
+                }
+                catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    operations.Error("Draft generation pre-flight fit review failed.", exception.Message);
+                }
             }
 
             var generationJobSet = GetJobSetOrThrow(input.JobSet.Id);
@@ -853,6 +875,14 @@ public sealed class LlmOperationBroker(
             await using var scope = scopeFactory.CreateAsyncScope();
             var fitRefreshService = scope.ServiceProvider.GetRequiredService<JobFitWorkspaceRefreshService>();
             var fitEnhancementService = scope.ServiceProvider.GetRequiredService<LlmFitEnhancementService>();
+            var currentJobSet = GetJobSetOrThrow(input.JobSet.Id);
+            var fitReviewFingerprint = BuildFitReviewFingerprint(
+                input.CandidateProfile,
+                currentJobSet,
+                workspace.ApplicantDifferentiatorProfile,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                input.UseLlmEnhancement);
 
             var assessment = await RefreshFitReviewCoreAsync(
                 state,
@@ -862,6 +892,7 @@ public sealed class LlmOperationBroker(
                 input.SelectedModel,
                 input.SelectedThinkingLevel,
                 input.UseLlmEnhancement,
+                fitReviewFingerprint,
                 fitRefreshService,
                 fitEnhancementService,
                 state.Cancellation.Token);
@@ -1015,6 +1046,15 @@ public sealed class LlmOperationBroker(
 
             if (input.CandidateProfile is not null)
             {
+                var latestJobSet = GetJobSetOrThrow(input.JobSet.Id);
+                var fitReviewFingerprint = BuildFitReviewFingerprint(
+                    input.CandidateProfile,
+                    latestJobSet,
+                    workspace.ApplicantDifferentiatorProfile,
+                    input.SelectedModel,
+                    input.SelectedThinkingLevel,
+                    useLlmEnhancement: true);
+
                 await RefreshFitReviewCoreAsync(
                     state,
                     input.JobSet.Id,
@@ -1023,6 +1063,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     useLlmEnhancement: true,
+                    fitReviewFingerprint,
                     fitRefreshService,
                     fitEnhancementService,
                     state.Cancellation.Token);
@@ -1034,11 +1075,11 @@ public sealed class LlmOperationBroker(
                     $"Comparing profile evidence against {input.JobSet.Title}.",
                     input.SelectedModel);
 
-                var latestJobSet = GetJobSetOrThrow(input.JobSet.Id);
+                var latestJobSetAfterFitReview = GetJobSetOrThrow(input.JobSet.Id);
                 var technologyGapAssessment = await gapAnalysisService.AnalyzeAsync(
                     input.CandidateProfile,
-                    latestJobSet.JobPosting!,
-                    latestJobSet.CompanyProfile,
+                    latestJobSetAfterFitReview.JobPosting!,
+                    latestJobSetAfterFitReview.CompanyProfile,
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
@@ -1140,6 +1181,7 @@ public sealed class LlmOperationBroker(
         string selectedModel,
         string selectedThinkingLevel,
         bool useLlmEnhancement,
+        string fitReviewFingerprint,
         JobFitWorkspaceRefreshService fitRefreshService,
         LlmFitEnhancementService fitEnhancementService,
         CancellationToken cancellationToken)
@@ -1147,7 +1189,7 @@ public sealed class LlmOperationBroker(
         PublishStage(
             state,
             jobSetId,
-            "Analyzing job fit",
+            "Refreshing deterministic fit review",
             $"Refreshing deterministic fit signals for {jobSetTitle}.");
 
         if (!fitRefreshService.RefreshJobSet(jobSetId))
@@ -1192,7 +1234,10 @@ public sealed class LlmOperationBroker(
             }
         }
 
-        return GetJobSetOrThrow(jobSetId).JobFitAssessment;
+        var finalAssessment = GetJobSetOrThrow(jobSetId).JobFitAssessment;
+        workspace.RecordJobSetFitReviewRefresh(jobSetId, fitReviewFingerprint, finalAssessment.IsLlmEnhanced);
+
+        return finalAssessment;
     }
 
     private void HandleProgress(LlmOperationState state, string jobSetId, LlmProgressUpdate update)
@@ -1261,6 +1306,107 @@ public sealed class LlmOperationBroker(
         return $"{detail} LLM upgraded {upgradedCount} requirement(s).";
     }
 
+    private static string BuildFitReviewFingerprint(
+        CandidateProfile candidateProfile,
+        JobSetSessionState jobSet,
+        ApplicantDifferentiatorProfile differentiatorProfile,
+        string selectedModel,
+        string selectedThinkingLevel,
+        bool useLlmEnhancement)
+    {
+        var builder = new StringBuilder();
+        AppendFingerprint(builder, candidateProfile.Name.ToString());
+        AppendFingerprint(builder, candidateProfile.Headline);
+        AppendFingerprint(builder, candidateProfile.Summary);
+        AppendFingerprint(builder, candidateProfile.Industry);
+        AppendFingerprint(builder, candidateProfile.Location);
+        AppendFingerprint(builder, candidateProfile.PublicProfileUrl);
+        AppendFingerprint(builder, candidateProfile.PrimaryEmail);
+
+        foreach (var experience in candidateProfile.Experience)
+        {
+            AppendFingerprint(builder, experience.CompanyName);
+            AppendFingerprint(builder, experience.Title);
+            AppendFingerprint(builder, experience.Description);
+            AppendFingerprint(builder, experience.Location);
+            AppendFingerprint(builder, experience.Period.ToString());
+        }
+
+        foreach (var project in candidateProfile.Projects)
+        {
+            AppendFingerprint(builder, project.Title);
+            AppendFingerprint(builder, project.Description);
+            AppendFingerprint(builder, project.Url?.ToString());
+            AppendFingerprint(builder, project.Period.ToString());
+        }
+
+        foreach (var skill in candidateProfile.Skills.OrderBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            AppendFingerprint(builder, skill.Name);
+        }
+
+        foreach (var certification in candidateProfile.Certifications)
+        {
+            AppendFingerprint(builder, certification.Name);
+            AppendFingerprint(builder, certification.Authority);
+            AppendFingerprint(builder, certification.Url?.ToString());
+            AppendFingerprint(builder, certification.Period.ToString());
+        }
+
+        foreach (var recommendation in candidateProfile.Recommendations)
+        {
+            AppendFingerprint(builder, recommendation.Author.ToString());
+            AppendFingerprint(builder, recommendation.Company);
+            AppendFingerprint(builder, recommendation.JobTitle);
+            AppendFingerprint(builder, recommendation.Text);
+            AppendFingerprint(builder, recommendation.VisibilityStatus);
+            AppendFingerprint(builder, recommendation.CreatedOn?.ToString());
+        }
+
+        foreach (var signal in candidateProfile.ManualSignals.OrderBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            AppendFingerprint(builder, signal.Key);
+            AppendFingerprint(builder, signal.Value);
+        }
+
+        AppendFingerprint(builder, jobSet.JobPosting?.RoleTitle);
+        AppendFingerprint(builder, jobSet.JobPosting?.CompanyName);
+        AppendFingerprint(builder, jobSet.JobPosting?.Summary);
+        AppendFingerprint(builder, string.Join('|', jobSet.JobPosting?.MustHaveThemes ?? Array.Empty<string>()));
+        AppendFingerprint(builder, string.Join('|', jobSet.JobPosting?.NiceToHaveThemes ?? Array.Empty<string>()));
+        AppendFingerprint(builder, string.Join('|', jobSet.JobPosting?.CulturalSignals ?? Array.Empty<string>()));
+        AppendFingerprint(builder, jobSet.CompanyProfile?.Name);
+        AppendFingerprint(builder, jobSet.CompanyProfile?.Summary);
+        AppendFingerprint(builder, string.Join('|', jobSet.CompanyProfile?.GuidingPrinciples ?? Array.Empty<string>()));
+        AppendFingerprint(builder, string.Join('|', jobSet.CompanyProfile?.CulturalSignals ?? Array.Empty<string>()));
+        AppendFingerprint(builder, string.Join('|', jobSet.CompanyProfile?.Differentiators ?? Array.Empty<string>()));
+
+        foreach (var line in differentiatorProfile.ToSummaryLines())
+        {
+            AppendFingerprint(builder, line);
+        }
+
+        if (useLlmEnhancement)
+        {
+            AppendFingerprint(builder, selectedModel);
+            AppendFingerprint(builder, selectedThinkingLevel);
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
+        return Convert.ToHexString(hash);
+    }
+
+    private static void AppendFingerprint(StringBuilder builder, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            builder.AppendLine("<empty>");
+            return;
+        }
+
+        builder.AppendLine(string.Join(' ', value.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToLowerInvariant());
+    }
+
     private void Publish(LlmOperationState state, string eventType, LlmOperationSnapshot snapshot)
     {
         state.SetSnapshot(snapshot);
@@ -1270,7 +1416,7 @@ public sealed class LlmOperationBroker(
     private static void Complete(LlmOperationState state)
     {
         state.Events.Writer.TryComplete();
-        state.Cancellation.Dispose();
+        state.Dispose();
     }
 
     private static IReadOnlyList<DocumentKind> ParseDocumentKinds(IReadOnlyList<string> documentKinds)
@@ -1292,12 +1438,32 @@ public sealed class LlmOperationBroker(
     {
         private readonly object gate = new();
         private LlmOperationSnapshot snapshot = snapshot;
+        private Timer? timeoutTimer;
+        private volatile bool timedOut;
 
         public Channel<LlmOperationEvent> Events { get; } = Channel.CreateUnbounded<LlmOperationEvent>();
 
         public CancellationTokenSource Cancellation { get; } = new();
 
         public DateTimeOffset? TimeoutAt { get; } = timeoutAt;
+
+        public bool TimedOut => timedOut;
+
+        public void StartTimeoutCountdown(TimeSpan timeout)
+        {
+            timeoutTimer = new Timer(_ =>
+            {
+                timedOut = true;
+
+                try
+                {
+                    Cancellation.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }, null, timeout, Timeout.InfiniteTimeSpan);
+        }
 
         public LlmOperationSnapshot GetSnapshot()
         {
@@ -1313,6 +1479,12 @@ public sealed class LlmOperationBroker(
             {
                 snapshot = next;
             }
+        }
+
+        public void Dispose()
+        {
+            timeoutTimer?.Dispose();
+            Cancellation.Dispose();
         }
     }
 

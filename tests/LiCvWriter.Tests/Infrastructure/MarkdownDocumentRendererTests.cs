@@ -127,6 +127,63 @@ public sealed class MarkdownDocumentRendererTests
         Assert.Contains("Kubernetes", result.Markdown);
     }
 
+    [Fact]
+    public async Task RenderAsync_Cv_GroupsPre2008ExperienceAndProjectsUnderEarlyCareer()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var candidate = request.Candidate with
+        {
+            Experience =
+            [
+                new ExperienceEntry("LegacyCorp", "Junior Engineer", "Maintained legacy systems.", "Aarhus", new DateRange(new PartialDate("2004", 2004), new PartialDate("2007", 2007))),
+                new ExperienceEntry("Contoso", "Lead Architect", "Led cloud migration.", "Seattle", new DateRange(new PartialDate("2019", 2019), null))
+            ],
+            Projects =
+            [
+                new ProjectEntry("Legacy Platform Upgrade", "Delivered upgrade in older estate.", null, new DateRange(new PartialDate("2006", 2006), new PartialDate("2007", 2007))),
+                new ProjectEntry("Cloud Migration Portal", "Built a self-service migration portal.", null, new DateRange(new PartialDate("2021", 2021), null))
+            ]
+        };
+
+        var datedRequest = request with { Candidate = candidate };
+
+        var result = await renderer.RenderAsync(datedRequest);
+
+        Assert.Contains("## Early career", result.Markdown);
+        Assert.Contains("Early career highlights from 1 roles and 1 projects (2004-2006).", result.Markdown);
+        Assert.DoesNotContain("### Junior Engineer | LegacyCorp", result.Markdown);
+        Assert.DoesNotContain("### Legacy Platform Upgrade", result.Markdown);
+        Assert.Contains("### Lead Architect | Contoso", result.Markdown);
+        Assert.Contains("### Cloud Migration Portal", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_UsesEarlyCareerFallbackWordingWhenProjectsAreMissing()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var candidate = request.Candidate with
+        {
+            Experience =
+            [
+                new ExperienceEntry("LegacyCorp", "Junior Engineer", "Maintained legacy systems.", "Aarhus", new DateRange(new PartialDate("2003", 2003), new PartialDate("2007", 2007))),
+                new ExperienceEntry("Contoso", "Lead Architect", "Led cloud migration.", "Seattle", new DateRange(new PartialDate("2019", 2019), null))
+            ],
+            Projects =
+            [
+                new ProjectEntry("Cloud Migration Portal", "Built a self-service migration portal.", null, new DateRange(new PartialDate("2021", 2021), null))
+            ]
+        };
+
+        var datedRequest = request with { Candidate = candidate };
+
+        var result = await renderer.RenderAsync(datedRequest);
+
+        Assert.Contains("Early career highlights from 1 roles (2003-2003).", result.Markdown);
+        Assert.DoesNotContain("roles and", result.Markdown);
+    }
+
     private static DocumentRenderRequest BuildCvRequest(
         string? generatedBody = "Experienced cloud architect.",
         OutputLanguage outputLanguage = OutputLanguage.English,

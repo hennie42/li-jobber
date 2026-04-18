@@ -25,7 +25,7 @@
             <button type="button"
                     class="@(jobSet.Id == Workspace.ActiveJobSetId ? "primary-button" : "secondary-button")"
                     title="@jobSet.ProgressDetail"
-                    disabled="@isBusy"
+                    disabled="@(isBusy || isBatchRunning)"
                     @onclick="() => SelectJobSet(jobSet.Id)">
                 <span class="job-set-button-label">
                     <span class="@GetProgressIndicatorClass(jobSet.ProgressState)" aria-hidden="true"></span>
@@ -34,8 +34,8 @@
             </button>
         }
 
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)" disabled="@isBusy">Add job tab (URLs)</button>
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)" disabled="@isBusy">Add job tab (paste text)</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)">Add job tab (URLs)</button>
+        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)">Add job tab (paste text)</button>
         <button type="button" class="secondary-button" @onclick="DeleteActiveJobSet" disabled="@(isBusy || Workspace.JobSets.Count <= 1)">Delete active job tab</button>
     </div>
     @if (Workspace.JobSets.Count == 1)
@@ -54,6 +54,31 @@
             @Workspace.SelectedLlmModel
         }
     </div>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Job set actions</div>
+    <div class="button-row">
+        <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady || isBatchRunning)">@(isRefreshingAll ? $"Running {GetOperationElapsed()}" : "Refresh all analysis")</button>
+        <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
+        <button class="secondary-button" @onclick="RunAllJobSetsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Run all job sets")</button>
+    </div>
+    <div class="status-chip @GetCurrentTaskStatusClass()">
+        @GetCurrentTaskStatusMessage()
+    </div>
+    @if (!string.IsNullOrWhiteSpace(GetCurrentTaskStatusDetail()))
+    {
+        <p class="muted-text">@GetCurrentTaskStatusDetail()</p>
+    }
+    @if (batchSkippedJobSetMessages.Count > 0)
+    {
+        <ul class="feature-list compact-list">
+            @foreach (var skippedMessage in batchSkippedJobSetMessages)
+            {
+                <li>@skippedMessage</li>
+            }
+        </ul>
+    }
 </section>
 
 @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -83,7 +108,7 @@
             <textarea id="companyContextText" class="prompt-box" rows="8" @bind="companyContextText" @bind:event="oninput" @bind:after="PersistJobSetInputs" placeholder="Paste company information here, or leave empty to skip company context..."></textarea>
         }
         <div class="button-row">
-            <button class="primary-button" @onclick="AnalyzeAndBuildContextAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isResearching ? $"Running {GetOperationElapsed()}" : "Analyze job and build company context")</button>
+            <button class="primary-button" @onclick="AnalyzeAndBuildContextAsync" disabled="@(isBusy || !Workspace.IsLlmReady || isBatchRunning)">@(isResearching ? $"Running {GetOperationElapsed()}" : "Analyze job and build company context")</button>
         </div>
         <p class="muted-text">@GetResearchHelpText()</p>
 
@@ -214,10 +239,6 @@
             }
         </p>
 
-        <div class="button-row">
-            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
-        </div>
-
         <dl class="key-value-grid compact-grid">
             <dt>Recommendation</dt>
             <dd>@FormatRecommendation(Workspace.JobFitAssessment.Recommendation)</dd>
@@ -284,10 +305,6 @@ else if (CanRunFitReview)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Fit review</h3></summary>
-
-        <div class="button-row">
-            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
-        </div>
 
         <p class="muted-text">No structured fit review is available for this tab yet. Run fit review or generate drafts when you want the app to score the current job context.</p>
     </details>
@@ -414,10 +431,6 @@ else if (CanRunFitReview)
     <p class="muted-text">Saved applicant differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Yes" : "No")</p>
     <p class="muted-text">Selected evidence items for this tab: @Workspace.GetActiveSelectedEvidenceCount()</p>
 
-    <div class="button-row">
-        <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady)">@(isRefreshingAll ? $"Running {GetOperationElapsed()}" : "Refresh all analysis")</button>
-    </div>
-
     <label class="field-label" for="outputLanguage">Output language</label>
     <select id="outputLanguage" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
         <option value="@OutputLanguage.English">English</option>
@@ -539,7 +552,7 @@ else if (CanRunFitReview)
     private const string ParseCompanyTelemetryMessage = "Parsing company context";
     private const string GenerateDraftsMessage = "Generating targeted drafts";
     private const string GenerateDraftTelemetryPrefix = "Generating ";
-    private const string RefreshFitReviewMessage = "Analyzing job fit";
+    private const string RefreshFitReviewMessage = "Refreshing deterministic fit review";
     private const string EnhanceFitReviewTelemetryMessage = "Enhancing fit review with LLM";
     private const string RefreshTechnologyGapMessage = "Analyzing technology gaps";
     private string jobUrl = string.Empty;
@@ -559,8 +572,14 @@ else if (CanRunFitReview)
     private bool generateInterviewNotes = true;
     private string? activeStreamOperationId;
     private LlmOperationSnapshot? activeStreamSnapshot;
+    private TaskCompletionSource<LlmOperationSnapshot>? activeOperationCompletionSource;
     private DotNetObjectReference<JobWorkbench>? streamCallbackReference;
     private bool disposed;
+    private bool isBatchRunning;
+    private int batchCompletedCount;
+    private int batchTotalCount;
+    private string? batchCurrentJobSetTitle;
+    private readonly List<string> batchSkippedJobSetMessages = [];
     private bool isBusy => isResearching || isGenerating || isRefreshingFitReview || isRefreshingTechnologyGap || isRefreshingAll;
     private bool isResearching => currentOperation == BusyOperation.AnalyzeAndBuildContext || isAnalyzing || isBuildingCompanyContext;
     private bool isAnalyzing => currentOperation == BusyOperation.AnalyzeJob
@@ -972,11 +991,7 @@ else if (CanRunFitReview)
                 return;
             }
 
-            var kinds = new List<DocumentKind>();
-            if (generateCv) kinds.Add(DocumentKind.Cv);
-            if (generateCoverLetter) kinds.Add(DocumentKind.CoverLetter);
-            if (generateSummary) kinds.Add(DocumentKind.ProfileSummary);
-            if (generateInterviewNotes) kinds.Add(DocumentKind.InterviewNotes);
+            var kinds = GetSelectedDocumentKinds();
 
             if (kinds.Count == 0)
             {
@@ -1002,9 +1017,14 @@ else if (CanRunFitReview)
 
     private void AddJobSet(JobSetInputMode inputMode)
     {
-        Workspace.AddJobSet(inputMode);
+        var makeActive = !isBusy && !isBatchRunning;
+        Workspace.AddJobSet(inputMode, makeActive);
         errorMessage = null;
-        ClearRetainedStreamState();
+        if (makeActive)
+        {
+            ClearRetainedStreamState();
+        }
+
         SyncFromWorkspace();
     }
 
@@ -1186,6 +1206,8 @@ else if (CanRunFitReview)
                 errorMessage = activeStreamSnapshot.Error ?? activeStreamSnapshot.Detail;
             }
 
+            activeOperationCompletionSource?.TrySetResult(activeStreamSnapshot);
+
             await DisposeActiveStreamAsync(clearSnapshot: false);
         }
 
@@ -1212,6 +1234,7 @@ else if (CanRunFitReview)
 
         activeStreamOperationId = startResult.OperationId;
         activeStreamSnapshot = null;
+        activeOperationCompletionSource = new TaskCompletionSource<LlmOperationSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         streamCallbackReference ??= DotNetObjectReference.Create(this);
 
         await JS.InvokeVoidAsync(
@@ -1241,12 +1264,125 @@ else if (CanRunFitReview)
         {
             activeStreamSnapshot = null;
         }
+
+        activeOperationCompletionSource?.TrySetCanceled();
+        activeOperationCompletionSource = null;
+    }
+
+    private async Task<LlmOperationSnapshot> StartStreamedOperationAndWaitAsync<TRequest>(string relativePath, TRequest request)
+    {
+        await StartStreamedOperationAsync(relativePath, request);
+        var completionSource = activeOperationCompletionSource
+            ?? throw new InvalidOperationException("The operation stream did not initialize correctly.");
+        return await completionSource.Task;
     }
 
     private void ClearRetainedStreamState()
     {
         activeStreamOperationId = null;
         activeStreamSnapshot = null;
+        activeOperationCompletionSource = null;
+    }
+
+    private async Task RunAllJobSetsAsync()
+    {
+        errorMessage = null;
+        batchSkippedJobSetMessages.Clear();
+
+        if (!Workspace.IsLlmReady)
+        {
+            errorMessage = "Complete Start / Setup first: check Ollama, choose a session model, and choose a thinking level.";
+            return;
+        }
+
+        if (Workspace.CandidateProfile is null)
+        {
+            errorMessage = "Load a LinkedIn profile before running all job sets.";
+            return;
+        }
+
+        var kinds = GetSelectedDocumentKinds();
+        if (kinds.Count == 0)
+        {
+            errorMessage = "Select at least one document type before running all job sets.";
+            return;
+        }
+
+        var readyJobSets = Workspace.JobSets
+            .OrderBy(jobSet => jobSet.SortOrder)
+            .Where(CanRunBatchDraftGeneration)
+            .ToArray();
+        var skippedJobSets = Workspace.JobSets
+            .OrderBy(jobSet => jobSet.SortOrder)
+            .Where(jobSet => !CanRunBatchDraftGeneration(jobSet))
+            .Select(jobSet => $"Skipped {jobSet.Title}: {GetBatchReadinessMessage(jobSet)}")
+            .ToArray();
+
+        foreach (var skippedMessage in skippedJobSets)
+        {
+            batchSkippedJobSetMessages.Add(skippedMessage);
+        }
+
+        if (readyJobSets.Length == 0)
+        {
+            errorMessage = skippedJobSets.Length == 0
+                ? "No job tabs are ready to run."
+                : "No job tabs are ready to run. See the skipped tabs listed above.";
+            return;
+        }
+
+        var originalJobSetId = Workspace.ActiveJobSetId;
+        isBatchRunning = true;
+        batchCompletedCount = 0;
+        batchTotalCount = readyJobSets.Length;
+        StartOperationTimer();
+
+        try
+        {
+            foreach (var jobSet in readyJobSets)
+            {
+                batchCurrentJobSetTitle = jobSet.Title;
+                Workspace.SelectJobSet(jobSet.Id);
+                SyncFromWorkspace();
+                currentOperation = BusyOperation.GenerateDrafts;
+                Workspace.ClearJobSetGeneratedArtifacts(jobSet.Id);
+
+                var snapshot = await StartStreamedOperationAndWaitAsync(
+                    "/api/llm/operations/generate-drafts",
+                    new StartDraftGenerationOperationRequest(jobSet.Id, kinds.Select(static kind => kind.ToString()).ToArray()));
+
+                if (snapshot.Status != "completed")
+                {
+                    throw new InvalidOperationException(snapshot.Error ?? snapshot.Detail ?? $"Batch run failed for {jobSet.Title}.");
+                }
+
+                batchCompletedCount++;
+            }
+
+            Operations.Success(
+                "Run all job sets completed.",
+                skippedJobSets.Length == 0
+                    ? $"Generated drafts for {readyJobSets.Length} job tab(s)."
+                    : $"Generated drafts for {readyJobSets.Length} job tab(s). Skipped {skippedJobSets.Length} tab(s).",
+                null);
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
+        finally
+        {
+            isBatchRunning = false;
+            batchCurrentJobSetTitle = null;
+            currentOperation = BusyOperation.None;
+            StopOperationTimer();
+
+            if (Workspace.JobSets.Any(jobSet => string.Equals(jobSet.Id, originalJobSetId, StringComparison.OrdinalIgnoreCase)))
+            {
+                Workspace.SelectJobSet(originalJobSetId);
+                SyncFromWorkspace();
+            }
+        }
     }
 
     private async Task RefreshAllAnalysisAsync()
@@ -1465,6 +1601,122 @@ else if (CanRunFitReview)
             JobSetProgressState.Failed => Workspace.ActiveJobSet.ProgressDetail,
             _ => Workspace.ActiveJobSet.ProgressDetail
         };
+
+    private List<DocumentKind> GetSelectedDocumentKinds()
+    {
+        var kinds = new List<DocumentKind>();
+
+        if (generateCv)
+        {
+            kinds.Add(DocumentKind.Cv);
+        }
+
+        if (generateCoverLetter)
+        {
+            kinds.Add(DocumentKind.CoverLetter);
+        }
+
+        if (generateSummary)
+        {
+            kinds.Add(DocumentKind.ProfileSummary);
+        }
+
+        if (generateInterviewNotes)
+        {
+            kinds.Add(DocumentKind.InterviewNotes);
+        }
+
+        return kinds;
+    }
+
+    private bool CanRunAnyBatchDraftGeneration()
+        => Workspace.IsLlmReady
+            && Workspace.CandidateProfile is not null
+            && Workspace.JobSets.Any(CanRunBatchDraftGeneration);
+
+    private bool CanRunBatchDraftGeneration(JobSetSessionState jobSet)
+        => string.IsNullOrWhiteSpace(GetBatchReadinessMessage(jobSet));
+
+    private string GetBatchReadinessMessage(JobSetSessionState jobSet)
+    {
+        if (!Workspace.IsLlmReady)
+        {
+            return "the session LLM is not ready";
+        }
+
+        if (Workspace.CandidateProfile is null)
+        {
+            return "no LinkedIn profile is loaded";
+        }
+
+        if (jobSet.JobPosting is null)
+        {
+            return "job context has not been analyzed";
+        }
+
+        return string.Empty;
+    }
+
+    private string GetBatchActionLabel()
+        => batchTotalCount == 0
+            ? "Run all job sets"
+            : $"Batch {Math.Min(batchCompletedCount + (isBusy ? 1 : 0), batchTotalCount)} of {batchTotalCount}";
+
+    private string GetCurrentTaskStatusMessage()
+    {
+        if (isBatchRunning)
+        {
+            return batchCurrentJobSetTitle is null
+                ? $"Batch: {batchCompletedCount} of {batchTotalCount}"
+                : $"Batch: {Math.Min(batchCompletedCount + (isBusy ? 1 : 0), batchTotalCount)} of {batchTotalCount} ({batchCurrentJobSetTitle})";
+        }
+
+        if (activeStreamSnapshot is { IsTerminal: false } snapshot
+            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Running: {snapshot.Message}";
+        }
+
+        if (Operations.IsBusy)
+        {
+            return $"Running: {Operations.CurrentMessage}";
+        }
+
+        return $"Status: {GetActiveTabStatusMessage()}";
+    }
+
+    private string? GetCurrentTaskStatusDetail()
+    {
+        if (isBatchRunning)
+        {
+            return batchCurrentJobSetTitle is null
+                ? "Sequential batch generation is preparing the next job tab."
+                : $"Current job tab: {batchCurrentJobSetTitle}. {GetActiveTabStatusMessage()}";
+        }
+
+        if (activeStreamSnapshot is { IsTerminal: false } snapshot
+            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+        {
+            return snapshot.Detail;
+        }
+
+        return Operations.IsBusy ? Operations.CurrentDetail : null;
+    }
+
+    private string GetCurrentTaskStatusClass()
+    {
+        if (isBatchRunning || isBusy)
+        {
+            return "status-pending";
+        }
+
+        return Workspace.ActiveJobSet.ProgressState switch
+        {
+            JobSetProgressState.Done => "status-ok",
+            JobSetProgressState.Failed => "status-warning",
+            _ => "status-pending"
+        };
+    }
 
     private static string FormatSourceContext(JobRequirementAssessment requirement)
     {

@@ -14,7 +14,9 @@ public sealed class OllamaOptions
 
     public string KeepAlive { get; set; } = "10m";
 
-    public int MaxOperationSeconds { get; set; } = 480;
+    public int MaxOperationSeconds { get; set; } = 0;
+
+    public int StreamingInactivitySeconds { get; set; } = 90;
 
     public string Think { get; set; } = "low";
 

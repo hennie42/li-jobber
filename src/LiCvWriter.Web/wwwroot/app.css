@@ -325,6 +325,10 @@ a {
   background: var(--panel);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+
+.status-warning {
+  background: color-mix(in srgb, #d14343 14%, white);
+  color: color-mix(in srgb, #8f1f1f 82%, black);
 }
 
 .hero-panel,

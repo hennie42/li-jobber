@@ -93,6 +93,76 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartDraftGeneration_WhenFitReviewIsCurrent_SkipsPreflightRefresh()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<IDraftGenerationService, FakeDraftGenerationService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobPosting(new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive Azure delivery and transformation leadership.",
+            MustHaveThemes = ["Azure", "Transformation leadership"]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var fitReviewResult = broker.StartFitReviewAnalysis(new StartFitReviewOperationRequest("job-set-01"));
+        await WaitForTerminalSnapshotAsync(broker, fitReviewResult.OperationId);
+
+        var startResult = broker.StartDraftGeneration(new StartDraftGenerationOperationRequest("job-set-01", ["Cv"]));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        var snapshot = broker.GetSnapshot(startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.NotNull(snapshot);
+        Assert.Equal("Generated content (enhanced fit)", workspace.GeneratedDocuments[0].Markdown);
+        Assert.Equal("Draft generation completed", snapshot!.Message);
+        Assert.Equal(3, snapshot.Sequence);
+    }
+
+    [Fact]
     public async Task StartJobContextAnalysis_CompletesAndStoresJobAndCompanyContext()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
@@ -343,8 +413,45 @@ public sealed class LlmOperationBrokerTests
 
         Assert.Equal("failed", finalSnapshot.Status);
         Assert.Contains("timed out", finalSnapshot.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Lower the thinking level or choose a faster model", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("disable the hard operation cap", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(JobSetProgressState.Failed, workspace.ActiveJobSet.ProgressState);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_WithoutHardCap_AllowsSlowOperationToComplete()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 0 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, SlowJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateActiveJobSetInputs(
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId, attempts: 1200);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal(JobSetProgressState.NotStarted, workspace.ActiveJobSet.ProgressState);
+        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
+        Assert.Equal("Slow company summary", workspace.CompanyProfile!.Summary);
     }
 
     [Fact]
