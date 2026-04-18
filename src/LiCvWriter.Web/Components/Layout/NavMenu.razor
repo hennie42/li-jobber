@@ -8,13 +8,20 @@
     <NavLink class="nav-item" href="/workspace/job-workbench" Match="NavLinkMatch.All">
         <span>Job Workbench</span>
     </NavLink>
-    @foreach (var jobSet in Workspace.JobSets.OrderBy(j => j.SortOrder))
+    @if (Workspace.JobSets.Count > 0)
     {
-        <NavLink class="nav-item nav-subitem" href="@($"/workspace/job-workbench/{jobSet.Id}")">
-            <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(jobSet)}")"></span>
-            <span class="nav-subitem-label">@jobSet.Title</span>
-            <span class="nav-subitem-suffix">@FormatInputMode(jobSet.InputMode)</span>
-        </NavLink>
+        <ul class="nav-subitem-list">
+            @foreach (var jobSet in Workspace.JobSets.OrderBy(j => j.SortOrder))
+            {
+                <li>
+                    <NavLink class="nav-item nav-subitem" href="@($"/workspace/job-workbench/{jobSet.Id}")" title="@jobSet.Title">
+                        <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(jobSet)}")" aria-hidden="true"></span>
+                        <span class="nav-subitem-label">@jobSet.Title</span>
+                        <span class="@($"nav-subitem-mode nav-subitem-mode-{GetModeClass(jobSet.InputMode)}")" title="@FormatInputModeTitle(jobSet.InputMode)">@FormatInputModeShort(jobSet.InputMode)</span>
+                    </NavLink>
+                </li>
+            }
+        </ul>
     }
     <NavLink class="nav-item" href="/diagnostics/session">
         <span>Session Diagnostics</span>
@@ -42,9 +49,21 @@
         _ => "idle"
     };
 
-    private static string FormatInputMode(JobSetInputMode mode) => mode switch
+    private static string GetModeClass(JobSetInputMode mode) => mode switch
     {
-        JobSetInputMode.PasteText => "(text)",
-        _ => "(URLs)"
+        JobSetInputMode.PasteText => "text",
+        _ => "url"
+    };
+
+    private static string FormatInputModeShort(JobSetInputMode mode) => mode switch
+    {
+        JobSetInputMode.PasteText => "TXT",
+        _ => "URL"
+    };
+
+    private static string FormatInputModeTitle(JobSetInputMode mode) => mode switch
+    {
+        JobSetInputMode.PasteText => "Pasted job posting text",
+        _ => "Linked job posting URLs"
     };
 }

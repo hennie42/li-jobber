@@ -13,29 +13,39 @@
 
 <PageTitle>Start / Setup</PageTitle>
 
-<section class="card-panel readiness-strip">
-    <div class="readiness-chips">
-        <span class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
-            Ollama: @(Workspace.IsLlmReady ? "ready" : "pending")
-        </span>
-        <span class="status-chip @(hasProfile ? "status-ok" : "status-pending")">
-            Profile: @(hasProfile ? "loaded" : "not loaded")
-        </span>
-        <span class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
-            Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "saved" : "optional")
-        </span>
-        <span class="status-chip">
-            Jobsets: @Workspace.JobSets.Count
-        </span>
+<header class="card-panel setup-header">
+    <div class="setup-header-row">
+        <div class="readiness-chips">
+            <span class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+                Ollama: @(Workspace.IsLlmReady ? "ready" : "pending")
+            </span>
+            <span class="status-chip @(hasProfile ? "status-ok" : "status-pending")">
+                Profile: @(hasProfile ? "loaded" : "not loaded")
+            </span>
+            <span class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
+                Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "saved" : "optional")
+            </span>
+            <span class="status-chip status-neutral">
+                Jobsets: @Workspace.JobSets.Count
+            </span>
+        </div>
+        <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench →</a>
     </div>
-    <a class="primary-button" href="/workspace/job-workbench">Open Job Workbench</a>
-</section>
+</header>
 
 <div class="stepper-container">
 <section class="content-grid setup-grid">
     <article class="card-panel stack-gap step-card @Step1StateClass">
-        <div class="field-label">Step 1</div>
-        <h3>Check Ollama and set the session model</h3>
+        <div class="step-card-header">
+            <div>
+                <div class="field-label">Step 1</div>
+                <h3>Check Ollama and set the session model</h3>
+            </div>
+            @if (Workspace.IsLlmReady && !isStep1Expanded)
+            {
+                <button class="link-button" @onclick="() => isStep1Expanded = true">Edit</button>
+            }
+        </div>
         <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
             @(Workspace.IsLlmReady
                 ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
@@ -104,30 +114,35 @@
                 <div class="message error">@llmErrorMessage</div>
             }
         }
-        @if (!isStep1Expanded)
+        @if (!isStep1Expanded && !Workspace.IsLlmReady)
         {
-            <p class="muted-text">Click the button below to review or change the model settings.</p>
+            <p class="muted-text">Click the button below to discover local models and pick one for this session.</p>
         }
 
-        <div class="button-row">
-            <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
-        </div>
+        @if (isStep1Expanded || !Workspace.IsLlmReady)
+        {
+            <div class="button-row">
+                <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
+            </div>
+        }
     </article>
 
     <article class="card-panel stack-gap step-card @Step2StateClass">
-        <div class="field-label">Step 2</div>
-        <h3>Load your LinkedIn profile</h3>
+        <div class="step-card-header">
+            <div>
+                <div class="field-label">Step 2</div>
+                <h3>Load your LinkedIn profile</h3>
+            </div>
+            @if (hasProfile && !isStep2Expanded)
+            {
+                <button class="link-button" @onclick="() => isStep2Expanded = true">Edit</button>
+            }
+        </div>
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
             @Workspace.LinkedInAuthorizationStatus.Message
         </div>
 
-        @if (hasProfile && !isStep2Expanded)
-        {
-            <div class="button-row">
-                <button class="secondary-button" @onclick="() => isStep2Expanded = true">Edit</button>
-            </div>
-        }
-        else
+        @if (!hasProfile || isStep2Expanded)
         {
         <dl class="key-value-grid compact-grid">
             <dt>Required scope</dt>

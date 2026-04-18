@@ -1256,7 +1256,11 @@ else if (CanRunFitReview)
 
         activeStreamSnapshot = operationEvent.Snapshot;
 
-        if (!string.Equals(activeStreamSnapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
+        // While running a batch from the listing page, JobSetId is null but
+        // events carry the per-jobset id. Accept events for the currently
+        // executing batch jobset; otherwise require a route-id match.
+        if (!isBatchRunning
+            && !string.Equals(activeStreamSnapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -1267,7 +1271,9 @@ else if (CanRunFitReview)
             StopOperationTimer();
             SyncFromWorkspace();
 
-            if (activeStreamSnapshot.Kind is "analyze-job-context" or "refresh-all" && activeStreamSnapshot.Status == "completed")
+            if (activeStreamSnapshot.Kind is "analyze-job-context" or "refresh-all"
+                && activeStreamSnapshot.Status == "completed"
+                && !string.IsNullOrWhiteSpace(JobSetId))
             {
                 SetAdditionalInstructions(BuildResearchInstructions());
             }
