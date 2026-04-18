@@ -39,4 +39,5 @@ public sealed record JobSetRecoveryState(
     IReadOnlyList<GeneratedDocument>? GeneratedDocuments = null,
     string AdditionalInstructions = "",
     string? LastFitReviewFingerprint = null,
-    bool LastFitReviewIncludedLlmEnhancement = false);
+    bool LastFitReviewIncludedLlmEnhancement = false,
+    JobSetSourceLanguage InputLanguage = JobSetSourceLanguage.Auto);

@@ -561,7 +561,8 @@ public sealed class LlmOperationBroker(
                     generationJobSet.JobFitAssessment,
                     input.ApplicantDifferentiatorProfile,
                     generationJobSet.EvidenceSelection,
-                    generationJobSet.TechnologyGapAssessment),
+                    generationJobSet.TechnologyGapAssessment,
+                    generationJobSet.InputLanguage.ToPromptHint()),
                 update => HandleProgress(state, input.JobSet.Id, update),
                 state.Cancellation.Token);
 
@@ -658,6 +659,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
@@ -669,6 +671,7 @@ public sealed class LlmOperationBroker(
                         input.SelectedModel,
                         input.SelectedThinkingLevel,
                         update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
                         state.Cancellation.Token);
 
                     workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
@@ -681,6 +684,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
@@ -690,6 +694,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
@@ -786,6 +791,7 @@ public sealed class LlmOperationBroker(
                 input.SelectedModel,
                 input.SelectedThinkingLevel,
                 update => HandleProgress(state, input.JobSet.Id, update),
+                input.JobSet.InputLanguage.ToPromptHint(),
                 state.Cancellation.Token);
 
             workspace.SetJobSetTechnologyGapAssessment(input.JobSet.Id, assessment);
@@ -1002,6 +1008,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
@@ -1013,6 +1020,7 @@ public sealed class LlmOperationBroker(
                         input.SelectedModel,
                         input.SelectedThinkingLevel,
                         update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
                         state.Cancellation.Token);
 
                     workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
@@ -1025,6 +1033,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
@@ -1036,6 +1045,7 @@ public sealed class LlmOperationBroker(
                         input.SelectedModel,
                         input.SelectedThinkingLevel,
                         update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
                         state.Cancellation.Token);
 
                     workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
@@ -1083,6 +1093,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
                     state.Cancellation.Token);
 
                 workspace.SetJobSetTechnologyGapAssessment(input.JobSet.Id, technologyGapAssessment);
@@ -1218,6 +1229,7 @@ public sealed class LlmOperationBroker(
                 selectedModel,
                 selectedThinkingLevel,
                 update => HandleProgress(state, jobSetId, update),
+                refreshedJobSet.InputLanguage.ToPromptHint(),
                 cancellationToken);
 
             workspace.SetJobSetJobFitAssessment(jobSetId, enhanced);

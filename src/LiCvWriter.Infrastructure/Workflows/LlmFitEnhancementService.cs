@@ -32,6 +32,7 @@ public sealed class LlmFitEnhancementService(
         string selectedModel,
         string selectedThinkingLevel,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         var candidateRequirements = baseline.Requirements
@@ -48,7 +49,7 @@ public sealed class LlmFitEnhancementService(
             var response = await llmClient.GenerateAsync(
                 new LlmRequest(
                     string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel,
-                    BuildSystemPrompt(),
+                    BuildSystemPrompt(sourceLanguageHint),
                     [new LlmChatMessage("user", BuildUserPrompt(candidateRequirements, candidateProfile, jobPosting, companyProfile))],
                     UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                     Stream: true,
@@ -134,8 +135,12 @@ public sealed class LlmFitEnhancementService(
             _ => null
         };
 
-    private static string BuildSystemPrompt()
-        => $$"""
+    private static string BuildSystemPrompt(string? sourceLanguageHint = null)
+    {
+        var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
+            ? string.Empty
+            : $"Job and company text are written in {sourceLanguageHint}; the candidate profile may be in English. Match evidence across languages.\n\n";
+        return languageLine + $$"""
             You are a semantic evidence matcher for candidate fit reviews.
 
             Given a list of job requirements that were NOT strongly matched by keyword search,
@@ -167,6 +172,7 @@ public sealed class LlmFitEnhancementService(
             - Set newMatch to "Partial" when the evidence is indirect but relevant.
             - Be conservative: only upgrade when the semantic connection is clear.
             """;
+    }
 
     private static string BuildUserPrompt(
         IReadOnlyList<JobRequirementAssessment> candidateRequirements,

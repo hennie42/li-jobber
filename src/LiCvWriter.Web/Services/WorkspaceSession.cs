@@ -123,6 +123,37 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         UpdateActiveJobSet(jobSet => jobSet with { OutputLanguage = outputLanguage });
     }
 
+    public void SetJobSetInputLanguage(string jobSetId, JobSetSourceLanguage inputLanguage)
+    {
+        UpdateJobSet(jobSetId, jobSet =>
+        {
+            if (jobSet.InputLanguage == inputLanguage)
+            {
+                return jobSet;
+            }
+
+            // Changing the source language invalidates prior parses, fit review,
+            // evidence ranking, technology gap and generated drafts because the
+            // next refresh will run with a different language hint.
+            return jobSet with
+            {
+                InputLanguage = inputLanguage,
+                JobPosting = null,
+                CompanyProfile = null,
+                JobFitAssessment = JobFitAssessment.Empty,
+                TechnologyGapAssessment = TechnologyGapAssessment.Empty,
+                SelectedEvidenceIds = Array.Empty<string>(),
+                EvidenceSelection = EvidenceSelectionResult.Empty,
+                LastFitReviewFingerprint = null,
+                LastFitReviewIncludedLlmEnhancement = false,
+                ProgressState = JobSetProgressState.NotStarted,
+                ProgressDetail = "Source language changed; re-run analysis to refresh this job set.",
+                GeneratedDocuments = Array.Empty<GeneratedDocument>(),
+                Exports = Array.Empty<DocumentExportResult>()
+            };
+        });
+    }
+
     public void MarkActiveJobSetRunning(string detail)
         => MarkJobSetRunning(ActiveJobSetId, detail);
 
@@ -664,6 +695,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     OutputFolderName = jobSet.OutputFolderName,
                     InputMode = jobSet.InputMode,
                     OutputLanguage = jobSet.OutputLanguage,
+                    InputLanguage = jobSet.InputLanguage,
                     ProgressState = isInterrupted ? JobSetProgressState.NotStarted : jobSet.ProgressState,
                     ProgressDetail = isInterrupted ? "Recovered after restart." : jobSet.ProgressDetail,
                     JobUrl = jobSet.JobUrl,
@@ -859,7 +891,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.GeneratedDocuments,
                 jobSet.AdditionalInstructions,
                 jobSet.LastFitReviewFingerprint,
-                jobSet.LastFitReviewIncludedLlmEnhancement)).ToArray(),
+                jobSet.LastFitReviewIncludedLlmEnhancement,
+                jobSet.InputLanguage)).ToArray(),
             applicantDifferentiatorProfile,
             candidateProfile,
             selectedLlmModel,
