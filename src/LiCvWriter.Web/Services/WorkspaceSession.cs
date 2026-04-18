@@ -41,6 +41,26 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public IReadOnlyList<JobSetSessionState> JobSets => Read(() => jobSets.ToArray());
 
+    public JobSetSessionState GetJobSet(string jobSetId) => Read(() => GetJobSetUnsafe(jobSetId));
+
+    public int GetSelectedEvidenceCount(string jobSetId) => Read(() =>
+    {
+        var jobSet = GetJobSetUnsafe(jobSetId);
+        return jobSet.SelectedEvidenceIds.Count > 0
+            ? jobSet.SelectedEvidenceIds.Count
+            : jobSet.EvidenceSelection.SelectedEvidence.Count;
+    });
+
+    public bool CanGenerateForJobSet(string jobSetId) => Read(() =>
+        candidateProfile is not null && GetJobSetUnsafe(jobSetId).JobPosting is not null);
+
+    public bool CanStartDraftGenerationForJobSet(string jobSetId) => Read(() =>
+        candidateProfile is not null
+        && GetJobSetUnsafe(jobSetId).JobPosting is not null
+        && ollamaAvailability is not null
+        && isLlmSessionConfigured
+        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
+
     public string ActiveJobSetId => Read(() => activeJobSetId);
 
     public JobSetSessionState ActiveJobSet => Read(GetActiveJobSetUnsafe);
@@ -274,6 +294,64 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         => ActiveJobSet.SelectedEvidenceIds.Count > 0
             ? ActiveJobSet.SelectedEvidenceIds.Count
             : EvidenceSelection.SelectedEvidence.Count;
+
+    public void SetJobSetOutputLanguage(string jobSetId, OutputLanguage outputLanguage)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with { OutputLanguage = outputLanguage });
+    }
+
+    public void SetJobSetEvidenceSelected(string jobSetId, string evidenceId, bool isSelected)
+    {
+        UpdateJobSet(jobSetId, jobSet =>
+        {
+            var updated = BuildUpdatedEvidenceSelection(jobSet.EvidenceSelection, evidenceId, isSelected);
+            return jobSet with
+            {
+                EvidenceSelection = updated,
+                SelectedEvidenceIds = updated.SelectedEvidence.Select(static item => item.Evidence.Id).ToArray()
+            };
+        });
+    }
+
+    public void ClearJobSetEvidenceSelections(string jobSetId)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with
+        {
+            SelectedEvidenceIds = Array.Empty<string>(),
+            EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
+                .Select(item => item with { IsSelected = false })
+                .ToArray())
+        });
+    }
+
+    public void SelectAllJobSetEvidence(string jobSetId)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with
+        {
+            SelectedEvidenceIds = jobSet.EvidenceSelection.RankedEvidence
+                .Select(item => item.Evidence.Id)
+                .ToArray(),
+            EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
+                .Select(item => item with { IsSelected = true })
+                .ToArray())
+        });
+    }
+
+    public void UpdateJobSetInputs(string jobSetId, string jobUrl, string companyUrlsText, string jobPostingText, string companyContextText)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with
+        {
+            JobUrl = jobUrl,
+            CompanyUrlsText = companyUrlsText,
+            JobPostingText = jobPostingText,
+            CompanyContextText = companyContextText
+        });
+    }
+
+    public void SetJobSetAdditionalInstructions(string jobSetId, string? additionalInstructions)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with { AdditionalInstructions = additionalInstructions ?? string.Empty });
+    }
 
     private static EvidenceSelectionResult BuildUpdatedEvidenceSelection(EvidenceSelectionResult evidenceSelection, string evidenceId, bool isSelected)
         => new(evidenceSelection.RankedEvidence
@@ -787,6 +865,16 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     private JobSetSessionState GetActiveJobSetUnsafe()
         => jobSets.First(jobSet => jobSet.Id == activeJobSetId);
+
+    private JobSetSessionState GetJobSetUnsafe(string jobSetId)
+    {
+        var jobSet = jobSets.FirstOrDefault(item => item.Id == jobSetId);
+        if (jobSet is null)
+        {
+            throw new InvalidOperationException($"The job set '{jobSetId}' was not found.");
+        }
+        return jobSet;
+    }
 
     private void UpdateActiveJobSet(Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
         => UpdateJobSet(ActiveJobSetId, update, notifyChanged);

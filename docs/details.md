@@ -35,7 +35,7 @@ graph TB
 | --- | --- | --- |
 | Bootstrap | [Program.cs](../src/LiCvWriter.Web/Program.cs), [App.razor](../src/LiCvWriter.Web/Components/App.razor), [Routes.razor](../src/LiCvWriter.Web/Components/Routes.razor) | DI, routing, HTTP client configuration |
 | Shell | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [NavMenu.razor](../src/LiCvWriter.Web/Components/Layout/NavMenu.razor) | Floating navigation, dual CRT monitors, completed-activity sidebar |
-| Streaming transport | [Program.cs](../src/LiCvWriter.Web/Program.cs), [LlmOperationBroker.cs](../src/LiCvWriter.Web/Services/LlmOperationBroker.cs), [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js) | Start/status/events/cancel endpoints, per-job-tab operation broker, browser `EventSource` bridge |
+| Streaming transport | [Program.cs](../src/LiCvWriter.Web/Program.cs), [LlmOperationBroker.cs](../src/LiCvWriter.Web/Services/LlmOperationBroker.cs), [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js) | Start/status/events/cancel endpoints, per-jobset operation broker, browser `EventSource` bridge |
 | Session state | [WorkspaceSession.cs](../src/LiCvWriter.Web/Services/WorkspaceSession.cs), [WorkspaceRecoveryStore.cs](../src/LiCvWriter.Web/Services/WorkspaceRecoveryStore.cs) | In-memory state container, recovery persistence |
 | Setup flow | [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor) | Ollama check, model selection, DMA import, differentiators |
 | Workbench flow | [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor) | Brokered job research, fit review, evidence, technology gap, refresh-all, generation |
@@ -105,15 +105,15 @@ The three pages share `WorkspaceSession` for state and `OperationStatusService` 
 
 ## 4. Session State and Recovery
 
-`WorkspaceSession` is the main in-memory state container. It splits into session-global state and per-job-tab state and raises a `Changed` event for page rerendering.
+`WorkspaceSession` is the main in-memory state container. It splits into session-global state and per-jobset state and raises a `Changed` event for page rerendering.
 
 ### State Ownership
 
 | Scope | Container | Examples |
 | --- | --- | --- |
 | Session-global | `WorkspaceSession` | `CandidateProfile`, `ApplicantDifferentiatorProfile`, `OllamaAvailability`, `SelectedLlmModel`, `SelectedThinkingLevel`, `HasStartedLlmWork`, `LinkedInAuthorizationStatus` |
-| Job-tab-local | `JobSetSessionState` | `JobPosting`, `CompanyProfile`, `JobFitAssessment`, `EvidenceSelection`, `TechnologyGapAssessment`, `GeneratedDocuments`, `Exports`, `SelectedEvidenceIds`, `OutputLanguage` |
-| Recovery | `WorkspaceRecoveryStore` | Active tab, job-tab inputs, applicant differentiators, selected evidence IDs, output folders |
+| Jobset-local | `JobSetSessionState` | `JobPosting`, `CompanyProfile`, `JobFitAssessment`, `EvidenceSelection`, `TechnologyGapAssessment`, `GeneratedDocuments`, `Exports`, `SelectedEvidenceIds`, `OutputLanguage` |
+| Recovery | `WorkspaceRecoveryStore` | Job sets, jobset inputs, applicant differentiators, selected evidence IDs, output folders |
 
 ### Workspace Lifecycle
 
@@ -137,13 +137,13 @@ These rules prevent stale outputs by clearing downstream results when upstream i
 
 | Action | Scope | Impact |
 | --- | --- | --- |
-| `SetImportResult()` | All job tabs | Replaces `CandidateProfile`, stores `ImportResult`, clears generated artifacts, fit assessments, technology gaps, and evidence selections for all tabs |
-| `SetApplicantDifferentiatorProfile()` | All job tabs | Stores differentiator profile, clears all fit assessments, clears evidence selections (preserves selected IDs for reranking) |
-| `SetJobPosting()` | Active tab | Replaces job posting, resets fit review, technology gap, evidence, progress, generated docs, exports |
-| `SetCompanyProfile()` | Active tab | Replaces company profile, resets fit review, technology gap, evidence, progress, generated docs, exports |
+| `SetImportResult()` | All jobsets | Replaces `CandidateProfile`, stores `ImportResult`, clears generated artifacts, fit assessments, technology gaps, and evidence selections for all jobsets |
+| `SetApplicantDifferentiatorProfile()` | All jobsets | Stores differentiator profile, clears all fit assessments, clears evidence selections (preserves selected IDs for reranking) |
+| `SetJobPosting()` | Specific jobset | Replaces job posting, resets fit review, technology gap, evidence, progress, generated docs, exports |
+| `SetCompanyProfile()` | Specific jobset | Replaces company profile, resets fit review, technology gap, evidence, progress, generated docs, exports |
 | `SetOllamaAvailability()` | Session-global | Updates model availability, clears `IsLlmSessionConfigured` if selected model is no longer available |
 | `MarkLlmWorkStarted()` | Session-global | Records that the session has performed LLM-backed work so the setup UI can warn that later model/thinking changes affect only future operations |
-| `SetGeneratedDocuments()` | Active tab | Marks tab done, stores generated documents and file exports |
+| `SetGeneratedDocuments()` | Specific jobset | Marks tab done, stores generated documents and file exports |
 
 ---
 
@@ -252,17 +252,17 @@ graph TD
 
 ## 7. Job Workbench Flow
 
-Implemented in [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor). Each job tab is independent and carries its own state through `JobSetSessionState`.
+Implemented in [JobWorkbench.razor](../src/LiCvWriter.Web/Components/Pages/Workspace/JobWorkbench.razor). Each jobset is independent and carries its own state through `JobSetSessionState`.
 
-### Per-Tab State
+### Per-Jobset State
 
-See [State Ownership](#state-ownership) for the full field list per job tab (`JobSetSessionState`).
+See [State Ownership](#state-ownership) for the full field list per jobset (`JobSetSessionState`).
 
 ### Brokered Streaming Transport
 
 Most LLM-backed workbench actions no longer execute as page-local long-running calls. The page starts a brokered operation through Minimal API endpoints, receives an operation id plus snapshot/events/cancel URLs, and subscribes to `/api/llm/operations/{operationId}/events` via `EventSource` in [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js).
 
-`LlmOperationBroker` enforces one active LLM operation per job tab, updates `WorkspaceSession` / `OperationStatusService`, and publishes SSE events for:
+`LlmOperationBroker` enforces one active LLM operation per jobset, updates `WorkspaceSession` / `OperationStatusService`, and publishes SSE events for:
 
 - `job-context`
 - `fit-review`
@@ -363,7 +363,7 @@ sequenceDiagram
     participant Workspace as WorkspaceSession
 
     User->>Workbench: Generate and export drafts
-    Workbench->>Refresh: RefreshActiveJobSetAsync()
+    Workbench->>Refresh: RefreshJobSetAsync()
     Workbench->>Generate: GenerateAsync(request)
     loop per requested document kind
         Generate->>Llm: GenerateAsync(LlmRequest)
