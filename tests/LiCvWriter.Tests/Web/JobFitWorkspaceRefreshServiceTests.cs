@@ -9,6 +9,8 @@ namespace LiCvWriter.Tests.Web;
 
 public sealed class JobFitWorkspaceRefreshServiceTests
 {
+    private string jobSetId = "job-set-01";
+
     [Fact]
     public void RefreshAllJobSets_UpdatesEveryTrackedJobTab()
     {
@@ -30,7 +32,7 @@ public sealed class JobFitWorkspaceRefreshServiceTests
                 Array.Empty<string>(),
                 "LinkedIn API"));
 
-        session.SetJobPosting(new JobPostingAnalysis
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead AI Architect",
             CompanyName = "Contoso",
@@ -39,7 +41,8 @@ public sealed class JobFitWorkspaceRefreshServiceTests
         });
 
         session.AddJobSet();
-        session.SetJobPosting(new JobPostingAnalysis
+        jobSetId = "job-set-02";
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Principal Consultant",
             CompanyName = "Fabrikam",
@@ -56,13 +59,13 @@ public sealed class JobFitWorkspaceRefreshServiceTests
 
         Assert.Equal(2, refreshed);
 
-        session.SelectJobSet("job-set-01");
-        Assert.True(session.JobFitAssessment.HasSignals);
-        Assert.True(session.EvidenceSelection.HasSignals);
+        jobSetId = "job-set-01";
+        Assert.True(session.GetJobSet(jobSetId).JobFitAssessment.HasSignals);
+        Assert.True(session.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
 
-        session.SelectJobSet("job-set-02");
-        Assert.True(session.JobFitAssessment.HasSignals);
-        Assert.True(session.EvidenceSelection.HasSignals);
+        jobSetId = "job-set-02";
+        Assert.True(session.GetJobSet(jobSetId).JobFitAssessment.HasSignals);
+        Assert.True(session.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
     }
 
     [Fact]
@@ -86,7 +89,7 @@ public sealed class JobFitWorkspaceRefreshServiceTests
                 Array.Empty<string>(),
                 "LinkedIn API"));
 
-        session.SetJobPosting(new JobPostingAnalysis
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Consultant",
             CompanyName = "Contoso",
@@ -100,11 +103,11 @@ public sealed class JobFitWorkspaceRefreshServiceTests
             session);
 
         service.RefreshAllJobSets();
-        var evidenceId = session.EvidenceSelection.SelectedEvidence.Last().Evidence.Id;
-        session.SetActiveJobSetEvidenceSelected(evidenceId, false);
+        var evidenceId = session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence.Last().Evidence.Id;
+        session.SetJobSetEvidenceSelected(jobSetId, evidenceId, false);
 
         service.RefreshAllJobSets();
 
-        Assert.DoesNotContain(session.EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == evidenceId);
+        Assert.DoesNotContain(session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == evidenceId);
     }
 }

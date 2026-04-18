@@ -1110,7 +1110,7 @@ else if (CanRunFitReview)
     private void AddJobSet(JobSetInputMode inputMode)
     {
         var existingIds = Workspace.JobSets.Select(j => j.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        Workspace.AddJobSet(inputMode, makeActive: false);
+        Workspace.AddJobSet(inputMode);
         var newJobSet = Workspace.JobSets.FirstOrDefault(j => !existingIds.Contains(j.Id));
         errorMessage = null;
         SyncFromWorkspace();

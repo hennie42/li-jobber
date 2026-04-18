@@ -7,16 +7,10 @@ public sealed class JobFitWorkspaceRefreshService(
     EvidenceSelectionService evidenceSelectionService,
     WorkspaceSession workspace)
 {
-    public bool RefreshActiveJobSet()
-        => RefreshJobSet(workspace.ActiveJobSetId);
-
     /// <summary>
-    /// Re-runs evidence selection for the active job set using its current fit assessment.
+    /// Re-runs evidence selection for the specified job set using its current fit assessment.
     /// Call after the LLM enhancement pass has updated the fit assessment in-place.
     /// </summary>
-    public void RefreshActiveJobSetEvidence()
-        => RefreshJobSetEvidence(workspace.ActiveJobSetId);
-
     public void RefreshJobSetEvidence(string jobSetId)
     {
         var candidateProfile = workspace.CandidateProfile;

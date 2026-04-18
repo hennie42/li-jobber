@@ -19,7 +19,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private LinkedInExportImportResult? importResult;
     private LinkedInImportDiagnosticsSnapshot? linkedInImportDiagnostics = LoadLinkedInImportDiagnostics(recoveryStore);
     private ApplicantDifferentiatorProfile applicantDifferentiatorProfile = LoadApplicantDifferentiatorProfile(recoveryStore);
-    private string activeJobSetId = LoadActiveJobSetId(recoveryStore);
     private LinkedInAuthorizationStatus linkedInAuthorizationStatus = LoadLinkedInAuthorizationStatus(recoveryStore);
     private OllamaModelAvailability? ollamaAvailability;
     private string selectedLlmModel = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
@@ -61,16 +60,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         && isLlmSessionConfigured
         && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
-    public string ActiveJobSetId => Read(() => activeJobSetId);
-
-    public JobSetSessionState ActiveJobSet => Read(GetActiveJobSetUnsafe);
-
-    public JobPostingAnalysis? JobPosting => Read(() => GetActiveJobSetUnsafe().JobPosting);
-
-    public CompanyResearchProfile? CompanyProfile => Read(() => GetActiveJobSetUnsafe().CompanyProfile);
-
-    public JobFitAssessment JobFitAssessment => Read(() => GetActiveJobSetUnsafe().JobFitAssessment);
-
     public LinkedInAuthorizationStatus LinkedInAuthorizationStatus => Read(() => linkedInAuthorizationStatus);
 
     public OllamaModelAvailability? OllamaAvailability => Read(() => ollamaAvailability);
@@ -83,25 +72,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public bool HasStartedLlmWork => Read(() => hasStartedLlmWork);
 
-    public IReadOnlyList<GeneratedDocument> GeneratedDocuments => Read(() => GetActiveJobSetUnsafe().GeneratedDocuments);
-
-    public IReadOnlyList<DocumentExportResult> Exports => Read(() => GetActiveJobSetUnsafe().Exports);
-
-    public EvidenceSelectionResult EvidenceSelection => Read(() => GetActiveJobSetUnsafe().EvidenceSelection);
-
-    public bool CanGenerate => Read(() => candidateProfile is not null && GetActiveJobSetUnsafe().JobPosting is not null);
-
     public bool IsLlmReady => Read(() => ollamaAvailability is not null
         && isLlmSessionConfigured
         && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
     public bool CanEditLlmSessionSettings => true;
-
-    public bool CanStartDraftGeneration => Read(() => candidateProfile is not null
-        && GetActiveJobSetUnsafe().JobPosting is not null
-        && ollamaAvailability is not null
-        && isLlmSessionConfigured
-        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
     public bool IsJobSetFitReviewCurrent(string jobSetId, string fingerprint, bool requiresLlmEnhancement)
     {
@@ -138,11 +113,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
-    public void SetActiveJobSetOutputLanguage(OutputLanguage outputLanguage)
-    {
-        UpdateActiveJobSet(jobSet => jobSet with { OutputLanguage = outputLanguage });
-    }
-
     public void SetJobSetInputLanguage(string jobSetId, JobSetSourceLanguage inputLanguage)
     {
         UpdateJobSet(jobSetId, jobSet =>
@@ -174,9 +144,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
-    public void MarkActiveJobSetRunning(string detail)
-        => MarkJobSetRunning(ActiveJobSetId, detail);
-
     public void MarkJobSetRunning(string jobSetId, string detail)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
@@ -185,9 +152,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ProgressDetail = detail
         });
     }
-
-    public void MarkActiveJobSetFailed(string detail)
-        => MarkJobSetFailed(ActiveJobSetId, detail);
 
     public void MarkJobSetFailed(string jobSetId, string detail)
     {
@@ -198,9 +162,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
-    public void ResetActiveJobSetProgress(string detail = "LLM work not started for this job set.")
-        => ResetJobSetProgress(ActiveJobSetId, detail);
-
     public void ResetJobSetProgress(string jobSetId, string detail = "LLM work not started for this job set.")
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
@@ -210,27 +171,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
-    public void SetActiveJobSetTechnologyGapAssessment(TechnologyGapAssessment technologyGapAssessment)
-        => SetJobSetTechnologyGapAssessment(ActiveJobSetId, technologyGapAssessment);
-
     public void SetJobSetTechnologyGapAssessment(string jobSetId, TechnologyGapAssessment technologyGapAssessment)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with { TechnologyGapAssessment = technologyGapAssessment });
     }
 
-    public void SetActiveJobSetJobFitAssessment(JobFitAssessment jobFitAssessment)
-    {
-        SetJobSetJobFitAssessment(ActiveJobSetId, jobFitAssessment);
-    }
-
     public void SetJobSetJobFitAssessment(string jobSetId, JobFitAssessment jobFitAssessment)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with { JobFitAssessment = jobFitAssessment });
-    }
-
-    public void SetActiveJobSetEvidenceSelection(EvidenceSelectionResult evidenceSelection)
-    {
-        SetJobSetEvidenceSelection(ActiveJobSetId, evidenceSelection);
     }
 
     public void SetJobSetEvidenceSelection(string jobSetId, EvidenceSelectionResult evidenceSelection)
@@ -252,48 +200,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             };
         });
     }
-
-    public void SetActiveJobSetEvidenceSelected(string evidenceId, bool isSelected)
-    {
-        UpdateActiveJobSet(jobSet =>
-        {
-            var updated = BuildUpdatedEvidenceSelection(jobSet.EvidenceSelection, evidenceId, isSelected);
-            return jobSet with
-            {
-                EvidenceSelection = updated,
-                SelectedEvidenceIds = updated.SelectedEvidence.Select(static item => item.Evidence.Id).ToArray()
-            };
-        });
-    }
-
-    public void ClearActiveJobSetEvidenceSelections()
-    {
-        UpdateActiveJobSet(jobSet => jobSet with
-        {
-            SelectedEvidenceIds = Array.Empty<string>(),
-            EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
-                .Select(item => item with { IsSelected = false })
-                .ToArray())
-        });
-    }
-
-    public void SelectAllActiveJobSetEvidence()
-    {
-        UpdateActiveJobSet(jobSet => jobSet with
-        {
-            SelectedEvidenceIds = jobSet.EvidenceSelection.RankedEvidence
-                .Select(item => item.Evidence.Id)
-                .ToArray(),
-            EvidenceSelection = new EvidenceSelectionResult(jobSet.EvidenceSelection.RankedEvidence
-                .Select(item => item with { IsSelected = true })
-                .ToArray())
-        });
-    }
-
-    public int GetActiveSelectedEvidenceCount()
-        => ActiveJobSet.SelectedEvidenceIds.Count > 0
-            ? ActiveJobSet.SelectedEvidenceIds.Count
-            : EvidenceSelection.SelectedEvidence.Count;
 
     public void SetJobSetOutputLanguage(string jobSetId, OutputLanguage outputLanguage)
     {
@@ -360,7 +266,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     : item)
                 .ToArray());
 
-    public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls, bool makeActive = true)
+    public void AddJobSet(JobSetInputMode inputMode = JobSetInputMode.LinkToUrls)
     {
         lock (gate)
         {
@@ -368,11 +274,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             var jobSet = CreateJobSet(nextSortOrder, inputMode);
 
             jobSets.Add(jobSet);
-
-            if (makeActive)
-            {
-                activeJobSetId = jobSet.Id;
-            }
         }
 
         NotifyChanged();
@@ -393,47 +294,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 throw new InvalidOperationException("At least one job set must remain in the workspace.");
             }
 
-            var wasActive = jobSets[index].Id == activeJobSetId;
             jobSets.RemoveAt(index);
-
-            if (wasActive)
-            {
-                activeJobSetId = jobSets[Math.Min(index, jobSets.Count - 1)].Id;
-            }
         }
 
         NotifyChanged();
-    }
-
-    public void SelectJobSet(string jobSetId)
-    {
-        lock (gate)
-        {
-            if (!jobSets.Any(jobSet => jobSet.Id == jobSetId))
-            {
-                throw new InvalidOperationException($"Job set '{jobSetId}' does not exist in this session.");
-            }
-
-            activeJobSetId = jobSetId;
-        }
-
-        NotifyChanged();
-    }
-
-    public void UpdateActiveJobSetInputs(string jobUrl, string companyUrlsText, string jobPostingText, string companyContextText)
-    {
-        UpdateActiveJobSet(jobSet => jobSet with
-        {
-            JobUrl = jobUrl,
-            CompanyUrlsText = companyUrlsText,
-            JobPostingText = jobPostingText,
-            CompanyContextText = companyContextText
-        });
-    }
-
-    public void SetActiveJobSetAdditionalInstructions(string? additionalInstructions)
-    {
-        UpdateActiveJobSet(jobSet => jobSet with { AdditionalInstructions = additionalInstructions ?? string.Empty });
     }
 
     public void SetImportResult(string exportPath, LinkedInExportImportResult importResult)
@@ -486,9 +350,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
-    public void SetJobPosting(JobPostingAnalysis jobPosting)
-        => SetJobSetJobPosting(ActiveJobSetId, jobPosting);
-
     public void SetJobSetJobPosting(string jobSetId, JobPostingAnalysis jobPosting)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
@@ -508,9 +369,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             Exports = Array.Empty<DocumentExportResult>()
         });
     }
-
-    public void SetCompanyProfile(CompanyResearchProfile companyProfile)
-        => SetJobSetCompanyProfile(ActiveJobSetId, companyProfile);
 
     public void SetJobSetCompanyProfile(string jobSetId, CompanyResearchProfile companyProfile)
     {
@@ -605,9 +463,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    public void SetGeneratedDocuments(IReadOnlyList<GeneratedDocument> documents, IReadOnlyList<DocumentExportResult> exports)
-        => SetJobSetGeneratedDocuments(ActiveJobSetId, documents, exports);
-
     public void SetJobSetGeneratedDocuments(string jobSetId, IReadOnlyList<GeneratedDocument> documents, IReadOnlyList<DocumentExportResult> exports)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
@@ -618,9 +473,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             Exports = exports
         });
     }
-
-    public void ClearGeneratedArtifacts(bool notifyChanged = true)
-        => ClearJobSetGeneratedArtifacts(ActiveJobSetId, notifyChanged);
 
     public void ClearJobSetGeneratedArtifacts(string jobSetId, bool notifyChanged = true)
     {
@@ -796,19 +648,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             .ToList();
     }
 
-    private static string LoadActiveJobSetId(WorkspaceRecoveryStore? recoveryStore)
-    {
-        var snapshot = recoveryStore?.Load();
-        if (snapshot?.JobSets is null || snapshot.JobSets.Count == 0)
-        {
-            return CreateJobSetId(1);
-        }
-
-        return snapshot.JobSets.Any(jobSet => jobSet.Id == snapshot.ActiveJobSetId)
-            ? snapshot.ActiveJobSetId
-            : snapshot.JobSets.OrderBy(jobSet => jobSet.SortOrder).First().Id;
-    }
-
     private static ApplicantDifferentiatorProfile LoadApplicantDifferentiatorProfile(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.ApplicantDifferentiatorProfile ?? ApplicantDifferentiatorProfile.Empty;
 
@@ -863,9 +702,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
     }
 
-    private JobSetSessionState GetActiveJobSetUnsafe()
-        => jobSets.First(jobSet => jobSet.Id == activeJobSetId);
-
     private JobSetSessionState GetJobSetUnsafe(string jobSetId)
     {
         var jobSet = jobSets.FirstOrDefault(item => item.Id == jobSetId);
@@ -875,9 +711,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         }
         return jobSet;
     }
-
-    private void UpdateActiveJobSet(Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
-        => UpdateJobSet(ActiveJobSetId, update, notifyChanged);
 
     private void UpdateJobSet(string jobSetId, Func<JobSetSessionState, JobSetSessionState> update, bool notifyChanged = true)
     {
@@ -955,7 +788,6 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     private WorkspaceRecoverySnapshot CreateRecoverySnapshotUnsafe()
         => new(
-            activeJobSetId,
             jobSets.Select(static jobSet => new JobSetRecoveryState(
                 jobSet.Id,
                 jobSet.SortOrder,
