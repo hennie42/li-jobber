@@ -13,8 +13,26 @@
 
 <PageTitle>Start / Setup</PageTitle>
 
+<section class="card-panel readiness-strip">
+    <div class="readiness-chips">
+        <span class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+            Ollama: @(Workspace.IsLlmReady ? "ready" : "pending")
+        </span>
+        <span class="status-chip @(hasProfile ? "status-ok" : "status-pending")">
+            Profile: @(hasProfile ? "loaded" : "not loaded")
+        </span>
+        <span class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
+            Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "saved" : "optional")
+        </span>
+        <span class="status-chip">
+            Jobsets: @Workspace.JobSets.Count
+        </span>
+    </div>
+    <a class="primary-button" href="/workspace/job-workbench">Open Job Workbench</a>
+</section>
+
 <div class="stepper-container">
-<section class="content-grid">
+<section class="content-grid setup-grid">
     <article class="card-panel stack-gap step-card @Step1StateClass">
         <div class="field-label">Step 1</div>
         <h3>Check Ollama and set the session model</h3>
@@ -102,6 +120,15 @@
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
             @Workspace.LinkedInAuthorizationStatus.Message
         </div>
+
+        @if (hasProfile && !isStep2Expanded)
+        {
+            <div class="button-row">
+                <button class="secondary-button" @onclick="() => isStep2Expanded = true">Edit</button>
+            </div>
+        }
+        else
+        {
         <dl class="key-value-grid compact-grid">
             <dt>Required scope</dt>
             <dd>@LinkedInOptions.PortabilityScope</dd>
@@ -148,6 +175,7 @@
         @if (!string.IsNullOrWhiteSpace(profileErrorMessage))
         {
             <div class="message error">@profileErrorMessage</div>
+        }
         }
     </article>
 </section>
@@ -528,6 +556,7 @@
     private string? importProgressStatus;
     private bool isProcessingInsightsPdf;
     private bool isStep1Expanded = false;
+    private bool isStep2Expanded = false;
     private bool isProfileExpanded;
     private string activeProfileTab = "experience";
     private string? editingField;
