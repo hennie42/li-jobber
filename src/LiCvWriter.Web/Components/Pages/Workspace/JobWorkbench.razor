@@ -18,6 +18,67 @@
 
 <PageTitle>Job Workbench</PageTitle>
 
+@if (string.IsNullOrWhiteSpace(JobSetId))
+{
+    <section class="card-panel stack-gap">
+        <div class="hero-row">
+            <div>
+                <h2>Job Workbench</h2>
+                <p class="muted-text">
+                    @Workspace.JobSets.Count jobset(s) &middot;
+                    @(Workspace.IsLlmReady ? "LLM ready" : "LLM not ready") &middot;
+                    @(Workspace.CandidateProfile is null ? "No profile loaded" : "Profile loaded")
+                </p>
+            </div>
+            <div class="button-row">
+                <button class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)" disabled="@(isBusy || isBatchRunning)">Add jobset (URLs)</button>
+                <button class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)" disabled="@(isBusy || isBatchRunning)">Add jobset (paste text)</button>
+            </div>
+        </div>
+    </section>
+
+    <section class="card-panel stack-gap">
+        <div class="field-label">Batch action</div>
+        <div class="checkbox-row">
+            <label><input type="checkbox" @bind="generateCv" /> CV</label>
+            <label><input type="checkbox" @bind="generateCoverLetter" /> Cover letter</label>
+            <label><input type="checkbox" @bind="generateSummary" /> Summary</label>
+            <label><input type="checkbox" @bind="generateInterviewNotes" /> Interview notes</label>
+        </div>
+        <div class="button-row">
+            <button class="primary-button" @onclick="RunAllRefreshThenDraftsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Start all")</button>
+        </div>
+        @if (isBatchRunning)
+        {
+            <p class="muted-text">@GetCurrentTaskStatusMessage()</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <div class="message error">@errorMessage</div>
+        }
+        @if (batchSkippedJobSetMessages.Count > 0)
+        {
+            <ul class="feature-list compact-list">
+                @foreach (var skippedMessage in batchSkippedJobSetMessages)
+                {
+                    <li>@skippedMessage</li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="card-panel stack-gap">
+        <div class="field-label">Jobsets</div>
+        <div class="jobsets-grid">
+            @foreach (var jobSet in Workspace.JobSets.OrderBy(j => j.SortOrder))
+            {
+                <JobsetOverviewRow JobSet="jobSet" ReadinessMessage="@GetBatchReadinessMessage(jobSet)" />
+            }
+        </div>
+    </section>
+}
+else
+{
 <section class="card-panel stack-gap">
     <div class="field-label">Job tabs</div>
     <div class="button-row">
@@ -545,6 +606,7 @@ else if (CanRunFitReview)
         </ul>
     </details>
 }
+}
 
 @code {
     [Parameter] public string? JobSetId { get; set; }
@@ -1041,7 +1103,9 @@ else if (CanRunFitReview)
     private void AddJobSet(JobSetInputMode inputMode)
     {
         var makeActive = !isBusy && !isBatchRunning;
+        var existingIds = Workspace.JobSets.Select(j => j.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Workspace.AddJobSet(inputMode, makeActive);
+        var newJobSet = Workspace.JobSets.FirstOrDefault(j => !existingIds.Contains(j.Id));
         errorMessage = null;
         if (makeActive)
         {
@@ -1049,6 +1113,11 @@ else if (CanRunFitReview)
         }
 
         SyncFromWorkspace();
+
+        if (newJobSet is not null && string.IsNullOrWhiteSpace(JobSetId))
+        {
+            Navigation.NavigateTo($"/workspace/job-workbench/{newJobSet.Id}");
+        }
     }
 
     private void DeleteActiveJobSet()
@@ -1387,6 +1456,118 @@ else if (CanRunFitReview)
                 skippedJobSets.Length == 0
                     ? $"Generated drafts for {readyJobSets.Length} job tab(s)."
                     : $"Generated drafts for {readyJobSets.Length} job tab(s). Skipped {skippedJobSets.Length} tab(s).",
+                null);
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
+        finally
+        {
+            isBatchRunning = false;
+            batchCurrentJobSetTitle = null;
+            currentOperation = BusyOperation.None;
+            StopOperationTimer();
+
+            if (Workspace.JobSets.Any(jobSet => string.Equals(jobSet.Id, originalJobSetId, StringComparison.OrdinalIgnoreCase)))
+            {
+                Workspace.SelectJobSet(originalJobSetId);
+                SyncFromWorkspace();
+            }
+        }
+    }
+
+    private async Task RunAllRefreshThenDraftsAsync()
+    {
+        errorMessage = null;
+        batchSkippedJobSetMessages.Clear();
+
+        if (!Workspace.IsLlmReady)
+        {
+            errorMessage = "Complete Start / Setup first: check Ollama, choose a session model, and choose a thinking level.";
+            return;
+        }
+
+        if (Workspace.CandidateProfile is null)
+        {
+            errorMessage = "Load a LinkedIn profile before running all jobsets.";
+            return;
+        }
+
+        var kinds = GetSelectedDocumentKinds();
+        if (kinds.Count == 0)
+        {
+            errorMessage = "Select at least one document type before running all jobsets.";
+            return;
+        }
+
+        var readyJobSets = Workspace.JobSets
+            .OrderBy(jobSet => jobSet.SortOrder)
+            .Where(CanRunBatchDraftGeneration)
+            .ToArray();
+        var skippedJobSets = Workspace.JobSets
+            .OrderBy(jobSet => jobSet.SortOrder)
+            .Where(jobSet => !CanRunBatchDraftGeneration(jobSet))
+            .Select(jobSet => $"Skipped {jobSet.Title}: {GetBatchReadinessMessage(jobSet)}")
+            .ToArray();
+
+        foreach (var skippedMessage in skippedJobSets)
+        {
+            batchSkippedJobSetMessages.Add(skippedMessage);
+        }
+
+        if (readyJobSets.Length == 0)
+        {
+            errorMessage = skippedJobSets.Length == 0
+                ? "No jobsets are ready to run."
+                : "No jobsets are ready to run. See the skipped jobsets listed above.";
+            return;
+        }
+
+        var originalJobSetId = Workspace.ActiveJobSetId;
+        isBatchRunning = true;
+        batchCompletedCount = 0;
+        batchTotalCount = readyJobSets.Length;
+        StartOperationTimer();
+
+        try
+        {
+            foreach (var jobSet in readyJobSets)
+            {
+                batchCurrentJobSetTitle = jobSet.Title;
+                Workspace.SelectJobSet(jobSet.Id);
+                SyncFromWorkspace();
+
+                currentOperation = BusyOperation.RefreshAll;
+                var refreshSnapshot = await StartStreamedOperationAndWaitAsync(
+                    "/api/llm/operations/refresh-all",
+                    new StartRefreshAllOperationRequest(jobSet.Id));
+
+                if (refreshSnapshot.Status != "completed")
+                {
+                    throw new InvalidOperationException(refreshSnapshot.Error ?? refreshSnapshot.Detail ?? $"Refresh-all failed for {jobSet.Title}.");
+                }
+
+                currentOperation = BusyOperation.GenerateDrafts;
+                Workspace.ClearJobSetGeneratedArtifacts(jobSet.Id);
+
+                var draftSnapshot = await StartStreamedOperationAndWaitAsync(
+                    "/api/llm/operations/generate-drafts",
+                    new StartDraftGenerationOperationRequest(jobSet.Id, kinds.Select(static kind => kind.ToString()).ToArray()));
+
+                if (draftSnapshot.Status != "completed")
+                {
+                    throw new InvalidOperationException(draftSnapshot.Error ?? draftSnapshot.Detail ?? $"Draft generation failed for {jobSet.Title}.");
+                }
+
+                batchCompletedCount++;
+            }
+
+            Operations.Success(
+                "Start all completed.",
+                skippedJobSets.Length == 0
+                    ? $"Refreshed and generated drafts for {readyJobSets.Length} jobset(s)."
+                    : $"Refreshed and generated drafts for {readyJobSets.Length} jobset(s). Skipped {skippedJobSets.Length} jobset(s).",
                 null);
         }
         catch (Exception exception)
