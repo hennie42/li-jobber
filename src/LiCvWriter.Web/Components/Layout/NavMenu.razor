@@ -1,11 +1,50 @@
+@implements IDisposable
+@inject WorkspaceSession Workspace
+
 <nav class="nav-cluster">
     <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">
         <span>Start / Setup</span>
     </NavLink>
-    <NavLink class="nav-item" href="/workspace/job-workbench">
+    <NavLink class="nav-item" href="/workspace/job-workbench" Match="NavLinkMatch.All">
         <span>Job Workbench</span>
     </NavLink>
+    @foreach (var jobSet in Workspace.JobSets.OrderBy(j => j.SortOrder))
+    {
+        <NavLink class="nav-item nav-subitem" href="@($"/workspace/job-workbench/{jobSet.Id}")">
+            <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(jobSet)}")"></span>
+            <span class="nav-subitem-label">@jobSet.Title</span>
+            <span class="nav-subitem-suffix">@FormatInputMode(jobSet.InputMode)</span>
+        </NavLink>
+    }
     <NavLink class="nav-item" href="/diagnostics/session">
         <span>Session Diagnostics</span>
     </NavLink>
 </nav>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += HandleChanged;
+    }
+
+    public void Dispose()
+    {
+        Workspace.Changed -= HandleChanged;
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    private static string GetIndicatorState(JobSetSessionState jobSet) => jobSet.ProgressState switch
+    {
+        JobSetProgressState.Done => "done",
+        JobSetProgressState.Running => "running",
+        JobSetProgressState.Failed => "failed",
+        _ => "idle"
+    };
+
+    private static string FormatInputMode(JobSetInputMode mode) => mode switch
+    {
+        JobSetInputMode.PasteText => "(text)",
+        _ => "(URLs)"
+    };
+}
