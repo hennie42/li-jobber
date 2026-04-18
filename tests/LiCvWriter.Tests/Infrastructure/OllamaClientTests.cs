@@ -158,11 +158,100 @@ public sealed class OllamaClientTests
         Assert.Contains(progress, update => update.ThinkingContent == "Thinking about Novo Nordisk Novo Nordisk");
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenStreamingStalls_ThrowsTimeoutException()
+    {
+        using var httpClient = CreateClient(request => request.RequestUri?.AbsolutePath switch
+        {
+            "/api/chat" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new BlockingAfterFirstLineStream())
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions
+        {
+            Model = "session-model",
+            StreamingInactivitySeconds = 1
+        });
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => client.GenerateAsync(
+            new LlmRequest(
+                "session-model",
+                null,
+                [new LlmChatMessage("user", "hi")],
+                UseChatEndpoint: true,
+                Stream: true)));
+
+        Assert.Contains("stopped streaming", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static HttpClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         => new(new StubMessageHandler(responseFactory))
         {
             BaseAddress = new Uri("http://localhost:11434/api/")
         };
+
+    private sealed class BlockingAfterFirstLineStream : Stream
+    {
+        private readonly byte[] payload = Encoding.UTF8.GetBytes("{\"model\":\"session-model\",\"message\":{\"content\":\"Hel\"},\"done\":false}\n");
+        private int position;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => payload.Length;
+
+        public override long Position
+        {
+            get => position;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (position >= payload.Length)
+            {
+                throw new NotSupportedException("Synchronous reads are not supported after the initial payload.");
+            }
+
+            var available = Math.Min(count, payload.Length - position);
+            payload.AsSpan(position, available).CopyTo(buffer.AsSpan(offset, available));
+            position += available;
+            return available;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (position < payload.Length)
+            {
+                var available = Math.Min(buffer.Length, payload.Length - position);
+                payload.AsMemory(position, available).CopyTo(buffer);
+                position += available;
+                return available;
+            }
+
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => throw new NotSupportedException();
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+    }
 
     private sealed class StubMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {

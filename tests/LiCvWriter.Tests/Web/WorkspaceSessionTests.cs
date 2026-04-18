@@ -96,6 +96,18 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void AddJobSet_WhenRequestedWithoutActivation_KeepsCurrentActiveTab()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.AddJobSet(makeActive: false);
+
+        Assert.Equal(2, session.JobSets.Count);
+        Assert.Equal("job-set-01", session.ActiveJobSetId);
+        Assert.Equal("job-set-02", session.JobSets.Last().Id);
+    }
+
+    [Fact]
     public void DeleteJobSet_RemovesActiveTabAndKeepsRemainingWorkspaceAvailable()
     {
         var session = new WorkspaceSession(new OllamaOptions());
@@ -262,6 +274,60 @@ public sealed class WorkspaceSessionTests
         Assert.Same(JobFitAssessment.Empty, session.JobFitAssessment);
         Assert.Same(EvidenceSelectionResult.Empty, session.EvidenceSelection);
         Assert.Single(session.ActiveJobSet.SelectedEvidenceIds);
+    }
+
+    [Fact]
+    public void UpdateCandidateProfile_ClearsFitEvidenceAndGeneratedArtifacts()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Experienced with .NET and Azure delivery."
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        session.SetJobPosting(new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive generative AI and platform work."
+        });
+        session.SetActiveJobSetJobFitAssessment(new JobFitAssessment(
+            72,
+            JobFitRecommendation.Stretch,
+            [new JobRequirementAssessment("Must have", "Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial, Array.Empty<string>(), "Partial evidence")],
+            Array.Empty<string>(),
+            Array.Empty<string>()));
+        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        [
+            new RankedEvidenceItem(
+                new CandidateEvidenceItem("skill:azure", CandidateEvidenceType.Skill, "Azure", "Azure", ["Azure"]),
+                20,
+                ["Supports must-have: Azure"],
+                true)
+        ]));
+        session.RecordJobSetFitReviewRefresh("job-set-01", "fingerprint", includedLlmEnhancement: true);
+        session.SetGeneratedDocuments(
+            [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.md")]);
+
+        session.UpdateCandidateProfile(new CandidateProfile
+        {
+            Name = new PersonName("Alex", "Taylor"),
+            Summary = "Updated profile summary"
+        });
+
+        Assert.Same(JobFitAssessment.Empty, session.JobFitAssessment);
+        Assert.Same(EvidenceSelectionResult.Empty, session.EvidenceSelection);
+        Assert.Equal(JobSetProgressState.NotStarted, session.ActiveJobSet.ProgressState);
+        Assert.Null(session.ActiveJobSet.LastFitReviewFingerprint);
+        Assert.Empty(session.GeneratedDocuments);
     }
 
     [Fact]

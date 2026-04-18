@@ -20,4 +20,9 @@ internal static class PromptConstraints
     /// Rule for draft-generation prompts: never surface negative framing about the candidate.
     /// </summary>
     internal const string NoNegativeTraits = "Do not mention gaps, weaknesses, missing skills, or negative traits of the applicant.";
+
+    /// <summary>
+    /// Rule set for CV outputs to keep content concise and recruiter-friendly.
+    /// </summary>
+    internal const string CvQualityGuidance = "For CV outputs, keep the professional profile concise (3-4 lines), prioritize quantified achievements, and follow a one-page-first mindset by emphasizing the most relevant and recent evidence.";
 }

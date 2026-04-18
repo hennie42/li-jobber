@@ -18,6 +18,29 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
     private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
+    private static readonly HashSet<string> GenericRequirementPhrases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "links",
+        "there is",
+        "of course",
+        "click here",
+        "read more",
+        "learn more",
+        "home",
+        "menu",
+        "privacy",
+        "terms",
+        "cookies",
+        "about",
+        "contact"
+    };
+
+    private static readonly HashSet<string> NonDomainTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "a", "an", "and", "or", "to", "for", "with", "from", "there", "is", "of", "course",
+        "click", "here", "read", "more", "learn", "home", "menu", "privacy", "terms", "cookies",
+        "about", "contact", "we", "our", "you", "your", "this", "that", "it"
+    };
 
     public async Task<JobPostingAnalysis> AnalyzeAsync(
         Uri jobPostingUrl,
@@ -481,6 +504,11 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             return null;
         }
 
+        if (!IsRequirementLabelQualityAcceptable(requirement, sourceSnippet, aliases))
+        {
+            return null;
+        }
+
         return new JobContextSignal(
             category,
             requirement,
@@ -490,6 +518,72 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             Math.Clamp(confidence.Value, 1, 100),
             NormalizeAliases(requirement, aliases));
     }
+
+    private static bool IsRequirementLabelQualityAcceptable(string requirement, string sourceSnippet, IReadOnlyList<string> aliases)
+    {
+        var normalizedRequirement = NormalizeRequirementText(requirement);
+        if (string.IsNullOrWhiteSpace(normalizedRequirement))
+        {
+            return false;
+        }
+
+        if (GenericRequirementPhrases.Contains(normalizedRequirement))
+        {
+            return false;
+        }
+
+        if (normalizedRequirement.StartsWith("there is", StringComparison.OrdinalIgnoreCase)
+            || normalizedRequirement.StartsWith("of course", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var requirementTokens = Tokenize(normalizedRequirement)
+            .Where(token => !NonDomainTokens.Contains(token))
+            .ToArray();
+        if (requirementTokens.Length == 0)
+        {
+            return false;
+        }
+
+        var snippetTokens = Tokenize(sourceSnippet)
+            .Where(token => !NonDomainTokens.Contains(token))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var requirementMatchesSnippet = requirementTokens.Any(requirementToken =>
+            snippetTokens.Any(snippetToken => TokensOverlap(requirementToken, snippetToken)));
+        var aliasesMatchSnippet = aliases
+            .SelectMany(static alias => Tokenize(alias))
+            .Where(token => !NonDomainTokens.Contains(token))
+            .Any(aliasToken => snippetTokens.Any(snippetToken => TokensOverlap(aliasToken, snippetToken)));
+
+        return requirementMatchesSnippet || aliasesMatchSnippet;
+    }
+
+    private static bool TokensOverlap(string left, string right)
+    {
+        if (left.Equals(right, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (left.Length < 4 || right.Length < 4)
+        {
+            return false;
+        }
+
+        return left.StartsWith(right, StringComparison.OrdinalIgnoreCase)
+            || right.StartsWith(left, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRequirementText(string value)
+        => Regex.Replace(value.Trim(), @"\s+", " ");
+
+    private static string[] Tokenize(string value)
+        => Regex.Matches(value.ToLowerInvariant(), @"[a-z0-9][a-z0-9\+#\./-]*")
+            .Select(static match => match.Value)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToArray();
 
     private static string[] NormalizeAliases(string requirement, IEnumerable<string> aliases)
         => aliases
@@ -624,6 +718,7 @@ Rules:
 - Use concise normalized requirement labels.
 - When helpful, include short aliases that reflect alternative phrasings or concrete terms appearing in the source text.
 - Include only requirements and culture signals that are clearly grounded in the supplied page.
+- Never emit conversational, navigation, or filler labels like "Links", "There is", "Of course", "Home", "Menu", or "Contact".
 - Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
 - Keep summary under 550 characters.
 - Do not invent employers, technologies, or company values that are not in the page.
@@ -657,6 +752,7 @@ Rules:
 - differentiators should capture what makes the company, team, or role context distinctive.
 - When helpful, include short aliases that reflect equivalent language used in the source text.
 - requirements should only include fit-relevant company context that is clearly supported by a sourceSnippet.
+- Never emit conversational, navigation, or filler labels like "Links", "There is", "Of course", "Home", "Menu", or "Contact".
 - Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
 - Keep summary under 650 characters.
 """;

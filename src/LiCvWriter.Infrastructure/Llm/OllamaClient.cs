@@ -210,7 +210,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
 
         while (true)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await ReadStreamingLineAsync(reader, cancellationToken);
             if (line is null)
             {
                 break;
@@ -308,6 +308,22 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             promptTokens,
             completionTokens,
             finalDuration);
+    }
+
+    private async Task<string?> ReadStreamingLineAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var inactivityTimeout = TimeSpan.FromSeconds(Math.Max(1, options.StreamingInactivitySeconds));
+        using var inactivityCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        inactivityCancellation.CancelAfter(inactivityTimeout);
+
+        try
+        {
+            return await reader.ReadLineAsync(inactivityCancellation.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Ollama stopped streaming for more than {inactivityTimeout.TotalSeconds:0} seconds.");
+        }
     }
 
     private async Task<string> GetRequiredStatusPayloadAsync(string relativePath, CancellationToken cancellationToken)

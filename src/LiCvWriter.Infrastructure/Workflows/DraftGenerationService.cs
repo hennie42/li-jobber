@@ -6,6 +6,7 @@ using LiCvWriter.Core.Auditing;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
+using LiCvWriter.Infrastructure.Documents;
 
 namespace LiCvWriter.Infrastructure.Workflows;
 
@@ -14,6 +15,7 @@ public sealed class DraftGenerationService(
     IDocumentRenderer documentRenderer,
     IDocumentExportService documentExportService,
     IAuditStore auditStore,
+    CvQualityValidator cvQualityValidator,
     OllamaOptions ollamaOptions) : IDraftGenerationService
 {
     public async Task<DraftGenerationResult> GenerateAsync(
@@ -67,6 +69,9 @@ public sealed class DraftGenerationService(
                 Model = response.Model
             };
 
+            var cvQualityResult = cvQualityValidator.ValidateAndAutoFix(document, request);
+            document = cvQualityResult.Document;
+
             documents.Add(document);
             progress?.Invoke(new LlmProgressUpdate(
                 $"Generated {kind}",
@@ -103,7 +108,17 @@ public sealed class DraftGenerationService(
                     ["PromptTokens"] = response.PromptTokens?.ToString() ?? string.Empty,
                     ["CompletionTokens"] = response.CompletionTokens?.ToString() ?? string.Empty,
                     ["Duration"] = response.Duration?.ToString() ?? string.Empty,
-                    ["MarkdownPath"] = export?.MarkdownPath ?? string.Empty
+                    ["MarkdownPath"] = export?.MarkdownPath ?? string.Empty,
+                    ["CvMissingMustHaveThemes"] = cvQualityResult.Report.MissingMustHaveThemeCount.ToString(),
+                    ["CvQuantifiedBulletCount"] = cvQualityResult.Report.QuantifiedBulletCount.ToString(),
+                    ["CvSummaryTrimmed"] = cvQualityResult.Report.SummaryTrimmed.ToString(),
+                    ["CvSectionOrderChanged"] = cvQualityResult.Report.SectionOrderChanged.ToString(),
+                    ["CvTrimmedOptionalSections"] = cvQualityResult.Report.TrimmedOptionalSections.Count == 0
+                        ? string.Empty
+                        : string.Join(",", cvQualityResult.Report.TrimmedOptionalSections),
+                    ["CvAppliedFixes"] = cvQualityResult.Report.AppliedFixes.Count == 0
+                        ? string.Empty
+                        : string.Join(",", cvQualityResult.Report.AppliedFixes)
                 }), cancellationToken);
 
             documentStopwatch.Stop();
@@ -194,12 +209,13 @@ public sealed class DraftGenerationService(
 Generate a {kind} in {languageLabel}.
 
 Rules:
-- Use only facts explicitly present in the evidence. Omit anything missing or ambiguous.
+    - {PromptConstraints.EvidenceGrounding}
 - Do not invent employers, dates, certifications, tools, metrics, or outcomes.
-- Do not mention gaps, weaknesses, missing skills, or negative traits.
+    - {PromptConstraints.NoNegativeTraits}
 - Do not expose fit scores, gap lists, or internal assessment data.
 - Keep technology names, company names, and quoted job phrases in their original form.
 - Use job themes and fit review only to guide emphasis — never surface them directly.
+    - {PromptConstraints.CvQualityGuidance}
 
 Target role: {request.JobPosting.RoleTitle} at {request.JobPosting.CompanyName}
 Summary: {request.JobPosting.Summary}

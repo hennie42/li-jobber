@@ -51,6 +51,7 @@ builder.Services.AddSingleton<ILinkedInExportImporter, LinkedInExportImporter>()
 builder.Services.AddSingleton<IInsightsDiscoveryPdfImporter, InsightsDiscoveryPdfImporter>();
 builder.Services.AddSingleton<IAuditStore, LocalMarkdownAuditStore>();
 builder.Services.AddSingleton<IDocumentRenderer, MarkdownDocumentRenderer>();
+builder.Services.AddSingleton<CvQualityValidator>();
 builder.Services.AddSingleton<IDocumentExportService, LocalDocumentExportService>();
 builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
 
@@ -58,7 +59,7 @@ builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
 builder.Services.AddHttpClient<OllamaClient>(client =>
 {
     client.BaseAddress = NormalizeApiBase(ollamaOptions.BaseUrl);
-    client.Timeout = TimeSpan.FromSeconds(Math.Max(90, ollamaOptions.MaxOperationSeconds + 30));
+    client.Timeout = Timeout.InfiniteTimeSpan;
 });
 builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
     new PromptCapturingLlmClient(provider.GetRequiredService<OllamaClient>()));
