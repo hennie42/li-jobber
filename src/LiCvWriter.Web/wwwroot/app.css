@@ -1338,3 +1338,39 @@ textarea.inline-edit-input {
   border-radius: 0.6rem;
   font-size: 0.8rem;
 }
+
+
+/* -- Per-jobset page strip ----------------- */
+
+.breadcrumb-row {
+  font-size: 0.85rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--signal-green-line, #57aa68);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.language-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.field-inline {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field-label-inline {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}

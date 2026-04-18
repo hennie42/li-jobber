@@ -80,51 +80,49 @@
 else
 {
 <section class="card-panel stack-gap">
-    <div class="field-label">Job tabs</div>
-    <div class="button-row">
-        @foreach (var jobSet in Workspace.JobSets.OrderBy(jobSet => jobSet.SortOrder))
-        {
-            <button type="button"
-                    class="@(jobSet.Id == Workspace.ActiveJobSetId ? "primary-button" : "secondary-button")"
-                    title="@jobSet.ProgressDetail"
-                    disabled="@(isBusy || isBatchRunning)"
-                    @onclick="() => SelectJobSet(jobSet.Id)">
-                <span class="job-set-button-label">
-                    <span class="@GetProgressIndicatorClass(jobSet.ProgressState)" aria-hidden="true"></span>
-                    <span>@jobSet.Title (@FormatInputMode(jobSet.InputMode))</span>
-                </span>
-            </button>
-        }
+    <div class="breadcrumb-row">
+        <a class="link-button" href="/workspace/job-workbench">&larr; All jobsets</a>
+    </div>
+    <div class="hero-row">
+        <div>
+            <h2>@Workspace.ActiveJobSet.Title</h2>
+            <p class="muted-text">
+                @FormatInputMode(Workspace.ActiveJobSet.InputMode)
+                <span class="meta-sep">&middot;</span>
+                @Workspace.ActiveJobSet.OutputFolderName
+                @if (Workspace.IsLlmReady)
+                {
+                    <span class="meta-sep">&middot;</span>
+                    @Workspace.SelectedLlmModel
+                }
+            </p>
+        </div>
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady || isBatchRunning)">@(isRefreshingAll ? $"Refreshing {GetOperationElapsed()}" : "Refresh all elements")</button>
+            <button class="secondary-button" @onclick="DeleteThisJobSetAsync" disabled="@(isBusy || isBatchRunning || Workspace.JobSets.Count <= 1)">Delete this jobset</button>
+        </div>
+    </div>
 
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.LinkToUrls)">Add job tab (URLs)</button>
-        <button type="button" class="secondary-button" @onclick="() => AddJobSet(JobSetInputMode.PasteText)">Add job tab (paste text)</button>
-        <button type="button" class="secondary-button" @onclick="DeleteActiveJobSet" disabled="@(isBusy || Workspace.JobSets.Count <= 1)">Delete active job tab</button>
+    <div class="language-row">
+        <label class="field-inline" for="inputLanguage">
+            <span class="field-label-inline">Input language</span>
+            <select id="inputLanguage" class="text-input" value="@Workspace.ActiveJobSet.InputLanguage" @onchange="HandleInputLanguageChanged">
+                <option value="@JobSetSourceLanguage.Auto">Auto-detect</option>
+                <option value="@JobSetSourceLanguage.English">English</option>
+                <option value="@JobSetSourceLanguage.Danish">Danish</option>
+            </select>
+        </label>
+        <label class="field-inline" for="outputLanguageStrip">
+            <span class="field-label-inline">Output language</span>
+            <select id="outputLanguageStrip" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
+                @foreach (var language in Enum.GetValues<OutputLanguage>())
+                {
+                    <option value="@language">@language</option>
+                }
+            </select>
+        </label>
     </div>
-    @if (Workspace.JobSets.Count == 1)
-    {
-        <p class="muted-text">At least one job tab must remain in the workspace.</p>
-    }
-    <div class="job-tabs-meta">
-        @Workspace.ActiveJobSet.OutputFolderName
-        <span class="meta-sep">&middot;</span>
-        @FormatInputMode(Workspace.ActiveJobSet.InputMode)
-        <span class="meta-sep">&middot;</span>
-        @Workspace.ActiveJobSet.OutputLanguage
-        @if (Workspace.IsLlmReady)
-        {
-            <span class="meta-sep">&middot;</span>
-            @Workspace.SelectedLlmModel
-        }
-    </div>
-</section>
 
-<section class="card-panel stack-gap">
-    <div class="field-label">Job set actions</div>
-    <div class="button-row">
-        <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady || isBatchRunning)">@(isRefreshingAll ? $"Running {GetOperationElapsed()}" : "Refresh all analysis")</button>
-        <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
-        <button class="secondary-button" @onclick="RunAllJobSetsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Run all job sets")</button>
-    </div>
     <div class="status-chip @GetCurrentTaskStatusClass()">
         @GetCurrentTaskStatusMessage()
     </div>
@@ -132,15 +130,17 @@ else
     {
         <p class="muted-text">@GetCurrentTaskStatusDetail()</p>
     }
-    @if (batchSkippedJobSetMessages.Count > 0)
+    @if (Workspace.JobSets.Count == 1)
     {
-        <ul class="feature-list compact-list">
-            @foreach (var skippedMessage in batchSkippedJobSetMessages)
-            {
-                <li>@skippedMessage</li>
-            }
-        </ul>
+        <p class="muted-text">At least one jobset must remain in the workspace.</p>
     }
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Jobset actions</div>
+    <div class="button-row">
+        <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
+    </div>
 </section>
 
 @if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -1736,6 +1736,50 @@ else if (CanRunFitReview)
         }
 
         return Task.CompletedTask;
+    }
+
+    private Task HandleInputLanguageChanged(ChangeEventArgs args)
+    {
+        if (args.Value is null || string.IsNullOrWhiteSpace(JobSetId))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (Enum.TryParse<JobSetSourceLanguage>(args.Value.ToString(), ignoreCase: true, out var inputLanguage))
+        {
+            Workspace.SetJobSetInputLanguage(JobSetId, inputLanguage);
+            ClearRetainedStreamState();
+            SyncFromWorkspace();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task DeleteThisJobSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(JobSetId))
+        {
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete jobset \"{Workspace.ActiveJobSet.Title}\"? This cannot be undone.");
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            Workspace.DeleteJobSet(JobSetId);
+            errorMessage = null;
+            ClearRetainedStreamState();
+            SyncFromWorkspace();
+            Navigation.NavigateTo("/workspace/job-workbench");
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
     }
 
     private Task HandleEvidenceSelectionChanged(string evidenceId, ChangeEventArgs args)
