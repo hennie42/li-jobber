@@ -9,6 +9,8 @@ namespace LiCvWriter.Tests.Web;
 
 public sealed class WorkspaceSessionTests
 {
+    private string jobSetId = "job-set-01";
+
     [Fact]
     public void SetLlmSessionSettings_MarksSessionReadyForKnownModel()
     {
@@ -83,32 +85,32 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
-    public void AddJobSet_CreatesNewActiveTab()
+    public void AddJobSet_CreatesNewJobSet()
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
         session.AddJobSet();
 
         Assert.Equal(2, session.JobSets.Count);
-        Assert.Equal("job-set-02", session.ActiveJobSetId);
-        Assert.Equal("Job set 2", session.ActiveJobSet.Title);
-        Assert.Equal("job-set-02", session.ActiveJobSet.OutputFolderName);
+        Assert.Equal("job-set-02", session.JobSets[1].Id);
+        Assert.Equal("Job set 2", session.JobSets[1].Title);
+        Assert.Equal("job-set-02", session.JobSets[1].OutputFolderName);
     }
 
     [Fact]
-    public void AddJobSet_WhenRequestedWithoutActivation_KeepsCurrentActiveTab()
+    public void AddJobSet_AppendsWithoutMutatingExistingJobSets()
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.AddJobSet(makeActive: false);
+        session.AddJobSet();
 
         Assert.Equal(2, session.JobSets.Count);
-        Assert.Equal("job-set-01", session.ActiveJobSetId);
-        Assert.Equal("job-set-02", session.JobSets.Last().Id);
+        Assert.Equal("job-set-01", session.JobSets[0].Id);
+        Assert.Equal("job-set-02", session.JobSets[1].Id);
     }
 
     [Fact]
-    public void DeleteJobSet_RemovesActiveTabAndKeepsRemainingWorkspaceAvailable()
+    public void DeleteJobSet_RemovesJobSetAndKeepsRemainingWorkspaceAvailable()
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
@@ -117,7 +119,6 @@ public sealed class WorkspaceSessionTests
         session.DeleteJobSet("job-set-03");
 
         Assert.Equal(2, session.JobSets.Count);
-        Assert.Equal("job-set-02", session.ActiveJobSetId);
         Assert.DoesNotContain(session.JobSets, jobSet => jobSet.Id == "job-set-03");
     }
 
@@ -133,7 +134,6 @@ public sealed class WorkspaceSessionTests
         session.AddJobSet();
 
         Assert.Equal(3, session.JobSets.Count);
-        Assert.Equal("job-set-04", session.ActiveJobSetId);
         Assert.Contains(session.JobSets, jobSet => jobSet.Id == "job-set-04");
     }
 
@@ -152,30 +152,31 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetJobPosting(new JobPostingAnalysis
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Architect",
             CompanyName = "Contoso",
             SourceUrl = new Uri("https://example.test/job-1")
         });
         session.AddJobSet();
-        session.SetJobPosting(new JobPostingAnalysis
+        jobSetId = "job-set-02";
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "AI Consultant",
             CompanyName = "Fabrikam",
             SourceUrl = new Uri("https://example.test/job-2")
         });
-        session.SelectJobSet("job-set-01");
+        jobSetId = "job-set-01";
 
-        Assert.Equal("Lead Architect @ Contoso", session.ActiveJobSet.Title);
-        Assert.Equal("job-set-01-contoso-lead-architect", session.ActiveJobSet.OutputFolderName);
-        Assert.Equal("https://example.test/job-1", session.ActiveJobSet.JobUrl);
+        Assert.Equal("Lead Architect @ Contoso", session.GetJobSet(jobSetId).Title);
+        Assert.Equal("job-set-01-contoso-lead-architect", session.GetJobSet(jobSetId).OutputFolderName);
+        Assert.Equal("https://example.test/job-1", session.GetJobSet(jobSetId).JobUrl);
 
-        session.SelectJobSet("job-set-02");
+        jobSetId = "job-set-02";
 
-        Assert.Equal("AI Consultant @ Fabrikam", session.ActiveJobSet.Title);
-        Assert.Equal("job-set-02-fabrikam-ai-consultant", session.ActiveJobSet.OutputFolderName);
-        Assert.Equal("https://example.test/job-2", session.ActiveJobSet.JobUrl);
+        Assert.Equal("AI Consultant @ Fabrikam", session.GetJobSet(jobSetId).Title);
+        Assert.Equal("job-set-02-fabrikam-ai-consultant", session.GetJobSet(jobSetId).OutputFolderName);
+        Assert.Equal("https://example.test/job-2", session.GetJobSet(jobSetId).JobUrl);
     }
 
     [Fact]
@@ -183,12 +184,12 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetGeneratedDocuments(
+        session.SetJobSetGeneratedDocuments(jobSetId, 
             [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
             [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.md")]);
 
-        Assert.Equal(JobSetProgressState.Done, session.ActiveJobSet.ProgressState);
-        Assert.Equal("Markdown drafts generated for this job set.", session.ActiveJobSet.ProgressDetail);
+        Assert.Equal(JobSetProgressState.Done, session.GetJobSet(jobSetId).ProgressState);
+        Assert.Equal("Markdown drafts generated for this job set.", session.GetJobSet(jobSetId).ProgressDetail);
     }
 
     [Fact]
@@ -196,14 +197,14 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetActiveJobSetOutputLanguage(OutputLanguage.Danish);
+        session.SetJobSetOutputLanguage(jobSetId, OutputLanguage.Danish);
         session.AddJobSet();
 
-        Assert.Equal(OutputLanguage.English, session.ActiveJobSet.OutputLanguage);
+        Assert.Equal(OutputLanguage.English, session.GetJobSet("job-set-02").OutputLanguage);
 
-        session.SelectJobSet("job-set-01");
+        jobSetId = "job-set-01";
 
-        Assert.Equal(OutputLanguage.Danish, session.ActiveJobSet.OutputLanguage);
+        Assert.Equal(OutputLanguage.Danish, session.GetJobSet(jobSetId).OutputLanguage);
     }
 
     [Fact]
@@ -224,14 +225,14 @@ public sealed class WorkspaceSessionTests
                 Array.Empty<string>(),
                 "LinkedIn API"));
 
-        session.SetJobPosting(new JobPostingAnalysis
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead AI Architect",
             CompanyName = "Contoso",
             Summary = "Drive generative AI, LLM, and Kubernetes platform work."
         });
 
-        Assert.Same(TechnologyGapAssessment.Empty, session.ActiveJobSet.TechnologyGapAssessment);
+        Assert.Same(TechnologyGapAssessment.Empty, session.GetJobSet(jobSetId).TechnologyGapAssessment);
     }
 
     [Fact]
@@ -240,9 +241,9 @@ public sealed class WorkspaceSessionTests
         var session = new WorkspaceSession(new OllamaOptions());
         var assessment = new TechnologyGapAssessment(["Generative AI"], ["LLMs", "Kubernetes"]);
 
-        session.SetActiveJobSetTechnologyGapAssessment(assessment);
+        session.SetJobSetTechnologyGapAssessment(jobSetId, assessment);
 
-        Assert.Equal(assessment, session.ActiveJobSet.TechnologyGapAssessment);
+        Assert.Equal(assessment, session.GetJobSet(jobSetId).TechnologyGapAssessment);
     }
 
     [Fact]
@@ -250,13 +251,13 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetActiveJobSetJobFitAssessment(new JobFitAssessment(
+        session.SetJobSetJobFitAssessment(jobSetId, new JobFitAssessment(
             72,
             JobFitRecommendation.Stretch,
             [new JobRequirementAssessment("Must have", "Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial, Array.Empty<string>(), "Partial evidence")],
             Array.Empty<string>(),
             Array.Empty<string>()));
-        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
         [
             new RankedEvidenceItem(
                 new CandidateEvidenceItem("skill:azure", CandidateEvidenceType.Skill, "Azure", "Azure", ["Azure"]),
@@ -271,9 +272,9 @@ public sealed class WorkspaceSessionTests
         });
 
         Assert.True(session.ApplicantDifferentiatorProfile.HasContent);
-        Assert.Same(JobFitAssessment.Empty, session.JobFitAssessment);
-        Assert.Same(EvidenceSelectionResult.Empty, session.EvidenceSelection);
-        Assert.Single(session.ActiveJobSet.SelectedEvidenceIds);
+        Assert.Same(JobFitAssessment.Empty, session.GetJobSet(jobSetId).JobFitAssessment);
+        Assert.Same(EvidenceSelectionResult.Empty, session.GetJobSet(jobSetId).EvidenceSelection);
+        Assert.Single(session.GetJobSet(jobSetId).SelectedEvidenceIds);
     }
 
     [Fact]
@@ -292,19 +293,19 @@ public sealed class WorkspaceSessionTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        session.SetJobPosting(new JobPostingAnalysis
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead AI Architect",
             CompanyName = "Contoso",
             Summary = "Drive generative AI and platform work."
         });
-        session.SetActiveJobSetJobFitAssessment(new JobFitAssessment(
+        session.SetJobSetJobFitAssessment(jobSetId, new JobFitAssessment(
             72,
             JobFitRecommendation.Stretch,
             [new JobRequirementAssessment("Must have", "Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial, Array.Empty<string>(), "Partial evidence")],
             Array.Empty<string>(),
             Array.Empty<string>()));
-        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
         [
             new RankedEvidenceItem(
                 new CandidateEvidenceItem("skill:azure", CandidateEvidenceType.Skill, "Azure", "Azure", ["Azure"]),
@@ -313,7 +314,7 @@ public sealed class WorkspaceSessionTests
                 true)
         ]));
         session.RecordJobSetFitReviewRefresh("job-set-01", "fingerprint", includedLlmEnhancement: true);
-        session.SetGeneratedDocuments(
+        session.SetJobSetGeneratedDocuments(jobSetId, 
             [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
             [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.md")]);
 
@@ -323,11 +324,11 @@ public sealed class WorkspaceSessionTests
             Summary = "Updated profile summary"
         });
 
-        Assert.Same(JobFitAssessment.Empty, session.JobFitAssessment);
-        Assert.Same(EvidenceSelectionResult.Empty, session.EvidenceSelection);
-        Assert.Equal(JobSetProgressState.NotStarted, session.ActiveJobSet.ProgressState);
-        Assert.Null(session.ActiveJobSet.LastFitReviewFingerprint);
-        Assert.Empty(session.GeneratedDocuments);
+        Assert.Same(JobFitAssessment.Empty, session.GetJobSet(jobSetId).JobFitAssessment);
+        Assert.Same(EvidenceSelectionResult.Empty, session.GetJobSet(jobSetId).EvidenceSelection);
+        Assert.Equal(JobSetProgressState.NotStarted, session.GetJobSet(jobSetId).ProgressState);
+        Assert.Null(session.GetJobSet(jobSetId).LastFitReviewFingerprint);
+        Assert.Empty(session.GetJobSet(jobSetId).GeneratedDocuments);
     }
 
     [Fact]
@@ -335,7 +336,7 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
         [
             new RankedEvidenceItem(
                 new CandidateEvidenceItem("experience:contoso", CandidateEvidenceType.Experience, "Lead Architect @ Contoso", "Azure delivery", ["Azure"]),
@@ -349,9 +350,9 @@ public sealed class WorkspaceSessionTests
                 false)
         ]));
 
-        session.SetActiveJobSetEvidenceSelected("skill:kubernetes", true);
+        session.SetJobSetEvidenceSelected(jobSetId, "skill:kubernetes", true);
 
-        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
         [
             new RankedEvidenceItem(
                 new CandidateEvidenceItem("experience:contoso", CandidateEvidenceType.Experience, "Lead Architect @ Contoso", "Azure delivery", ["Azure"]),
@@ -370,9 +371,9 @@ public sealed class WorkspaceSessionTests
                 true)
         ]));
 
-        Assert.Contains(session.EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "experience:contoso");
-        Assert.Contains(session.EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "skill:kubernetes");
-        Assert.DoesNotContain(session.EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "project:rag");
+        Assert.Contains(session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "experience:contoso");
+        Assert.Contains(session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "skill:kubernetes");
+        Assert.DoesNotContain(session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == "project:rag");
     }
 
     [Fact]
@@ -380,7 +381,7 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetActiveJobSetEvidenceSelection(new EvidenceSelectionResult(
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
         [
             new RankedEvidenceItem(
                 new CandidateEvidenceItem("experience:contoso", CandidateEvidenceType.Experience, "Lead Architect @ Contoso", "Azure delivery", ["Azure"]),
@@ -389,10 +390,10 @@ public sealed class WorkspaceSessionTests
                 true)
         ]));
 
-        session.ClearActiveJobSetEvidenceSelections();
+        session.ClearJobSetEvidenceSelections(jobSetId);
 
-        Assert.Empty(session.ActiveJobSet.SelectedEvidenceIds);
-        Assert.Empty(session.EvidenceSelection.SelectedEvidence);
+        Assert.Empty(session.GetJobSet(jobSetId).SelectedEvidenceIds);
+        Assert.Empty(session.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence);
     }
 
     [Fact]
@@ -403,7 +404,7 @@ public sealed class WorkspaceSessionTests
         session.AddJobSet(JobSetInputMode.PasteText);
 
         Assert.Equal(2, session.JobSets.Count);
-        Assert.Equal(JobSetInputMode.PasteText, session.ActiveJobSet.InputMode);
+        Assert.Equal(JobSetInputMode.PasteText, session.GetJobSet("job-set-02").InputMode);
     }
 
     [Fact]
@@ -411,11 +412,11 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.GetJobSet(jobSetId).InputMode);
 
         session.AddJobSet();
 
-        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.GetJobSet(jobSetId).InputMode);
     }
 
     [Fact]
@@ -424,10 +425,10 @@ public sealed class WorkspaceSessionTests
         var session = new WorkspaceSession(new OllamaOptions());
 
         session.AddJobSet(JobSetInputMode.PasteText);
-        session.UpdateActiveJobSetInputs(string.Empty, string.Empty, "Full job posting text here", "Company info pasted");
+        session.UpdateJobSetInputs(jobSetId, string.Empty, string.Empty, "Full job posting text here", "Company info pasted");
 
-        Assert.Equal("Full job posting text here", session.ActiveJobSet.JobPostingText);
-        Assert.Equal("Company info pasted", session.ActiveJobSet.CompanyContextText);
+        Assert.Equal("Full job posting text here", session.GetJobSet(jobSetId).JobPostingText);
+        Assert.Equal("Company info pasted", session.GetJobSet(jobSetId).CompanyContextText);
     }
 
     [Fact]
@@ -435,15 +436,16 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions());
 
-        session.SetActiveJobSetAdditionalInstructions("Instructions for tab 1");
+        session.SetJobSetAdditionalInstructions(jobSetId, "Instructions for tab 1");
         session.AddJobSet();
-        session.SetActiveJobSetAdditionalInstructions("Instructions for tab 2");
+        jobSetId = "job-set-02";
+        session.SetJobSetAdditionalInstructions(jobSetId, "Instructions for tab 2");
 
-        session.SelectJobSet("job-set-01");
-        Assert.Equal("Instructions for tab 1", session.ActiveJobSet.AdditionalInstructions);
+        jobSetId = "job-set-01";
+        Assert.Equal("Instructions for tab 1", session.GetJobSet(jobSetId).AdditionalInstructions);
 
-        session.SelectJobSet("job-set-02");
-        Assert.Equal("Instructions for tab 2", session.ActiveJobSet.AdditionalInstructions);
+        jobSetId = "job-set-02";
+        Assert.Equal("Instructions for tab 2", session.GetJobSet(jobSetId).AdditionalInstructions);
     }
 
     [Fact]
@@ -454,14 +456,14 @@ public sealed class WorkspaceSessionTests
         session.AddJobSet(JobSetInputMode.PasteText);
         session.AddJobSet(JobSetInputMode.LinkToUrls);
 
-        session.SelectJobSet("job-set-01");
-        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+        jobSetId = "job-set-01";
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.GetJobSet(jobSetId).InputMode);
 
-        session.SelectJobSet("job-set-02");
-        Assert.Equal(JobSetInputMode.PasteText, session.ActiveJobSet.InputMode);
+        jobSetId = "job-set-02";
+        Assert.Equal(JobSetInputMode.PasteText, session.GetJobSet(jobSetId).InputMode);
 
-        session.SelectJobSet("job-set-03");
-        Assert.Equal(JobSetInputMode.LinkToUrls, session.ActiveJobSet.InputMode);
+        jobSetId = "job-set-03";
+        Assert.Equal(JobSetInputMode.LinkToUrls, session.GetJobSet(jobSetId).InputMode);
     }
 
     [Fact]

@@ -7,7 +7,6 @@ using LiCvWriter.Infrastructure.LinkedIn;
 namespace LiCvWriter.Web.Services;
 
 public sealed record WorkspaceRecoverySnapshot(
-    string ActiveJobSetId,
     IReadOnlyList<JobSetRecoveryState> JobSets,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     CandidateProfile? CandidateProfile = null,

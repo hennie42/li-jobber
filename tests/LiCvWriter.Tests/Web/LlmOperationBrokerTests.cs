@@ -13,6 +13,8 @@ namespace LiCvWriter.Tests.Web;
 
 public sealed class LlmOperationBrokerTests
 {
+    private string jobSetId = "job-set-01";
+
     [Fact]
     public async Task StartDraftGeneration_CompletesAndPublishesFinalSnapshot()
     {
@@ -60,7 +62,7 @@ public sealed class LlmOperationBrokerTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        workspace.SetJobPosting(new JobPostingAnalysis
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Architect",
             CompanyName = "Contoso",
@@ -86,10 +88,10 @@ public sealed class LlmOperationBrokerTests
         Assert.NotNull(finalSnapshot);
         Assert.Equal("completed", finalSnapshot!.Status);
         Assert.True(finalSnapshot.Completed);
-        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
-        Assert.True(workspace.EvidenceSelection.HasSignals);
-        Assert.Equal("Generated content (enhanced fit)", workspace.GeneratedDocuments[0].Markdown);
-        Assert.Equal(JobSetProgressState.Done, workspace.ActiveJobSet.ProgressState);
+        Assert.True(workspace.GetJobSet(jobSetId).JobFitAssessment.IsLlmEnhanced);
+        Assert.True(workspace.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
+        Assert.Equal("Generated content (enhanced fit)", workspace.GetJobSet(jobSetId).GeneratedDocuments[0].Markdown);
+        Assert.Equal(JobSetProgressState.Done, workspace.GetJobSet(jobSetId).ProgressState);
     }
 
     [Fact]
@@ -139,7 +141,7 @@ public sealed class LlmOperationBrokerTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        workspace.SetJobPosting(new JobPostingAnalysis
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Architect",
             CompanyName = "Contoso",
@@ -157,7 +159,7 @@ public sealed class LlmOperationBrokerTests
 
         Assert.Equal("completed", finalSnapshot.Status);
         Assert.NotNull(snapshot);
-        Assert.Equal("Generated content (enhanced fit)", workspace.GeneratedDocuments[0].Markdown);
+        Assert.Equal("Generated content (enhanced fit)", workspace.GetJobSet(jobSetId).GeneratedDocuments[0].Markdown);
         Assert.Equal("Draft generation completed", snapshot!.Message);
         Assert.Equal(3, snapshot.Sequence);
     }
@@ -183,7 +185,7 @@ public sealed class LlmOperationBrokerTests
             true,
             ["configured-model"]));
         workspace.SetLlmSessionSettings("configured-model", "medium");
-        workspace.UpdateActiveJobSetInputs(
+        workspace.UpdateJobSetInputs(jobSetId, 
             "https://example.test/job",
             "https://example.test/company",
             string.Empty,
@@ -194,8 +196,8 @@ public sealed class LlmOperationBrokerTests
         var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
 
         Assert.Equal("completed", finalSnapshot.Status);
-        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
-        Assert.Equal("Contoso summary", workspace.CompanyProfile!.Summary);
+        Assert.Equal("Lead Architect", workspace.GetJobSet(jobSetId).JobPosting!.RoleTitle);
+        Assert.Equal("Contoso summary", workspace.GetJobSet(jobSetId).CompanyProfile!.Summary);
     }
 
     [Fact]
@@ -231,7 +233,7 @@ public sealed class LlmOperationBrokerTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        workspace.SetJobPosting(new JobPostingAnalysis
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Architect",
             CompanyName = "Contoso",
@@ -243,8 +245,8 @@ public sealed class LlmOperationBrokerTests
         var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
 
         Assert.Equal("completed", finalSnapshot.Status);
-        Assert.Contains("Azure", workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies);
-        Assert.Contains("Kubernetes", workspace.ActiveJobSet.TechnologyGapAssessment.PossiblyUnderrepresentedTechnologies);
+        Assert.Contains("Azure", workspace.GetJobSet(jobSetId).TechnologyGapAssessment.DetectedTechnologies);
+        Assert.Contains("Kubernetes", workspace.GetJobSet(jobSetId).TechnologyGapAssessment.PossiblyUnderrepresentedTechnologies);
     }
 
     [Fact]
@@ -293,7 +295,7 @@ public sealed class LlmOperationBrokerTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        workspace.SetJobPosting(new JobPostingAnalysis
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
         {
             RoleTitle = "Lead Architect",
             CompanyName = "Contoso",
@@ -306,12 +308,12 @@ public sealed class LlmOperationBrokerTests
         var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
 
         Assert.Equal("completed", finalSnapshot.Status);
-        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
-        Assert.Contains(workspace.JobFitAssessment.Requirements, requirement =>
+        Assert.True(workspace.GetJobSet(jobSetId).JobFitAssessment.IsLlmEnhanced);
+        Assert.Contains(workspace.GetJobSet(jobSetId).JobFitAssessment.Requirements, requirement =>
             requirement.Requirement == "Transformation leadership"
             && requirement.IsLlmEnhanced
             && requirement.Match == JobRequirementMatch.Strong);
-        Assert.True(workspace.EvidenceSelection.HasSignals);
+        Assert.True(workspace.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
     }
 
     [Fact]
@@ -362,7 +364,7 @@ public sealed class LlmOperationBrokerTests
                 new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
                 Array.Empty<string>(),
                 "LinkedIn API"));
-        workspace.UpdateActiveJobSetInputs(
+        workspace.UpdateJobSetInputs(jobSetId, 
             "https://example.test/job",
             "https://example.test/company",
             string.Empty,
@@ -373,11 +375,11 @@ public sealed class LlmOperationBrokerTests
         var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
 
         Assert.Equal("completed", finalSnapshot.Status);
-        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
-        Assert.Equal("Contoso summary", workspace.CompanyProfile!.Summary);
-        Assert.True(workspace.JobFitAssessment.IsLlmEnhanced);
-        Assert.True(workspace.EvidenceSelection.HasSignals);
-        Assert.Contains("Azure", workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies);
+        Assert.Equal("Lead Architect", workspace.GetJobSet(jobSetId).JobPosting!.RoleTitle);
+        Assert.Equal("Contoso summary", workspace.GetJobSet(jobSetId).CompanyProfile!.Summary);
+        Assert.True(workspace.GetJobSet(jobSetId).JobFitAssessment.IsLlmEnhanced);
+        Assert.True(workspace.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
+        Assert.Contains("Azure", workspace.GetJobSet(jobSetId).TechnologyGapAssessment.DetectedTechnologies);
     }
 
     [Fact]
@@ -401,7 +403,7 @@ public sealed class LlmOperationBrokerTests
             true,
             ["configured-model"]));
         workspace.SetLlmSessionSettings("configured-model", "medium");
-        workspace.UpdateActiveJobSetInputs(
+        workspace.UpdateJobSetInputs(jobSetId, 
             "https://example.test/job",
             "https://example.test/company",
             string.Empty,
@@ -414,7 +416,7 @@ public sealed class LlmOperationBrokerTests
         Assert.Equal("failed", finalSnapshot.Status);
         Assert.Contains("timed out", finalSnapshot.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("disable the hard operation cap", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(JobSetProgressState.Failed, workspace.ActiveJobSet.ProgressState);
+        Assert.Equal(JobSetProgressState.Failed, workspace.GetJobSet(jobSetId).ProgressState);
     }
 
     [Fact]
@@ -438,7 +440,7 @@ public sealed class LlmOperationBrokerTests
             true,
             ["configured-model"]));
         workspace.SetLlmSessionSettings("configured-model", "medium");
-        workspace.UpdateActiveJobSetInputs(
+        workspace.UpdateJobSetInputs(jobSetId, 
             "https://example.test/job",
             "https://example.test/company",
             string.Empty,
@@ -449,9 +451,9 @@ public sealed class LlmOperationBrokerTests
         var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId, attempts: 1200);
 
         Assert.Equal("completed", finalSnapshot.Status);
-        Assert.Equal(JobSetProgressState.NotStarted, workspace.ActiveJobSet.ProgressState);
-        Assert.Equal("Lead Architect", workspace.JobPosting!.RoleTitle);
-        Assert.Equal("Slow company summary", workspace.CompanyProfile!.Summary);
+        Assert.Equal(JobSetProgressState.NotStarted, workspace.GetJobSet(jobSetId).ProgressState);
+        Assert.Equal("Lead Architect", workspace.GetJobSet(jobSetId).JobPosting!.RoleTitle);
+        Assert.Equal("Slow company summary", workspace.GetJobSet(jobSetId).CompanyProfile!.Summary);
     }
 
     [Fact]
@@ -476,7 +478,7 @@ public sealed class LlmOperationBrokerTests
             true,
             ["configured-model"]));
         workspace.SetLlmSessionSettings("configured-model", "medium");
-        workspace.UpdateActiveJobSetInputs(
+        workspace.UpdateJobSetInputs(jobSetId, 
             "https://example.test/job",
             "https://example.test/company",
             string.Empty,
