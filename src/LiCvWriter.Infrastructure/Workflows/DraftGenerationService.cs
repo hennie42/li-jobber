@@ -204,9 +204,12 @@ public sealed class DraftGenerationService(
         var fitSummary = BuildFitSummary(request.JobFitAssessment);
         var differentiators = FormatLines(request.ApplicantDifferentiatorProfile?.ToSummaryLines(), "- No applicant differentiator profile is stored for this session.");
         var selectedEvidence = FormatSelectedEvidence(request.EvidenceSelection);
+        var languageContextLine = string.IsNullOrWhiteSpace(request.SourceLanguageHint)
+            ? string.Empty
+            : $"Job and company text source language: {request.SourceLanguageHint}. Output language: {languageLabel}.{Environment.NewLine}{Environment.NewLine}";
 
         return $"""
-Generate a {kind} in {languageLabel}.
+{languageContextLine}Generate a {kind} in {languageLabel}.
 
 Rules:
     - {PromptConstraints.EvidenceGrounding}

@@ -18,4 +18,5 @@ public sealed record DraftGenerationRequest(
     JobFitAssessment? JobFitAssessment = null,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     EvidenceSelectionResult? EvidenceSelection = null,
-    TechnologyGapAssessment? TechnologyGapAssessment = null);
+    TechnologyGapAssessment? TechnologyGapAssessment = null,
+    string? SourceLanguageHint = null);

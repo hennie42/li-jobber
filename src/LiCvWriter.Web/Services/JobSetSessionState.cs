@@ -20,6 +20,8 @@ public sealed record JobSetSessionState
 
     public OutputLanguage OutputLanguage { get; init; } = OutputLanguage.English;
 
+    public JobSetSourceLanguage InputLanguage { get; init; } = JobSetSourceLanguage.Auto;
+
     public JobSetProgressState ProgressState { get; init; } = JobSetProgressState.NotStarted;
 
     public string ProgressDetail { get; init; } = "LLM work not started for this job set.";

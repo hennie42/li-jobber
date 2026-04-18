@@ -10,6 +10,7 @@ public interface IJobResearchService
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 
     Task<CompanyResearchProfile> BuildCompanyProfileAsync(
@@ -17,6 +18,7 @@ public interface IJobResearchService
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 
     Task<JobPostingAnalysis> AnalyzeTextAsync(
@@ -24,6 +26,7 @@ public interface IJobResearchService
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 
     Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(
@@ -31,5 +34,6 @@ public interface IJobResearchService
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 }

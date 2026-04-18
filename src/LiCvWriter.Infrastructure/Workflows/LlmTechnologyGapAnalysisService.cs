@@ -18,12 +18,13 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
         string selectedModel,
         string selectedThinkingLevel,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel,
-                BuildSystemPrompt(),
+                BuildSystemPrompt(sourceLanguageHint),
                 [new LlmChatMessage("user", BuildUserPrompt(candidateProfile, jobPosting, companyProfile))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
@@ -44,8 +45,12 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
             : TechnologyGapAnalyzer.Analyze(candidateProfile, jobPosting, companyProfile);
     }
 
-    private static string BuildSystemPrompt()
-        => $$"""
+    private static string BuildSystemPrompt(string? sourceLanguageHint = null)
+    {
+        var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
+            ? string.Empty
+            : $"Job and company text are written in {sourceLanguageHint}; the candidate profile may be in English. Match technology terms across languages.\n\n";
+        return languageLine + $$"""
 You analyze technology alignment between a candidate profile and a target job.
 
 Return JSON only with this exact shape:
@@ -61,6 +66,7 @@ Rules:
 - `possiblyUnderrepresentedTechnologies`: only technologies from `detectedTechnologies` that seem weak or absent in the candidate evidence.
 - Prefer grounded source-backed requirement signals and aliases when provided.
 """;
+    }
 
     private static string BuildUserPrompt(CandidateProfile candidateProfile, JobPostingAnalysis jobPosting, CompanyResearchProfile? companyProfile)
     {

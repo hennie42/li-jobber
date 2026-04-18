@@ -47,6 +47,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         await ValidatePublicHttpsUriAsync(jobPostingUrl, cancellationToken);
@@ -63,7 +64,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 resolvedModel,
-                BuildJobSystemPrompt(),
+                BuildJobSystemPrompt(sourceLanguageHint),
                 [new LlmChatMessage("user", BuildJobUserPrompt(jobPostingUrl, title, heading, text))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
@@ -87,6 +88,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         var urls = sourceUrls.ToArray();
@@ -116,7 +118,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 ResolveModel(selectedModel),
-                BuildCompanySystemPrompt(),
+                BuildCompanySystemPrompt(sourceLanguageHint),
                 [new LlmChatMessage("user", BuildCompanyUserPrompt(sourceDocuments))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
@@ -140,6 +142,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(jobPostingText))
@@ -151,7 +154,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 resolvedModel,
-                BuildJobSystemPrompt(),
+                BuildJobSystemPrompt(sourceLanguageHint),
                 [new LlmChatMessage("user", BuildPastedJobUserPrompt(jobPostingText))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
@@ -175,6 +178,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
         Action<LlmProgressUpdate>? progress = null,
+        string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(companyContextText))
@@ -185,7 +189,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 ResolveModel(selectedModel),
-                BuildCompanySystemPrompt(),
+                BuildCompanySystemPrompt(sourceLanguageHint),
                 [new LlmChatMessage("user", BuildPastedCompanyUserPrompt(companyContextText))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
@@ -692,8 +696,12 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
     private string ResolveThinkingLevel(string? selectedThinkingLevel)
         => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();
 
-    private static string BuildJobSystemPrompt()
-        => """
+    private static string BuildJobSystemPrompt(string? sourceLanguageHint = null)
+    {
+        var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
+            ? string.Empty
+            : $"The source job posting is written in {sourceLanguageHint}; extract values verbatim where helpful but produce normalized labels in {sourceLanguageHint}.\n";
+        return languageLine + """
 You extract structured job requirements from a single job posting.
 
 Return JSON only with this exact shape:
@@ -723,9 +731,14 @@ Rules:
 - Keep summary under 550 characters.
 - Do not invent employers, technologies, or company values that are not in the page.
 """;
+    }
 
-    private static string BuildCompanySystemPrompt()
-        => """
+    private static string BuildCompanySystemPrompt(string? sourceLanguageHint = null)
+    {
+        var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
+            ? string.Empty
+            : $"The source company pages are written in {sourceLanguageHint}; extract values verbatim where helpful but produce normalized labels in {sourceLanguageHint}.\n";
+        return languageLine + """
 You extract structured company context from one or more company source pages.
 
 Return JSON only with this exact shape:
@@ -756,6 +769,7 @@ Rules:
 - Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
 - Keep summary under 650 characters.
 """;
+    }
 
     private static string BuildJobUserPrompt(Uri jobPostingUrl, string title, string heading, string text)
     {
