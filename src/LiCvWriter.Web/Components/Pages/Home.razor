@@ -909,9 +909,9 @@
             return "Load the DMA member snapshot next.";
         }
 
-        if (Workspace.JobPosting is null)
+        if (Workspace.JobSets.All(j => j.JobPosting is null))
         {
-            return "Open the job workbench next. Add or select a job tab, then analyze a target role when you are ready.";
+            return "Open the job workbench next. Add or select a jobset, then analyze a target role when you are ready.";
         }
 
         return "The session, profile, and job context are ready. Run fit review, technology gap, or draft generation when you want the app to start deeper analysis.";

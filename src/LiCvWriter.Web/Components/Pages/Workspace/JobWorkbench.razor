@@ -85,11 +85,11 @@ else
     </div>
     <div class="hero-row">
         <div>
-            <h2>@Workspace.ActiveJobSet.Title</h2>
+            <h2>@CurrentJobSet.Title</h2>
             <p class="muted-text">
-                @FormatInputMode(Workspace.ActiveJobSet.InputMode)
+                @FormatInputMode(CurrentJobSet.InputMode)
                 <span class="meta-sep">&middot;</span>
-                @Workspace.ActiveJobSet.OutputFolderName
+                @CurrentJobSet.OutputFolderName
                 @if (Workspace.IsLlmReady)
                 {
                     <span class="meta-sep">&middot;</span>
@@ -106,7 +106,7 @@ else
     <div class="language-row">
         <label class="field-inline" for="inputLanguage">
             <span class="field-label-inline">Input language</span>
-            <select id="inputLanguage" class="text-input" value="@Workspace.ActiveJobSet.InputLanguage" @onchange="HandleInputLanguageChanged">
+            <select id="inputLanguage" class="text-input" value="@CurrentJobSet.InputLanguage" @onchange="HandleInputLanguageChanged">
                 <option value="@JobSetSourceLanguage.Auto">Auto-detect</option>
                 <option value="@JobSetSourceLanguage.English">English</option>
                 <option value="@JobSetSourceLanguage.Danish">Danish</option>
@@ -114,7 +114,7 @@ else
         </label>
         <label class="field-inline" for="outputLanguageStrip">
             <span class="field-label-inline">Output language</span>
-            <select id="outputLanguageStrip" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
+            <select id="outputLanguageStrip" class="text-input" value="@CurrentJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
                 @foreach (var language in Enum.GetValues<OutputLanguage>())
                 {
                     <option value="@language">@language</option>
@@ -153,7 +153,7 @@ else
 <details class="card-panel stack-gap" open>
     <summary><h3>Research</h3></summary>
 
-    @if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.LinkToUrls)
+    @if (CurrentJobSet.InputMode == JobSetInputMode.LinkToUrls)
         {
             <label class="field-label" for="jobUrl">Job URL</label>
             <input id="jobUrl" class="text-input" @bind="jobUrl" @bind:event="oninput" @bind:after="PersistJobSetInputs" />
@@ -272,26 +272,26 @@ else
         }
     </details>
 
-@if (Workspace.JobFitAssessment.HasSignals)
+@if (CurrentJobSet.JobFitAssessment.HasSignals)
 {
     <details class="card-panel stack-gap" open>
         <summary>
             <div class="fit-header">
                 <div>
                     <h3>Fit review</h3>
-                    @if (Workspace.JobFitAssessment.IsLlmEnhanced)
+                    @if (CurrentJobSet.JobFitAssessment.IsLlmEnhanced)
                     {
                         <span class="status-chip status-llm">LLM-enhanced</span>
                     }
                 </div>
-                <div class="status-chip @GetRecommendationStatusClass(Workspace.JobFitAssessment.Recommendation)">
-                    @FormatRecommendation(Workspace.JobFitAssessment.Recommendation) - @Workspace.JobFitAssessment.OverallScore/100
+                <div class="status-chip @GetRecommendationStatusClass(CurrentJobSet.JobFitAssessment.Recommendation)">
+                    @FormatRecommendation(CurrentJobSet.JobFitAssessment.Recommendation) - @CurrentJobSet.JobFitAssessment.OverallScore/100
                 </div>
             </div>
         </summary>
 
         <p class="muted-text">
-            @if (Workspace.JobFitAssessment.IsLlmEnhanced)
+            @if (CurrentJobSet.JobFitAssessment.IsLlmEnhanced)
             {
                 <text>This review combines deterministic signal matching with an LLM semantic pass that identifies evidence keyword search may have missed.</text>
             }
@@ -303,19 +303,19 @@ else
 
         <dl class="key-value-grid compact-grid">
             <dt>Recommendation</dt>
-            <dd>@FormatRecommendation(Workspace.JobFitAssessment.Recommendation)</dd>
+            <dd>@FormatRecommendation(CurrentJobSet.JobFitAssessment.Recommendation)</dd>
             <dt>Overall score</dt>
-            <dd>@Workspace.JobFitAssessment.OverallScore / 100</dd>
+            <dd>@CurrentJobSet.JobFitAssessment.OverallScore / 100</dd>
             <dt>Requirements</dt>
-            <dd>@Workspace.JobFitAssessment.Requirements.Count</dd>
+            <dd>@CurrentJobSet.JobFitAssessment.Requirements.Count</dd>
             <dt>Strong matches</dt>
-            <dd>@Workspace.JobFitAssessment.StrongMatchCount</dd>
+            <dd>@CurrentJobSet.JobFitAssessment.StrongMatchCount</dd>
             <dt>Open gaps</dt>
-            <dd>@Workspace.JobFitAssessment.GapCount</dd>
+            <dd>@CurrentJobSet.JobFitAssessment.GapCount</dd>
         </dl>
 
         <div class="fit-assessment-list">
-            @foreach (var requirement in Workspace.JobFitAssessment.Requirements)
+            @foreach (var requirement in CurrentJobSet.JobFitAssessment.Requirements)
             {
                 <article class="fit-assessment-card @GetRequirementMatchClass(requirement.Match)">
                     <div class="fit-card-header">
@@ -372,7 +372,7 @@ else if (CanRunFitReview)
     </details>
 }
 
-@if (Workspace.CandidateProfile is not null && Workspace.ActiveJobSet.TechnologyGapAssessment.HasSignals)
+@if (Workspace.CandidateProfile is not null && CurrentJobSet.TechnologyGapAssessment.HasSignals)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Technology gap check</h3></summary>
@@ -386,7 +386,7 @@ else if (CanRunFitReview)
         <div>
             <div class="field-label">Detected in job context</div>
             <ul class="feature-list">
-                @foreach (var technology in Workspace.ActiveJobSet.TechnologyGapAssessment.DetectedTechnologies)
+                @foreach (var technology in CurrentJobSet.TechnologyGapAssessment.DetectedTechnologies)
                 {
                     <li>@technology</li>
                 }
@@ -395,10 +395,10 @@ else if (CanRunFitReview)
 
         <div>
             <div class="field-label">Possibly underrepresented on profile</div>
-            @if (Workspace.ActiveJobSet.TechnologyGapAssessment.HasGaps)
+            @if (CurrentJobSet.TechnologyGapAssessment.HasGaps)
             {
                 <ul class="feature-list">
-                    @foreach (var technology in Workspace.ActiveJobSet.TechnologyGapAssessment.PossiblyUnderrepresentedTechnologies)
+                    @foreach (var technology in CurrentJobSet.TechnologyGapAssessment.PossiblyUnderrepresentedTechnologies)
                     {
                         <li>@technology might be underrepresented on the current profile.</li>
                     }
@@ -411,7 +411,7 @@ else if (CanRunFitReview)
         </div>
     </details>
 }
-else if (Workspace.JobPosting is not null)
+else if (CurrentJobSet.JobPosting is not null)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Technology gap check</h3></summary>
@@ -424,7 +424,7 @@ else if (Workspace.JobPosting is not null)
     </details>
 }
 
-@if (Workspace.EvidenceSelection.HasSignals)
+@if (CurrentJobSet.EvidenceSelection.HasSignals)
 {
     <details class="card-panel stack-gap" open>
         <summary>
@@ -432,8 +432,8 @@ else if (Workspace.JobPosting is not null)
                 <div>
                     <h3>Ranked evidence</h3>
                 </div>
-                <div class="status-chip @(Workspace.GetActiveSelectedEvidenceCount() > 0 ? "status-ok" : "status-pending")">
-                    @Workspace.GetActiveSelectedEvidenceCount() selected
+                <div class="status-chip @(Workspace.GetSelectedEvidenceCount(JobSetId!) > 0 ? "status-ok" : "status-pending")">
+                    @Workspace.GetSelectedEvidenceCount(JobSetId!) selected
                 </div>
             </div>
         </summary>
@@ -441,12 +441,12 @@ else if (Workspace.JobPosting is not null)
         <p class="muted-text">Select the strongest proof points to feed into the draft prompts for this job tab.</p>
 
         <div class="button-row">
-            <button class="secondary-button" @onclick="SelectAllEvidenceAsync" disabled="@(Workspace.GetActiveSelectedEvidenceCount() == Workspace.EvidenceSelection.RankedEvidence.Count)">Select all</button>
-            <button class="secondary-button" @onclick="ClearEvidenceSelectionsAsync" disabled="@(Workspace.GetActiveSelectedEvidenceCount() == 0)">Deselect all</button>
+            <button class="secondary-button" @onclick="SelectAllEvidenceAsync" disabled="@(Workspace.GetSelectedEvidenceCount(JobSetId!) == CurrentJobSet.EvidenceSelection.RankedEvidence.Count)">Select all</button>
+            <button class="secondary-button" @onclick="ClearEvidenceSelectionsAsync" disabled="@(Workspace.GetSelectedEvidenceCount(JobSetId!) == 0)">Deselect all</button>
         </div>
 
         <div class="evidence-selection-list">
-            @foreach (var rankedEvidence in Workspace.EvidenceSelection.RankedEvidence)
+            @foreach (var rankedEvidence in CurrentJobSet.EvidenceSelection.RankedEvidence)
             {
                 <label class="evidence-selection-card">
                     <input type="checkbox"
@@ -487,14 +487,14 @@ else if (CanRunFitReview)
 <details class="card-panel stack-gap" open>
     <summary><h3>Draft generation</h3></summary>
 
-    <div class="status-chip @(Workspace.CanStartDraftGeneration ? "status-ok" : "status-pending")">
+    <div class="status-chip @(Workspace.CanStartDraftGenerationForJobSet(JobSetId!) ? "status-ok" : "status-pending")">
         @GetGenerationReadinessMessage()
     </div>
     <p class="muted-text">Saved applicant differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "Yes" : "No")</p>
-    <p class="muted-text">Selected evidence items for this tab: @Workspace.GetActiveSelectedEvidenceCount()</p>
+    <p class="muted-text">Selected evidence items for this tab: @Workspace.GetSelectedEvidenceCount(JobSetId!)</p>
 
     <label class="field-label" for="outputLanguage">Output language</label>
-    <select id="outputLanguage" class="text-input" value="@Workspace.ActiveJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
+    <select id="outputLanguage" class="text-input" value="@CurrentJobSet.OutputLanguage" @onchange="HandleOutputLanguageChanged">
         <option value="@OutputLanguage.English">English</option>
         <option value="@OutputLanguage.Danish">Danish</option>
     </select>
@@ -512,7 +512,7 @@ else if (CanRunFitReview)
     <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions" @bind:event="oninput" @bind:after="PersistAdditionalInstructions"></textarea>
 
     <div class="button-row">
-        <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGeneration)">@(isGenerating ? $"Running {GetOperationElapsed()}" : "Generate and export drafts")</button>
+        <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGenerationForJobSet(JobSetId!))">@(isGenerating ? $"Running {GetOperationElapsed()}" : "Generate and export drafts")</button>
         <a class="secondary-button" href="/">Open Start / Setup</a>
     </div>
 
@@ -575,11 +575,11 @@ else if (CanRunFitReview)
     }
 </details>
 
-@if (Workspace.GeneratedDocuments.Count > 0)
+@if (CurrentJobSet.GeneratedDocuments.Count > 0)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Generated markdown drafts</h3></summary>
-        @foreach (var document in Workspace.GeneratedDocuments)
+        @foreach (var document in CurrentJobSet.GeneratedDocuments)
         {
             <details class="details-card">
                 <summary>@document.Kind - @document.Title</summary>
@@ -590,12 +590,12 @@ else if (CanRunFitReview)
     </details>
 }
 
-@if (Workspace.Exports.Count > 0)
+@if (CurrentJobSet.Exports.Count > 0)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Exported files</h3></summary>
         <ul class="feature-list">
-            @foreach (var export in Workspace.Exports)
+            @foreach (var export in CurrentJobSet.Exports)
             {
                 <li>@export.Kind: @export.MarkdownPath</li>
                 @if (!string.IsNullOrWhiteSpace(export.WordPath))
@@ -663,9 +663,26 @@ else if (CanRunFitReview)
         || IsActiveTelemetryMessage(RefreshTechnologyGapMessage);
     private bool isRefreshingAll => currentOperation == BusyOperation.RefreshAll;
 
-    private bool CanRunFitReview => Workspace.CandidateProfile is not null && Workspace.JobPosting is not null;
+    private bool CanRunFitReview => Workspace.CandidateProfile is not null && CurrentJobSet.JobPosting is not null;
 
-    private bool CanRunTechnologyGapCheck => Workspace.IsLlmReady && Workspace.CandidateProfile is not null && Workspace.JobPosting is not null;
+    private bool CanRunTechnologyGapCheck => Workspace.IsLlmReady && Workspace.CandidateProfile is not null && CurrentJobSet.JobPosting is not null;
+
+    private JobSetSessionState CurrentJobSet
+    {
+        get
+        {
+            var id = JobSetId;
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                var match = Workspace.JobSets.FirstOrDefault(j => string.Equals(j.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    return match;
+                }
+            }
+            return Workspace.JobSets[0];
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -681,17 +698,7 @@ else if (CanRunFitReview)
             return;
         }
 
-        var jobSets = Workspace.JobSets;
-        if (!jobSets.Any(j => string.Equals(j.Id, JobSetId, StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
-
-        if (!string.Equals(Workspace.ActiveJobSetId, JobSetId, StringComparison.OrdinalIgnoreCase))
-        {
-            Workspace.SelectJobSet(JobSetId);
-            SyncFromWorkspace();
-        }
+        SyncFromWorkspace();
     }
 
     public void Dispose()
@@ -745,7 +752,7 @@ else if (CanRunFitReview)
             return;
         }
 
-        if (Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText)
+        if (CurrentJobSet.InputMode == JobSetInputMode.PasteText)
         {
             await AnalyzeAndBuildContextFromTextAsync();
             return;
@@ -768,7 +775,7 @@ else if (CanRunFitReview)
             currentOperation = BusyOperation.AnalyzeAndBuildContext;
             await StartStreamedOperationAsync(
                 "/api/llm/operations/job-context",
-                new StartJobContextOperationRequest(Workspace.ActiveJobSetId));
+                new StartJobContextOperationRequest(JobSetId!));
         }
         catch (Exception exception)
         {
@@ -792,7 +799,7 @@ else if (CanRunFitReview)
             currentOperation = BusyOperation.AnalyzeAndBuildContext;
             await StartStreamedOperationAsync(
                 "/api/llm/operations/job-context",
-                new StartJobContextOperationRequest(Workspace.ActiveJobSetId));
+                new StartJobContextOperationRequest(JobSetId!));
         }
         catch (Exception exception)
         {
@@ -861,13 +868,13 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkActiveJobSetRunning("Job analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.");
             analysis = await Operations.RunAsync(
                 AnalyzeJobMessage,
                 $"{uri} via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.AnalyzeAsync(uri, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
-            Workspace.SetJobPosting(analysis);
+            Workspace.SetJobSetJobPosting(JobSetId!, analysis);
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -882,7 +889,7 @@ else if (CanRunFitReview)
             errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
                 ? exception.Message
                 : $"{userErrorPrefix}: {exception.Message}";
-            Workspace.MarkActiveJobSetFailed("Job analysis failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Job analysis failed for this tab.");
             Operations.Error("Job analysis failed.", exception.Message);
             return false;
         }
@@ -914,13 +921,13 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkActiveJobSetRunning("Company context analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.");
             companyProfile = await Operations.RunAsync(
                 BuildCompanyContextMessage,
                 $"{urls.Length} source URLs via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.BuildCompanyProfileAsync(urls, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
-            Workspace.SetCompanyProfile(companyProfile);
+            Workspace.SetJobSetCompanyProfile(JobSetId!, companyProfile);
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -935,7 +942,7 @@ else if (CanRunFitReview)
             errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
                 ? exception.Message
                 : $"{userErrorPrefix}: {exception.Message}";
-            Workspace.MarkActiveJobSetFailed("Company context analysis failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Company context analysis failed for this tab.");
             Operations.Error("Company context analysis failed.", exception.Message);
             return false;
         }
@@ -966,13 +973,13 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkActiveJobSetRunning("Job analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.");
             analysis = await Operations.RunAsync(
                 AnalyzeJobMessage,
                 $"pasted text via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.AnalyzeTextAsync(jobPostingText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
-            Workspace.SetJobPosting(analysis);
+            Workspace.SetJobSetJobPosting(JobSetId!, analysis);
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -987,7 +994,7 @@ else if (CanRunFitReview)
             errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
                 ? exception.Message
                 : $"{userErrorPrefix}: {exception.Message}";
-            Workspace.MarkActiveJobSetFailed("Job analysis failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Job analysis failed for this tab.");
             Operations.Error("Job analysis failed.", exception.Message);
             return false;
         }
@@ -1018,13 +1025,13 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkActiveJobSetRunning("Company context analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.");
             companyProfile = await Operations.RunAsync(
                 BuildCompanyContextMessage,
                 $"pasted text via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.BuildCompanyProfileFromTextAsync(companyContextText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
-            Workspace.SetCompanyProfile(companyProfile);
+            Workspace.SetJobSetCompanyProfile(JobSetId!, companyProfile);
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -1039,7 +1046,7 @@ else if (CanRunFitReview)
             errorMessage = string.IsNullOrWhiteSpace(userErrorPrefix)
                 ? exception.Message
                 : $"{userErrorPrefix}: {exception.Message}";
-            Workspace.MarkActiveJobSetFailed("Company context analysis failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Company context analysis failed for this tab.");
             Operations.Error("Company context analysis failed.", exception.Message);
             return false;
         }
@@ -1068,7 +1075,7 @@ else if (CanRunFitReview)
                 return;
             }
 
-            if (Workspace.CandidateProfile is null || Workspace.JobPosting is null)
+            if (Workspace.CandidateProfile is null || CurrentJobSet.JobPosting is null)
             {
                 errorMessage = "Load a LinkedIn profile and analyze a target job before generating drafts.";
                 currentOperation = BusyOperation.None;
@@ -1086,15 +1093,15 @@ else if (CanRunFitReview)
                 return;
             }
 
-            Workspace.ClearGeneratedArtifacts();
+            Workspace.ClearJobSetGeneratedArtifacts(JobSetId!);
             await StartStreamedOperationAsync(
                 "/api/llm/operations/generate-drafts",
-                new StartDraftGenerationOperationRequest(Workspace.ActiveJobSetId, kinds.Select(static kind => kind.ToString()).ToArray()));
+                new StartDraftGenerationOperationRequest(JobSetId!, kinds.Select(static kind => kind.ToString()).ToArray()));
         }
         catch (Exception exception)
         {
             errorMessage = exception.Message;
-            Workspace.MarkActiveJobSetFailed("Draft generation failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Draft generation failed for this tab.");
             currentOperation = BusyOperation.None;
             StopOperationTimer();
         }
@@ -1102,16 +1109,10 @@ else if (CanRunFitReview)
 
     private void AddJobSet(JobSetInputMode inputMode)
     {
-        var makeActive = !isBusy && !isBatchRunning;
         var existingIds = Workspace.JobSets.Select(j => j.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        Workspace.AddJobSet(inputMode, makeActive);
+        Workspace.AddJobSet(inputMode, makeActive: false);
         var newJobSet = Workspace.JobSets.FirstOrDefault(j => !existingIds.Contains(j.Id));
         errorMessage = null;
-        if (makeActive)
-        {
-            ClearRetainedStreamState();
-        }
-
         SyncFromWorkspace();
 
         if (newJobSet is not null && string.IsNullOrWhiteSpace(JobSetId))
@@ -1120,39 +1121,16 @@ else if (CanRunFitReview)
         }
     }
 
-    private void DeleteActiveJobSet()
-    {
-        try
-        {
-            Workspace.DeleteJobSet(Workspace.ActiveJobSetId);
-            errorMessage = null;
-            ClearRetainedStreamState();
-            SyncFromWorkspace();
-        }
-        catch (Exception exception)
-        {
-            errorMessage = exception.Message;
-        }
-    }
-
-    private void SelectJobSet(string jobSetId)
-    {
-        Workspace.SelectJobSet(jobSetId);
-        errorMessage = null;
-        ClearRetainedStreamState();
-        SyncFromWorkspace();
-    }
-
     private void PersistJobSetInputs()
-        => Workspace.UpdateActiveJobSetInputs(jobUrl, companyUrls, jobPostingText, companyContextText);
+        => Workspace.UpdateJobSetInputs(JobSetId!, jobUrl, companyUrls, jobPostingText, companyContextText);
 
     private void PersistAdditionalInstructions()
-        => Workspace.SetActiveJobSetAdditionalInstructions(additionalInstructions);
+        => Workspace.SetJobSetAdditionalInstructions(JobSetId!, additionalInstructions);
 
     private void SetAdditionalInstructions(string value)
     {
         additionalInstructions = value;
-        Workspace.SetActiveJobSetAdditionalInstructions(value);
+        Workspace.SetJobSetAdditionalInstructions(JobSetId!, value);
     }
 
     private string BuildResearchInstructions()
@@ -1195,13 +1173,19 @@ else if (CanRunFitReview)
 
     private void SyncFromWorkspace()
     {
-        analysis = Workspace.JobPosting;
-        companyProfile = Workspace.CompanyProfile;
-        jobUrl = Workspace.ActiveJobSet.JobUrl;
-        companyUrls = Workspace.ActiveJobSet.CompanyUrlsText;
-        jobPostingText = Workspace.ActiveJobSet.JobPostingText;
-        companyContextText = Workspace.ActiveJobSet.CompanyContextText;
-        additionalInstructions = Workspace.ActiveJobSet.AdditionalInstructions;
+        if (string.IsNullOrWhiteSpace(JobSetId))
+        {
+            return;
+        }
+
+        var jobSet = CurrentJobSet;
+        analysis = jobSet.JobPosting;
+        companyProfile = jobSet.CompanyProfile;
+        jobUrl = jobSet.JobUrl;
+        companyUrls = jobSet.CompanyUrlsText;
+        jobPostingText = jobSet.JobPostingText;
+        companyContextText = jobSet.CompanyContextText;
+        additionalInstructions = jobSet.AdditionalInstructions;
 
         if (string.IsNullOrWhiteSpace(jobUrl) && analysis?.SourceUrl is not null)
         {
@@ -1225,7 +1209,7 @@ else if (CanRunFitReview)
         {
             await StartStreamedOperationAsync(
                 "/api/llm/operations/fit-review",
-                new StartFitReviewOperationRequest(Workspace.ActiveJobSetId));
+                new StartFitReviewOperationRequest(JobSetId!));
         }
         catch (Exception exception)
         {
@@ -1251,7 +1235,7 @@ else if (CanRunFitReview)
         {
             await StartStreamedOperationAsync(
                 "/api/llm/operations/technology-gap",
-                new StartTechnologyGapOperationRequest(Workspace.ActiveJobSetId));
+                new StartTechnologyGapOperationRequest(JobSetId!));
         }
         catch (Exception exception)
         {
@@ -1272,7 +1256,7 @@ else if (CanRunFitReview)
 
         activeStreamSnapshot = operationEvent.Snapshot;
 
-        if (!string.Equals(activeStreamSnapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(activeStreamSnapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -1376,107 +1360,6 @@ else if (CanRunFitReview)
         activeOperationCompletionSource = null;
     }
 
-    private async Task RunAllJobSetsAsync()
-    {
-        errorMessage = null;
-        batchSkippedJobSetMessages.Clear();
-
-        if (!Workspace.IsLlmReady)
-        {
-            errorMessage = "Complete Start / Setup first: check Ollama, choose a session model, and choose a thinking level.";
-            return;
-        }
-
-        if (Workspace.CandidateProfile is null)
-        {
-            errorMessage = "Load a LinkedIn profile before running all job sets.";
-            return;
-        }
-
-        var kinds = GetSelectedDocumentKinds();
-        if (kinds.Count == 0)
-        {
-            errorMessage = "Select at least one document type before running all job sets.";
-            return;
-        }
-
-        var readyJobSets = Workspace.JobSets
-            .OrderBy(jobSet => jobSet.SortOrder)
-            .Where(CanRunBatchDraftGeneration)
-            .ToArray();
-        var skippedJobSets = Workspace.JobSets
-            .OrderBy(jobSet => jobSet.SortOrder)
-            .Where(jobSet => !CanRunBatchDraftGeneration(jobSet))
-            .Select(jobSet => $"Skipped {jobSet.Title}: {GetBatchReadinessMessage(jobSet)}")
-            .ToArray();
-
-        foreach (var skippedMessage in skippedJobSets)
-        {
-            batchSkippedJobSetMessages.Add(skippedMessage);
-        }
-
-        if (readyJobSets.Length == 0)
-        {
-            errorMessage = skippedJobSets.Length == 0
-                ? "No job tabs are ready to run."
-                : "No job tabs are ready to run. See the skipped tabs listed above.";
-            return;
-        }
-
-        var originalJobSetId = Workspace.ActiveJobSetId;
-        isBatchRunning = true;
-        batchCompletedCount = 0;
-        batchTotalCount = readyJobSets.Length;
-        StartOperationTimer();
-
-        try
-        {
-            foreach (var jobSet in readyJobSets)
-            {
-                batchCurrentJobSetTitle = jobSet.Title;
-                Workspace.SelectJobSet(jobSet.Id);
-                SyncFromWorkspace();
-                currentOperation = BusyOperation.GenerateDrafts;
-                Workspace.ClearJobSetGeneratedArtifacts(jobSet.Id);
-
-                var snapshot = await StartStreamedOperationAndWaitAsync(
-                    "/api/llm/operations/generate-drafts",
-                    new StartDraftGenerationOperationRequest(jobSet.Id, kinds.Select(static kind => kind.ToString()).ToArray()));
-
-                if (snapshot.Status != "completed")
-                {
-                    throw new InvalidOperationException(snapshot.Error ?? snapshot.Detail ?? $"Batch run failed for {jobSet.Title}.");
-                }
-
-                batchCompletedCount++;
-            }
-
-            Operations.Success(
-                "Run all job sets completed.",
-                skippedJobSets.Length == 0
-                    ? $"Generated drafts for {readyJobSets.Length} job tab(s)."
-                    : $"Generated drafts for {readyJobSets.Length} job tab(s). Skipped {skippedJobSets.Length} tab(s).",
-                null);
-        }
-        catch (Exception exception)
-        {
-            errorMessage = exception.Message;
-        }
-        finally
-        {
-            isBatchRunning = false;
-            batchCurrentJobSetTitle = null;
-            currentOperation = BusyOperation.None;
-            StopOperationTimer();
-
-            if (Workspace.JobSets.Any(jobSet => string.Equals(jobSet.Id, originalJobSetId, StringComparison.OrdinalIgnoreCase)))
-            {
-                Workspace.SelectJobSet(originalJobSetId);
-                SyncFromWorkspace();
-            }
-        }
-    }
-
     private async Task RunAllRefreshThenDraftsAsync()
     {
         errorMessage = null;
@@ -1524,7 +1407,6 @@ else if (CanRunFitReview)
             return;
         }
 
-        var originalJobSetId = Workspace.ActiveJobSetId;
         isBatchRunning = true;
         batchCompletedCount = 0;
         batchTotalCount = readyJobSets.Length;
@@ -1535,8 +1417,6 @@ else if (CanRunFitReview)
             foreach (var jobSet in readyJobSets)
             {
                 batchCurrentJobSetTitle = jobSet.Title;
-                Workspace.SelectJobSet(jobSet.Id);
-                SyncFromWorkspace();
 
                 currentOperation = BusyOperation.RefreshAll;
                 var refreshSnapshot = await StartStreamedOperationAndWaitAsync(
@@ -1580,12 +1460,6 @@ else if (CanRunFitReview)
             batchCurrentJobSetTitle = null;
             currentOperation = BusyOperation.None;
             StopOperationTimer();
-
-            if (Workspace.JobSets.Any(jobSet => string.Equals(jobSet.Id, originalJobSetId, StringComparison.OrdinalIgnoreCase)))
-            {
-                Workspace.SelectJobSet(originalJobSetId);
-                SyncFromWorkspace();
-            }
         }
     }
 
@@ -1606,7 +1480,7 @@ else if (CanRunFitReview)
         {
             await StartStreamedOperationAsync(
                 "/api/llm/operations/refresh-all",
-                new StartRefreshAllOperationRequest(Workspace.ActiveJobSetId));
+                new StartRefreshAllOperationRequest(JobSetId!));
         }
         catch (Exception exception)
         {
@@ -1630,11 +1504,11 @@ else if (CanRunFitReview)
 
         try
         {
-            Workspace.MarkActiveJobSetRunning("Fit review is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Fit review is running for this tab.");
             var refreshed = await Operations.RunAsync(
                 RefreshFitReviewMessage,
-                Workspace.ActiveJobSet.Title,
-                () => Task.FromResult(JobFitWorkspaceRefreshService.RefreshActiveJobSet()));
+                CurrentJobSet.Title,
+                () => Task.FromResult(JobFitWorkspaceRefreshService.RefreshJobSet(JobSetId!)));
 
             if (!refreshed)
             {
@@ -1646,22 +1520,22 @@ else if (CanRunFitReview)
                 return;
             }
 
-            if (Workspace.JobFitAssessment.Requirements.Any(static r => r.Match != JobRequirementMatch.Strong))
+            if (CurrentJobSet.JobFitAssessment.Requirements.Any(static r => r.Match != JobRequirementMatch.Strong))
             {
                 Workspace.MarkLlmWorkStarted();
-                Workspace.MarkActiveJobSetRunning("Enhancing fit review with LLM semantic matching.");
+                Workspace.MarkJobSetRunning(JobSetId!, "Enhancing fit review with LLM semantic matching.");
                 var enhanced = await FitEnhancementService.EnhanceAsync(
-                    Workspace.JobFitAssessment,
+                    CurrentJobSet.JobFitAssessment,
                     Workspace.CandidateProfile!,
-                    Workspace.JobPosting!,
-                    Workspace.CompanyProfile,
+                    CurrentJobSet.JobPosting!,
+                    CurrentJobSet.CompanyProfile,
                     Workspace.SelectedLlmModel,
                     Workspace.SelectedThinkingLevel,
                     ReportLlmProgress,
                     default);
 
-                Workspace.SetActiveJobSetJobFitAssessment(enhanced);
-                JobFitWorkspaceRefreshService.RefreshActiveJobSetEvidence();
+                Workspace.SetJobSetJobFitAssessment(JobSetId!, enhanced);
+                JobFitWorkspaceRefreshService.RefreshJobSetEvidence(JobSetId!);
 
                 if (enhanced.IsLlmEnhanced)
                 {
@@ -1674,12 +1548,12 @@ else if (CanRunFitReview)
                 }
             }
 
-            Workspace.ResetActiveJobSetProgress("Fit review updated for this job tab. Markdown generation not started for this tab.");
+            Workspace.ResetJobSetProgress(JobSetId!, "Fit review updated for this job tab. Markdown generation not started for this tab.");
         }
         catch (Exception exception)
         {
             errorMessage = exception.Message;
-            Workspace.MarkActiveJobSetFailed("Fit review failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Fit review failed for this tab.");
             Operations.Error("Fit review failed.", exception.Message);
         }
     }
@@ -1699,26 +1573,26 @@ else if (CanRunFitReview)
         try
         {
             Workspace.MarkLlmWorkStarted();
-            Workspace.MarkActiveJobSetRunning("Technology gap analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Technology gap analysis is running for this tab.");
             var assessment = await Operations.RunAsync(
                 RefreshTechnologyGapMessage,
-                Workspace.ActiveJobSet.Title,
+                CurrentJobSet.Title,
                 () => GapAnalysisService.AnalyzeAsync(
                     Workspace.CandidateProfile!,
-                    Workspace.JobPosting!,
-                    Workspace.CompanyProfile,
+                    CurrentJobSet.JobPosting!,
+                    CurrentJobSet.CompanyProfile,
                     Workspace.SelectedLlmModel,
                     Workspace.SelectedThinkingLevel,
                     ReportLlmProgress));
 
-            Workspace.SetActiveJobSetTechnologyGapAssessment(assessment);
-            Workspace.ResetActiveJobSetProgress("Technology gap analysis completed. Markdown generation not started for this tab.");
+            Workspace.SetJobSetTechnologyGapAssessment(JobSetId!, assessment);
+            Workspace.ResetJobSetProgress(JobSetId!, "Technology gap analysis completed. Markdown generation not started for this tab.");
             await RefreshOllamaAvailabilitySilentlyAsync();
         }
         catch (Exception exception)
         {
             errorMessage = exception.Message;
-            Workspace.MarkActiveJobSetFailed("Technology gap analysis failed for this tab.");
+            Workspace.MarkJobSetFailed(JobSetId!, "Technology gap analysis failed for this tab.");
             Operations.Error("Technology gap analysis failed.", exception.Message);
         }
     }
@@ -1732,7 +1606,7 @@ else if (CanRunFitReview)
 
         if (Enum.TryParse<OutputLanguage>(args.Value.ToString(), ignoreCase: true, out var outputLanguage))
         {
-            Workspace.SetActiveJobSetOutputLanguage(outputLanguage);
+            Workspace.SetJobSetOutputLanguage(JobSetId!, outputLanguage);
         }
 
         return Task.CompletedTask;
@@ -1762,7 +1636,7 @@ else if (CanRunFitReview)
             return;
         }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete jobset \"{Workspace.ActiveJobSet.Title}\"? This cannot be undone.");
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete jobset \"{CurrentJobSet.Title}\"? This cannot be undone.");
         if (!confirmed)
         {
             return;
@@ -1785,20 +1659,20 @@ else if (CanRunFitReview)
     private Task HandleEvidenceSelectionChanged(string evidenceId, ChangeEventArgs args)
     {
         var isSelected = args.Value is bool value && value;
-        Workspace.SetActiveJobSetEvidenceSelected(evidenceId, isSelected);
+        Workspace.SetJobSetEvidenceSelected(JobSetId!, evidenceId, isSelected);
         return Task.CompletedTask;
     }
 
     private Task ClearEvidenceSelectionsAsync()
     {
-        Workspace.ClearActiveJobSetEvidenceSelections();
+        Workspace.ClearJobSetEvidenceSelections(JobSetId!);
         Operations.Info("Evidence selections cleared.", "The next generation pass will use either refreshed ranking defaults or whatever you select next.");
         return Task.CompletedTask;
     }
 
     private Task SelectAllEvidenceAsync()
     {
-        Workspace.SelectAllActiveJobSetEvidence();
+        Workspace.SelectAllJobSetEvidence(JobSetId!);
         Operations.Info("All evidence selected.", "Every ranked evidence item is now selected for this tab.");
         return Task.CompletedTask;
     }
@@ -1806,7 +1680,7 @@ else if (CanRunFitReview)
     private void ReportLlmProgress(LlmProgressUpdate update)
     {
         Operations.UpdateCurrent(update);
-        Workspace.MarkActiveJobSetRunning(update.Detail ?? update.Message);
+        Workspace.MarkJobSetRunning(JobSetId!, update.Detail ?? update.Message);
     }
 
     private async Task RefreshOllamaAvailabilitySilentlyAsync()
@@ -1833,7 +1707,7 @@ else if (CanRunFitReview)
             return "Load a LinkedIn profile before generating drafts.";
         }
 
-        if (Workspace.JobPosting is null)
+        if (CurrentJobSet.JobPosting is null)
         {
             return "Analyze a target job before generating drafts.";
         }
@@ -1842,12 +1716,12 @@ else if (CanRunFitReview)
     }
 
     private string GetActiveTabStatusMessage()
-        => Workspace.ActiveJobSet.ProgressState switch
+        => CurrentJobSet.ProgressState switch
         {
             JobSetProgressState.Done => "This job tab has completed markdown generation.",
-            JobSetProgressState.Running => Workspace.ActiveJobSet.ProgressDetail,
-            JobSetProgressState.Failed => Workspace.ActiveJobSet.ProgressDetail,
-            _ => Workspace.ActiveJobSet.ProgressDetail
+            JobSetProgressState.Running => CurrentJobSet.ProgressDetail,
+            JobSetProgressState.Failed => CurrentJobSet.ProgressDetail,
+            _ => CurrentJobSet.ProgressDetail
         };
 
     private List<DocumentKind> GetSelectedDocumentKinds()
@@ -1920,7 +1794,7 @@ else if (CanRunFitReview)
         }
 
         if (activeStreamSnapshot is { IsTerminal: false } snapshot
-            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(snapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
         {
             return $"Running: {snapshot.Message}";
         }
@@ -1943,7 +1817,7 @@ else if (CanRunFitReview)
         }
 
         if (activeStreamSnapshot is { IsTerminal: false } snapshot
-            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(snapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
         {
             return snapshot.Detail;
         }
@@ -1958,7 +1832,7 @@ else if (CanRunFitReview)
             return "status-pending";
         }
 
-        return Workspace.ActiveJobSet.ProgressState switch
+        return CurrentJobSet.ProgressState switch
         {
             JobSetProgressState.Done => "status-ok",
             JobSetProgressState.Failed => "status-warning",
@@ -2011,7 +1885,7 @@ else if (CanRunFitReview)
 
     private LlmOperationSnapshot? GetActiveDraftStreamSnapshot()
         => activeStreamSnapshot is { Kind: "generate-drafts" } snapshot
-            && string.Equals(snapshot.JobSetId, Workspace.ActiveJobSetId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(snapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase)
             ? snapshot
             : null;
 
@@ -2062,7 +1936,7 @@ else if (CanRunFitReview)
         };
 
     private string GetResearchHelpText()
-        => Workspace.ActiveJobSet.InputMode == JobSetInputMode.PasteText
+        => CurrentJobSet.InputMode == JobSetInputMode.PasteText
             ? "Paste the job posting text and optionally company context text. Structured parsing runs through the session model from Start / Setup."
             : "Provide the target job URL and at least one company context URL. Structured parsing runs through the session model from Start / Setup and blocks this tab if the model cannot return valid JSON.";
 
