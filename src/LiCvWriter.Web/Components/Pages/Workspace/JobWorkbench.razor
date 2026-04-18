@@ -1,4 +1,5 @@
 @page "/workspace/job-workbench"
+@page "/workspace/job-workbench/{JobSetId}"
 @implements IDisposable
 @implements IAsyncDisposable
 @using System.Net.Http.Json
@@ -546,6 +547,8 @@ else if (CanRunFitReview)
 }
 
 @code {
+    [Parameter] public string? JobSetId { get; set; }
+
     private const string AnalyzeJobMessage = "Analyzing job page";
     private const string ParseJobTelemetryMessage = "Parsing job posting";
     private const string BuildCompanyContextMessage = "Building company context";
@@ -607,6 +610,26 @@ else if (CanRunFitReview)
         Operations.Changed += HandleChanged;
         Workspace.Changed += HandleWorkspaceChanged;
         SyncFromWorkspace();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (string.IsNullOrWhiteSpace(JobSetId))
+        {
+            return;
+        }
+
+        var jobSets = Workspace.JobSets;
+        if (!jobSets.Any(j => string.Equals(j.Id, JobSetId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (!string.Equals(Workspace.ActiveJobSetId, JobSetId, StringComparison.OrdinalIgnoreCase))
+        {
+            Workspace.SelectJobSet(JobSetId);
+            SyncFromWorkspace();
+        }
     }
 
     public void Dispose()

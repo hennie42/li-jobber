@@ -318,6 +318,53 @@ a {
   transform: translateX(-6px);
 }
 
+.nav-subitem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.9rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.85rem;
+  border-radius: 0.75rem;
+}
+
+.nav-subitem .nav-subitem-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-subitem .nav-subitem-suffix {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.nav-subitem .job-set-indicator {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #c9c9c9;
+  flex: 0 0 auto;
+}
+
+.nav-subitem .job-set-indicator-running {
+  background: #f5b042;
+  box-shadow: 0 0 0 3px rgba(245, 176, 66, 0.18);
+}
+
+.nav-subitem .job-set-indicator-done {
+  background: var(--signal-green-line, #57aa68);
+}
+
+.nav-subitem .job-set-indicator-failed {
+  background: #d14343;
+}
+
+.nav-subitem .job-set-indicator-idle {
+  background: #c9c9c9;
+}
+
 .hero-panel,
 .card-panel,
 .timeline-card,
