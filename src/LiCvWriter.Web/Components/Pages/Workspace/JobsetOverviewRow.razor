@@ -1,0 +1,85 @@
+@using LiCvWriter.Application.Models
+
+<div class="overview-row">
+    <div class="overview-row-header">
+        <a class="overview-row-title" href="@($"/workspace/job-workbench/{JobSet.Id}")">
+            <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(JobSet.ProgressState)}")" aria-hidden="true"></span>
+            <span>@JobSet.Title</span>
+        </a>
+        <div class="overview-row-meta">
+            <span class="meta-chip">@FormatInputMode(JobSet.InputMode)</span>
+            <span class="meta-chip">@JobSet.OutputFolderName</span>
+            <span class="meta-chip">in: @FormatInputLanguage(JobSet.InputLanguage)</span>
+            <span class="meta-chip">out: @JobSet.OutputLanguage</span>
+        </div>
+    </div>
+
+    <div class="overview-row-status">
+        @if (string.IsNullOrWhiteSpace(ReadinessMessage))
+        {
+            <span class="status-chip status-ok">Ready for LLM work</span>
+        }
+        else
+        {
+            <span class="status-chip status-warning">Not ready: @ReadinessMessage</span>
+        }
+        <span class="status-chip @GetProgressChipClass(JobSet.ProgressState)">@JobSet.ProgressState</span>
+        @if (!string.IsNullOrWhiteSpace(JobSet.ProgressDetail))
+        {
+            <span class="muted-text">@JobSet.ProgressDetail</span>
+        }
+    </div>
+
+    <div class="overview-row-signals">
+        @if (JobSet.JobFitAssessment.HasSignals)
+        {
+            <span class="meta-chip">Fit: @JobSet.JobFitAssessment.Recommendation (@JobSet.JobFitAssessment.OverallScore)</span>
+        }
+        @if (JobSet.GeneratedDocuments.Count > 0)
+        {
+            <span class="meta-chip">@JobSet.GeneratedDocuments.Count draft(s)</span>
+        }
+        @if (JobSet.Exports.Count > 0)
+        {
+            <span class="meta-chip">@JobSet.Exports.Count export(s)</span>
+        }
+    </div>
+
+    <div class="overview-row-actions">
+        <a class="secondary-button" href="@($"/workspace/job-workbench/{JobSet.Id}")">Open</a>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public JobSetSessionState JobSet { get; set; } = default!;
+    [Parameter] public string ReadinessMessage { get; set; } = string.Empty;
+
+    private static string GetIndicatorState(JobSetProgressState state) => state switch
+    {
+        JobSetProgressState.Done => "done",
+        JobSetProgressState.Running => "running",
+        JobSetProgressState.Failed => "failed",
+        _ => "idle"
+    };
+
+    private static string GetProgressChipClass(JobSetProgressState state) => state switch
+    {
+        JobSetProgressState.Done => "status-ok",
+        JobSetProgressState.Running => "status-pending",
+        JobSetProgressState.Failed => "status-warning",
+        _ => string.Empty
+    };
+
+    private static string FormatInputMode(JobSetInputMode mode) => mode switch
+    {
+        JobSetInputMode.PasteText => "Paste text",
+        _ => "URLs"
+    };
+
+    private static string FormatInputLanguage(JobSetSourceLanguage language) => language switch
+    {
+        JobSetSourceLanguage.English => "English",
+        JobSetSourceLanguage.Danish => "Danish",
+        _ => "Auto"
+    };
+}

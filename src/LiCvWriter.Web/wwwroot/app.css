@@ -1261,3 +1261,80 @@ textarea.inline-edit-input {
     line-height: 1.3;
   }
 }
+
+/* -- Job Workbench overview ---------------- */
+
+.hero-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.checkbox-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.jobsets-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+.overview-row {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.overview-row-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.overview-row-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+.overview-row-title:hover {
+  text-decoration: underline;
+}
+
+.overview-row-meta,
+.overview-row-status,
+.overview-row-signals,
+.overview-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.meta-chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+}
