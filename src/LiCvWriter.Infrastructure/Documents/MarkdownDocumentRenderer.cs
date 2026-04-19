@@ -12,7 +12,7 @@ namespace LiCvWriter.Infrastructure.Documents;
 /// </summary>
 public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 {
-    private const int EarlyCareerCutoffYear = 2008;
+    private const int EarlyCareerCutoffYear = 2009;
 
     /// <summary>Common Danish words used for language detection heuristic.</summary>
     private static readonly HashSet<string> DanishMarkers = new(StringComparer.OrdinalIgnoreCase)
@@ -310,7 +310,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             return;
         }
 
-        builder.AppendLine($"## {Translate(outputLanguage, "Earlier Career", "Tidlig karriere")}");
+        builder.AppendLine($"## {Translate(outputLanguage, "Early Career", "Tidlig karriere")}");
         builder.AppendLine();
 
         foreach (var role in earlyCareerExperience)
@@ -392,8 +392,8 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         return (isDanish, outputLanguage) switch
         {
-            (true, OutputLanguage.English) => " *(translated from Danish)*",
-            (false, OutputLanguage.Danish) => " *(translated from English)*",
+            (true, OutputLanguage.English) => " (translated from Danish)",
+            (false, OutputLanguage.Danish) => " (translated from English)",
             _ => string.Empty
         };
     }
@@ -423,14 +423,22 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         return ratio >= 0.08;
     }
 
+    /// <summary>
+    /// A role or project is "early career" when it was completed before the cutoff year.
+    /// Ongoing items (no end date) are never early career. Falls back to start year
+    /// only when no end date is available.
+    /// </summary>
     private static bool IsBeforeCutoff(DateRange period, int cutoffYear)
     {
-        var year = GetReferenceYear(period);
-        return year is not null && year.Value < cutoffYear;
-    }
+        var endYear = period.FinishedOn?.Year;
+        if (endYear is not null)
+        {
+            return endYear.Value < cutoffYear;
+        }
 
-    private static int? GetReferenceYear(DateRange period)
-        => period.StartedOn?.Year ?? period.FinishedOn?.Year;
+        // No end date: treat ongoing/current items as modern.
+        return false;
+    }
 
     private static bool PeriodContains(DateRange outer, DateRange inner)
     {
