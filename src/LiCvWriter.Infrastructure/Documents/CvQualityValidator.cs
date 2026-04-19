@@ -49,9 +49,15 @@ public sealed class CvQualityValidator
         }
 
         var quantifiedBulletCount = CountQuantifiedBullets(processedMarkdown);
-        var missingMustHaveThemeCount = request.JobPosting.MustHaveThemes.Count(theme =>
-            !string.IsNullOrWhiteSpace(theme)
-            && !processedMarkdown.Contains(theme, StringComparison.OrdinalIgnoreCase));
+        var missingThemes = request.JobPosting.MustHaveThemes
+            .Where(theme => !string.IsNullOrWhiteSpace(theme)
+                && !processedMarkdown.Contains(theme, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var missingMustHaveThemeCount = missingThemes.Length;
+        var totalMustHave = request.JobPosting.MustHaveThemes.Count(static t => !string.IsNullOrWhiteSpace(t));
+        var atsKeywordCoveragePercent = totalMustHave > 0
+            ? (int)Math.Round(100.0 * (totalMustHave - missingMustHaveThemeCount) / totalMustHave)
+            : 0;
 
         var updatedDocument = fixes.Count > 0
             ? document with { Markdown = processedMarkdown, PlainText = processedMarkdown }
@@ -63,7 +69,9 @@ public sealed class CvQualityValidator
             summaryTrimmed,
             sectionOrderChanged,
             trimmedSections,
-            fixes);
+            fixes,
+            missingThemes,
+            atsKeywordCoveragePercent);
 
         return new CvQualityValidationResult(updatedDocument, report);
     }

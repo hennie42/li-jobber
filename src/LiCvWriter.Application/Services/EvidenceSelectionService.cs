@@ -18,8 +18,10 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             return EvidenceSelectionResult.Empty;
         }
 
+        var recencyMap = BuildRecencyMap(candidateProfile);
+
         var ranked = evidenceCatalog
-            .Select(evidence => Rank(evidence, jobPosting, companyProfile, jobFitAssessment, differentiatorProfile))
+            .Select(evidence => Rank(evidence, jobPosting, companyProfile, jobFitAssessment, differentiatorProfile, recencyMap))
             .Where(static evidence => evidence.Score > 0)
             .OrderByDescending(static evidence => evidence.Score)
             .ThenBy(static evidence => evidence.Evidence.Title, StringComparer.OrdinalIgnoreCase)
@@ -43,7 +45,8 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
         JobPostingAnalysis jobPosting,
         CompanyResearchProfile? companyProfile,
         JobFitAssessment jobFitAssessment,
-        ApplicantDifferentiatorProfile? differentiatorProfile)
+        ApplicantDifferentiatorProfile? differentiatorProfile,
+        IReadOnlyDictionary<string, int?> recencyMap)
     {
         var score = BaseScore(evidence.Type);
         var reasons = new List<string>();
@@ -88,6 +91,14 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
         {
             score += 4;
             reasons.Add("Matches the broader target context.");
+        }
+
+        // Recency weighting: recent evidence is more compelling to recruiters.
+        var recencyBonus = GetRecencyBonus(evidence.Id, recencyMap);
+        if (recencyBonus > 0)
+        {
+            score += recencyBonus;
+            reasons.Add("Recent and relevant experience.");
         }
 
         return new RankedEvidenceItem(
@@ -186,4 +197,52 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             JobRequirementImportance.Cultural => "cultural signal",
             _ => "requirement"
         };
+
+    /// <summary>
+    /// Builds a lookup from evidence ID to the most recent year associated with
+    /// that evidence item (experience end year, project end year, etc.).
+    /// </summary>
+    private static IReadOnlyDictionary<string, int?> BuildRecencyMap(CandidateProfile candidateProfile)
+    {
+        var map = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        var currentYear = DateTime.UtcNow.Year;
+
+        foreach (var role in candidateProfile.Experience)
+        {
+            var id = $"experience:{NormalizeEvidenceId($"{role.CompanyName}-{role.Title}-{role.Period.DisplayValue}")}";
+            var endYear = role.Period.FinishedOn?.Year ?? currentYear;
+            map[id] = endYear;
+        }
+
+        foreach (var project in candidateProfile.Projects)
+        {
+            var id = $"project:{NormalizeEvidenceId(project.Title)}";
+            var endYear = project.Period.FinishedOn?.Year ?? project.Period.StartedOn?.Year;
+            map[id] = endYear;
+        }
+
+        return map;
+    }
+
+    private static string NormalizeEvidenceId(string value)
+        => value.Trim().ToLowerInvariant().Replace(' ', '-');
+
+    /// <summary>
+    /// Returns a recency bonus: +6 for last 3 years, +3 for 3-7 years, 0 for older.
+    /// </summary>
+    private static int GetRecencyBonus(string evidenceId, IReadOnlyDictionary<string, int?> recencyMap)
+    {
+        if (!recencyMap.TryGetValue(evidenceId, out var endYear) || endYear is null)
+        {
+            return 0;
+        }
+
+        var yearsAgo = DateTime.UtcNow.Year - endYear.Value;
+        return yearsAgo switch
+        {
+            <= 3 => 6,
+            <= 7 => 3,
+            _ => 0
+        };
+    }
 }
