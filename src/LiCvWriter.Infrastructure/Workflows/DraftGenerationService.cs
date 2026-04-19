@@ -134,7 +134,7 @@ public sealed class DraftGenerationService(
                     ["CompletionTokens"] = response.CompletionTokens?.ToString() ?? string.Empty,
                     ["Duration"] = response.Duration?.ToString() ?? string.Empty,
                     ["FilePath"] = export?.FilePath ?? string.Empty,
-                    ["CvMissingMustHaveThemes"] = cvQualityResult.Report.MissingMustHaveThemeCount.ToString(),
+                    ["CvMissingMustHaveThemeCount"] = cvQualityResult.Report.MissingMustHaveThemeCount.ToString(),
                     ["CvQuantifiedBulletCount"] = cvQualityResult.Report.QuantifiedBulletCount.ToString(),
                     ["CvSummaryTrimmed"] = cvQualityResult.Report.SummaryTrimmed.ToString(),
                     ["CvSectionOrderChanged"] = cvQualityResult.Report.SectionOrderChanged.ToString(),
@@ -147,13 +147,18 @@ public sealed class DraftGenerationService(
                     ["CvAtsKeywordCoveragePercent"] = cvQualityResult.Report.AtsKeywordCoveragePercent.ToString(),
                     ["CvMissingMustHaveThemes"] = cvQualityResult.Report.MissingMustHaveThemes is { Count: > 0 }
                         ? string.Join(",", cvQualityResult.Report.MissingMustHaveThemes)
-                        : string.Empty
+                        : string.Empty,
+                    ["CvActionableFeedback"] = string.Join(" | ", cvQualityResult.Report.BuildActionableFeedback())
                 }), cancellationToken);
 
             documentStopwatch.Stop();
+            var qualityFeedback = cvQualityResult.Report.BuildActionableFeedback();
+            var completionDetail = qualityFeedback.Count > 0
+                ? $"{kind} finished in {FormatDuration(documentStopwatch.Elapsed)} (LLM: {FormatDuration(response.Duration)}). Quality: {string.Join(" ", qualityFeedback)}"
+                : $"{kind} finished in {FormatDuration(documentStopwatch.Elapsed)} (LLM: {FormatDuration(response.Duration)}).";
             progress?.Invoke(new LlmProgressUpdate(
                 $"Completed {kind}",
-                $"{kind} finished in {FormatDuration(documentStopwatch.Elapsed)} (LLM: {FormatDuration(response.Duration)}).",
+                completionDetail,
                 response.Model,
                 documentStopwatch.Elapsed,
                 Completed: true,
@@ -279,6 +284,7 @@ Target role: {request.JobPosting.RoleTitle} at {request.JobPosting.CompanyName}
 Summary: {request.JobPosting.Summary}
 Must-have themes: {FormatThemes(request.JobPosting.MustHaveThemes)}
 Nice-to-have themes: {FormatThemes(request.JobPosting.NiceToHaveThemes)}
+Inferred (implicit) requirements: {FormatThemes(request.JobPosting.InferredRequirements)}
 
 Fit review:
 {fitSummary}
@@ -626,7 +632,9 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
         var systemPrompt =
             $"You are a CV refinement editor. Review the candidate's experience bullets against the job's must-have themes. " +
             $"For each theme not yet addressed, improve or replace the weakest bullet to incorporate it — but only if the candidate has evidence for it. " +
-            $"For bullets that could be more specific or quantified, suggest improvements. Output the complete refined {lang} experience section in markdown. " +
+            $"For bullets that could be more specific or quantified, add concrete metrics (percentages, counts, timeframes, scale) where the evidence supports it. " +
+            $"Prefer action-result format: 'Led X, resulting in Y' or 'Delivered X across Y, achieving Z'. " +
+            $"Output the complete refined {lang} experience section in markdown. " +
             $"Preserve exact role titles, companies, and date periods. Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks.";
 
         var userPrompt = $"""
