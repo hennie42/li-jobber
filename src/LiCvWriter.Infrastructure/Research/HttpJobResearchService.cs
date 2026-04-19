@@ -54,7 +54,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
         var title = ExtractMatch(html, "<title[^>]*>(.*?)</title>") ?? jobPostingUrl.Host;
         var heading = ExtractMatch(html, "<h1[^>]*>(.*?)</h1>") ?? title;
-        var text = StripHtml(html);
+        var text = ExtractSemanticContent(html);
         if (string.IsNullOrWhiteSpace(text))
         {
             throw new InvalidOperationException("The job page did not contain enough readable text to parse.");
@@ -80,7 +80,16 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             }),
             cancellationToken);
 
-        return ParseJobPostingAnalysis(response.Content, jobPostingUrl, heading, text);
+        var analysis = ParseJobPostingAnalysis(response.Content, jobPostingUrl, heading, text);
+
+        // Second pass: infer unstated requirements commonly expected for this role type.
+        var inferred = await InferHiddenRequirementsAsync(analysis, resolvedModel, ResolveThinkingLevel(selectedThinkingLevel), progress, cancellationToken);
+        if (inferred.Count > 0)
+        {
+            analysis = analysis with { InferredRequirements = inferred };
+        }
+
+        return analysis;
     }
 
     public async Task<CompanyResearchProfile> BuildCompanyProfileAsync(
@@ -690,6 +699,100 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return defaultSourceLabel;
     }
 
+    /// <summary>
+    /// Second LLM pass: infers implicit requirements that are not stated in the job posting
+    /// but are commonly expected for this type of role at this seniority level.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> InferHiddenRequirementsAsync(
+        JobPostingAnalysis analysis,
+        string model,
+        string thinkingLevel,
+        Action<LlmProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        var explicitRequirements = analysis.MustHaveThemes
+            .Concat(analysis.NiceToHaveThemes)
+            .Concat(analysis.CulturalSignals)
+            .ToArray();
+
+        if (explicitRequirements.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var systemPrompt = """
+You identify implicit/hidden requirements that are commonly expected but unstated in a job posting.
+
+Return a JSON array of short requirement labels only. Example: ["Networking fundamentals", "Cost optimization", "Security basics"]
+
+Rules:
+- Return valid JSON array only. No markdown fences, no explanation.
+- Include only requirements that are genuinely implicit for this type of role.
+- Do not repeat any of the explicitly stated requirements.
+- Limit to 3-5 of the most important unstated requirements.
+- Use concise normalized labels (2-4 words each).
+""";
+
+        var userPrompt = $"""
+Role: {analysis.RoleTitle} at {analysis.CompanyName}
+Summary: {analysis.Summary}
+Explicit requirements already identified: {string.Join(", ", explicitRequirements)}
+
+What implicit requirements are likely expected but unstated for this role?
+""";
+
+        try
+        {
+            var response = await llmClient.GenerateAsync(
+                new LlmRequest(
+                    model,
+                    systemPrompt,
+                    [new LlmChatMessage("user", userPrompt)],
+                    UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                    Stream: false,
+                    Think: thinkingLevel,
+                    KeepAlive: ollamaOptions.KeepAlive,
+                    Temperature: 0.2),
+                progress is null ? null : update => progress(update with
+                {
+                    Message = "Inferring hidden requirements",
+                    Detail = string.IsNullOrWhiteSpace(update.Detail)
+                        ? "Analyzing implicit role expectations."
+                        : update.Detail
+                }),
+                cancellationToken);
+
+            var content = ExtractJsonArray(response.Content);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return Array.Empty<string>();
+            }
+
+            using var doc = JsonDocument.Parse(content, LenientJsonOptions);
+            return doc.RootElement.EnumerateArray()
+                .Where(static e => e.ValueKind == JsonValueKind.String)
+                .Select(static e => e.GetString()?.Trim())
+                .Where(static s => !string.IsNullOrWhiteSpace(s))
+                .Where(label => !explicitRequirements.Any(existing => existing.Equals(label, StringComparison.OrdinalIgnoreCase)))
+                .Take(5)
+                .ToArray()!;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private static string? ExtractJsonArray(string content)
+    {
+        var trimmed = content.Trim();
+        trimmed = Regex.Replace(trimmed, @"<think>.*?</think>", string.Empty, RegexOptions.Singleline).Trim();
+        trimmed = Regex.Replace(trimmed, @"```(?:json)?\s*\n?(.*?)\n?\s*```", "$1", RegexOptions.Singleline).Trim();
+        var start = trimmed.IndexOf('[');
+        var end = trimmed.LastIndexOf(']');
+        return start >= 0 && end > start ? trimmed[start..(end + 1)] : null;
+    }
+
     private string ResolveModel(string? selectedModel)
         => string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
 
@@ -1056,6 +1159,104 @@ Rules:
     {
         var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
         return match.Success ? StripHtml(match.Groups[1].Value).Trim() : null;
+    }
+
+    /// <summary>
+    /// Regex patterns matching boilerplate HTML elements to strip before extraction.
+    /// </summary>
+    private static readonly Regex BoilerplateTagPattern = new(
+        @"<(nav|header|footer|aside|noscript|iframe)[^>]*>.*?</\1>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static readonly Regex CookieBannerPattern = new(
+        @"<div[^>]*(cookie|consent|gdpr|privacy-banner|cc-banner)[^>]*>.*?</div>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extracts semantically meaningful content from HTML, prioritizing requirement-dense
+    /// sections and structured lists while dropping navigation, footers, and cookie banners.
+    /// Falls back to <see cref="StripHtml"/> if semantic extraction yields too little content.
+    /// </summary>
+    private static string ExtractSemanticContent(string html)
+    {
+        // Strip script, style, and boilerplate regions first.
+        var cleaned = Regex.Replace(html, @"<(script|style)[^>]*>.*?</\1>", string.Empty, RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        cleaned = BoilerplateTagPattern.Replace(cleaned, string.Empty);
+        cleaned = CookieBannerPattern.Replace(cleaned, string.Empty);
+
+        // Extract semantic sections: split on headings (h1-h6), keep content blocks.
+        var sections = Regex.Split(cleaned, @"(?=<h[1-6][^>]*>)", RegexOptions.IgnoreCase | RegexOptions.Singleline)
+            .Select(section =>
+            {
+                var headingMatch = Regex.Match(section, @"<h[1-6][^>]*>(.*?)</h[1-6]>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+                var heading = headingMatch.Success ? StripHtml(headingMatch.Groups[1].Value).Trim() : string.Empty;
+                var body = StripHtml(section);
+                return new { Heading = heading, Body = body, Length = body.Length };
+            })
+            .Where(section => !string.IsNullOrWhiteSpace(section.Body) && section.Length > 20)
+            .ToArray();
+
+        if (sections.Length == 0)
+        {
+            return StripHtml(html);
+        }
+
+        // Score sections: requirement-dense headings get priority.
+        var requirementHeadingKeywords = new[] {
+            "requirement", "qualification", "krav", "erfaring", "competenc", "skill",
+            "responsibility", "about the role", "what we", "you will", "du vil",
+            "what you", "om stillingen", "vi søger", "we are looking"
+        };
+
+        var prioritized = sections
+            .Select(section =>
+            {
+                var score = section.Length;
+                var headingLower = section.Heading.ToLowerInvariant();
+
+                // Boost sections whose headings indicate requirements.
+                if (requirementHeadingKeywords.Any(keyword => headingLower.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                {
+                    score += 5000;
+                }
+
+                // Boost sections containing list items (ul/li patterns in text).
+                var listItemCount = Regex.Matches(section.Body, @"^\s*[-•●◦]\s", RegexOptions.Multiline).Count;
+                score += listItemCount * 200;
+
+                return new { section.Heading, section.Body, Score = score };
+            })
+            .OrderByDescending(s => s.Score)
+            .ToArray();
+
+        // Assemble up to the char budget, taking highest-scoring sections first.
+        var result = new StringBuilder();
+        foreach (var section in prioritized)
+        {
+            if (result.Length + section.Body.Length > MaxJobContextCharacters)
+            {
+                var remaining = MaxJobContextCharacters - result.Length;
+                if (remaining > 100)
+                {
+                    if (!string.IsNullOrWhiteSpace(section.Heading))
+                    {
+                        result.AppendLine($"[{section.Heading}]");
+                    }
+                    result.AppendLine(section.Body[..remaining]);
+                }
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(section.Heading))
+            {
+                result.AppendLine($"[{section.Heading}]");
+            }
+            result.AppendLine(section.Body);
+            result.AppendLine();
+        }
+
+        var semanticText = result.ToString().Trim();
+        return semanticText.Length >= 200 ? semanticText : StripHtml(html);
     }
 
     private static string StripHtml(string html)

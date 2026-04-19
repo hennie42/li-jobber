@@ -21,6 +21,23 @@ public sealed class JobFitAnalysisService(CandidateEvidenceService candidateEvid
         ApplicantDifferentiatorProfile? differentiatorProfile = null)
     {
         var requirements = BuildRequirements(jobPosting, companyProfile);
+
+        // Append inferred (hidden) requirements as nice-to-have, avoiding duplicates.
+        if (jobPosting.InferredRequirements.Count > 0)
+        {
+            var existingLabels = requirements
+                .Select(static r => r.Requirement)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var inferred = jobPosting.InferredRequirements
+                .Where(label => !existingLabels.Contains(label))
+                .Select(static label => new FitRequirementContext("Inferred", label, JobRequirementImportance.NiceToHave))
+                .ToArray();
+            if (inferred.Length > 0)
+            {
+                requirements = [.. requirements, .. inferred];
+            }
+        }
+
         if (requirements.Count == 0)
         {
             return JobFitAssessment.Empty;
