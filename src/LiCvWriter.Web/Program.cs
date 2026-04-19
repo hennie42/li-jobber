@@ -52,7 +52,7 @@ builder.Services.AddSingleton<IInsightsDiscoveryPdfImporter, InsightsDiscoveryPd
 builder.Services.AddSingleton<IAuditStore, LocalMarkdownAuditStore>();
 builder.Services.AddSingleton<IDocumentRenderer, MarkdownDocumentRenderer>();
 builder.Services.AddSingleton<CvQualityValidator>();
-builder.Services.AddSingleton<IDocumentExportService, LocalDocumentExportService>();
+builder.Services.AddSingleton<IDocumentExportService, TemplateBasedDocumentExportService>();
 builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
 
 builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
@@ -109,6 +109,58 @@ app.MapGet("/api/health/ollama", async (ILlmClient client, CancellationToken can
 {
     var result = await client.VerifyModelAvailabilityAsync(cancellationToken);
     return Results.Ok(result);
+});
+
+// Opens a generated export (file or its containing folder) in the user's
+// default application via the OS shell. Paths are validated to be inside the
+// configured ExportRoot to prevent path traversal attacks.
+app.MapGet("/api/files/open", (string path, bool revealFolder, StorageOptions options) =>
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return Results.BadRequest("Path is required.");
+    }
+
+    var exportRoot = Path.GetFullPath(
+        Environment.ExpandEnvironmentVariables(options.ExportRoot.Replace('/', Path.DirectorySeparatorChar)));
+
+    string fullPath;
+    try
+    {
+        fullPath = Path.GetFullPath(path);
+    }
+    catch (ArgumentException)
+    {
+        return Results.BadRequest("Invalid path.");
+    }
+
+    if (!fullPath.StartsWith(exportRoot, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.BadRequest("Path is outside the configured export root.");
+    }
+
+    var target = revealFolder
+        ? Path.GetDirectoryName(fullPath) ?? fullPath
+        : fullPath;
+
+    if (!File.Exists(target) && !Directory.Exists(target))
+    {
+        return Results.NotFound();
+    }
+
+    try
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target)
+        {
+            UseShellExecute = true
+        });
+    }
+    catch (Exception exception)
+    {
+        return Results.Problem(exception.Message);
+    }
+
+    return Results.NoContent();
 });
 
 app.MapPost("/api/llm/operations/generate-drafts", (StartDraftGenerationOperationRequest request, LlmOperationBroker broker) =>

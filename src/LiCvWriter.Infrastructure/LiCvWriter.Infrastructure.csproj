@@ -18,5 +18,9 @@
     <PackageReference Include="Markdig" Version="1.1.2" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Documents\Templates\cv-template.dotx" />
+  </ItemGroup>
 </Project>
 

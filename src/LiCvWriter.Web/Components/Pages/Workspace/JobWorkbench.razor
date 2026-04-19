@@ -597,11 +597,15 @@ else if (CanRunFitReview)
         <ul class="feature-list">
             @foreach (var export in CurrentJobSet.Exports)
             {
-                <li>@export.Kind: @export.MarkdownPath</li>
-                @if (!string.IsNullOrWhiteSpace(export.WordPath))
-                {
-                    <li>@export.Kind (Word): @export.WordPath</li>
-                }
+                <li>
+                    <strong>@export.Kind</strong>:
+                    <a href="@BuildOpenFileUrl(export.FilePath, revealFolder: false)" target="_blank" rel="noopener">@Path.GetFileName(export.FilePath)</a>
+                    <span class="muted-text">
+                        (<a href="@BuildOpenFileUrl(export.FilePath, revealFolder: true)" target="_blank" rel="noopener">open folder</a>)
+                    </span>
+                    <br />
+                    <span class="muted-text">@export.FilePath</span>
+                </li>
             }
         </ul>
     </details>
@@ -1888,6 +1892,14 @@ else if (CanRunFitReview)
 
     private static string FormatTokenCount(long? tokens)
         => tokens?.ToString("N0") ?? "Pending";
+
+    /// <summary>
+    /// Builds a query-string URL for the file-open endpoint that opens the
+    /// exported file (or its containing folder when <paramref name="revealFolder"/>
+    /// is true) using the OS shell.
+    /// </summary>
+    private static string BuildOpenFileUrl(string filePath, bool revealFolder)
+        => $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder={(revealFolder ? "true" : "false")}";
 
     private LlmOperationSnapshot? GetActiveDraftStreamSnapshot()
         => activeStreamSnapshot is { Kind: "generate-drafts" } snapshot
