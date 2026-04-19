@@ -1,4 +1,6 @@
+using DocumentFormat.OpenXml.Packaging;
 using LiCvWriter.Application.Models;
+using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
@@ -112,6 +114,72 @@ public sealed class CvRenderingLiveDataVerificationTests
         var earlyCareerSection = ExtractSection(markdown, "## Early Career", "## Certifications");
         Assert.DoesNotContain("###", earlyCareerSection);
         Assert.Contains("- **", earlyCareerSection);
+    }
+
+    /// <summary>
+    /// Full pipeline: render markdown, export to .docx via template, and verify
+    /// that all sections are present in the Word document body text.
+    /// </summary>
+    [Fact]
+    public async Task ExportCv_WithRepresentativeData_AllSectionsAppearInDocx()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildRepresentativeRequest();
+        var rendered = await renderer.RenderAsync(request);
+        var markdown = rendered.Markdown;
+
+        var exportRoot = Path.Combine(Path.GetTempPath(), $"licvwriter-export-verify-{Guid.NewGuid():N}");
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = exportRoot });
+            var exportResult = await service.ExportAsync(rendered);
+
+            Assert.True(File.Exists(exportResult.FilePath), "Exported .docx must exist");
+
+            // Write markdown next to the docx for easy comparison
+            var mdPath = Path.ChangeExtension(exportResult.FilePath, ".md");
+            await File.WriteAllTextAsync(mdPath, markdown);
+
+            using var wordDoc = WordprocessingDocument.Open(exportResult.FilePath, isEditable: false);
+            var body = wordDoc.MainDocumentPart?.Document?.Body;
+            Assert.NotNull(body);
+            var allText = body.InnerText;
+
+            // Write the plain text dump for diagnostics
+            var txtPath = Path.ChangeExtension(exportResult.FilePath, ".txt");
+            await File.WriteAllTextAsync(txtPath, allText);
+
+            // Modern experience must be present
+            Assert.Contains("Senior Automation Architect", allText);
+            Assert.Contains("Senior Cloud Architect", allText);
+            Assert.Contains("Principal Consultant", allText);
+            Assert.Contains("Senior IT Consultant", allText);
+
+            // Client sub-items from the freelance umbrella
+            Assert.Contains("A. Datum Capital", allText);
+            Assert.Contains("Graphic Grove", allText);
+
+            // Early career must be present
+            Assert.Contains("Early Career", allText);
+            Assert.Contains("Legacy Design Studio", allText);
+            Assert.Contains("Alpine Systems", allText);
+            Assert.Contains("Proseware", allText);
+
+            // Certifications
+            Assert.Contains("Certifications", allText);
+            Assert.Contains("Certified Ethical Hacker", allText);
+
+            // Recommendations
+            Assert.Contains("Recommendations", allText);
+            Assert.Contains("Alex", allText);
+        }
+        finally
+        {
+            if (Directory.Exists(exportRoot))
+            {
+                // Leave files for manual inspection — don't clean up
+            }
+        }
     }
 
     /// <summary>

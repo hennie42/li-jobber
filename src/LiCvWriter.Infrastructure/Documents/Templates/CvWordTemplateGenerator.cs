@@ -25,7 +25,7 @@ public static class CvWordTemplateGenerator
         new("FitSnapshot", "Fit Snapshot", "[Strengths and overall fit score]"),
         new("Experience", "Professional Experience", "[Recent roles with title, company, period, and achievements]"),
         new("Projects", "Projects", "[Project entries with period, description, and links]"),
-        new("EarlyCareer", "Earlier Career", "[Pre-cutoff roles and projects]"),
+        new("EarlyCareer", "Early Career", "[Pre-cutoff roles and projects]"),
         new("Certifications", "Certifications", "[Selected certifications]"),
         new("Recommendations", "Recommendations", "[Recommendation quotes with attribution]"),
     ];
