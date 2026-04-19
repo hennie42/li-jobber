@@ -14,4 +14,5 @@ public sealed record DocumentRenderRequest(
     JobFitAssessment? JobFitAssessment = null,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     EvidenceSelectionResult? EvidenceSelection = null,
-    TechnologyGapAssessment? TechnologyGapAssessment = null);
+    TechnologyGapAssessment? TechnologyGapAssessment = null,
+    IReadOnlyList<CvSectionContent>? GeneratedSections = null);

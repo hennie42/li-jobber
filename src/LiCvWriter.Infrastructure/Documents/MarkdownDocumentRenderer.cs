@@ -43,9 +43,12 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         builder.AppendLine($"- {Translate(outputLanguage, "Company", "Virksomhed")}: {request.JobPosting.CompanyName}");
         builder.AppendLine();
 
-        var generatedBody = !string.IsNullOrWhiteSpace(request.GeneratedBody)
-            ? request.GeneratedBody.Trim()
-            : request.Candidate.Summary?.Trim();
+        var profileSection = FindSection(request.GeneratedSections, CvSection.ProfileSummary);
+        var generatedBody = !string.IsNullOrWhiteSpace(profileSection)
+            ? profileSection!.Trim()
+            : !string.IsNullOrWhiteSpace(request.GeneratedBody)
+                ? request.GeneratedBody.Trim()
+                : request.Candidate.Summary?.Trim();
 
         switch (request.Kind)
         {
@@ -65,8 +68,8 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
                 AppendProfileOverview(builder, generatedBody, request, selectedEvidence, outputLanguage);
                 AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
-                AppendExperienceList(builder, modernExperience, outputLanguage);
-                AppendProjects(builder, modernProjects, outputLanguage);
+                AppendExperienceList(builder, modernExperience, outputLanguage, FindSection(request.GeneratedSections, CvSection.ExperienceHighlights));
+                AppendProjects(builder, modernProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ProjectHighlights));
                 AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
                 AppendAllRecommendations(builder, request.Candidate, outputLanguage);
                 if (HasSelectedCertifications(selectedEvidence))
@@ -131,13 +134,19 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             builder.AppendLine();
         }
 
-        var technologies = BuildKeywordLine(request, selectedEvidence);
+        var keySkillsOverride = FindSection(request.GeneratedSections, CvSection.KeySkills);
+        var technologies = !string.IsNullOrWhiteSpace(keySkillsOverride)
+            ? keySkillsOverride!.Trim()
+            : BuildKeywordLine(request, selectedEvidence);
         if (!string.IsNullOrWhiteSpace(technologies))
         {
             builder.AppendLine($"**{Translate(outputLanguage, "Key Technologies & Competencies", "Nøgleteknologier og kompetencer")}:** {technologies}");
             builder.AppendLine();
         }
     }
+
+    private static string? FindSection(IReadOnlyList<CvSectionContent>? sections, CvSection section)
+        => sections?.FirstOrDefault(s => s.Section == section)?.Markdown;
 
     /// <summary>
     /// Builds a comma-separated keyword line from job themes and detected technologies,
@@ -176,7 +185,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     /// <summary>
     /// Renders all experience entries with ATS-standard section title and clear Title/Company/Date pattern.
     /// </summary>
-    private static void AppendExperienceList(StringBuilder builder, IReadOnlyList<ExperienceEntry> experience, OutputLanguage outputLanguage)
+    private static void AppendExperienceList(StringBuilder builder, IReadOnlyList<ExperienceEntry> experience, OutputLanguage outputLanguage, string? sectionOverride = null)
     {
         if (experience.Count == 0)
         {
@@ -185,6 +194,13 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         builder.AppendLine($"## {Translate(outputLanguage, "Professional Experience", "Erhvervserfaring")}");
         builder.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(sectionOverride))
+        {
+            builder.AppendLine(sectionOverride.Trim());
+            builder.AppendLine();
+            return;
+        }
 
         foreach (var role in experience.Take(12))
         {
@@ -207,7 +223,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     /// <summary>
     /// Renders candidate projects with title, period, description, and URL.
     /// </summary>
-    private static void AppendProjects(StringBuilder builder, IReadOnlyList<ProjectEntry> projects, OutputLanguage outputLanguage)
+    private static void AppendProjects(StringBuilder builder, IReadOnlyList<ProjectEntry> projects, OutputLanguage outputLanguage, string? sectionOverride = null)
     {
         if (projects.Count == 0)
         {
@@ -216,6 +232,13 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         builder.AppendLine($"## {Translate(outputLanguage, "Projects", "Projekter")}");
         builder.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(sectionOverride))
+        {
+            builder.AppendLine(sectionOverride.Trim());
+            builder.AppendLine();
+            return;
+        }
 
         foreach (var project in projects)
         {
