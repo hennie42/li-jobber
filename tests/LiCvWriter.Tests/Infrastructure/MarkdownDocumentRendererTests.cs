@@ -151,7 +151,7 @@ public sealed class MarkdownDocumentRendererTests
 
         var result = await renderer.RenderAsync(datedRequest);
 
-        Assert.Contains("## Earlier Career", result.Markdown);
+        Assert.Contains("## Early Career", result.Markdown);
         Assert.Contains("**Junior Engineer** | LegacyCorp", result.Markdown);
         Assert.Contains("**Legacy Platform Upgrade**", result.Markdown);
         Assert.Contains("### Lead Architect | Contoso", result.Markdown);
@@ -180,7 +180,7 @@ public sealed class MarkdownDocumentRendererTests
 
         var result = await renderer.RenderAsync(datedRequest);
 
-        Assert.Contains("## Earlier Career", result.Markdown);
+        Assert.Contains("## Early Career", result.Markdown);
         Assert.Contains("**Junior Engineer** | LegacyCorp", result.Markdown);
     }
 
