@@ -11,6 +11,10 @@ namespace LiCvWriter.Infrastructure.Llm;
 public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) : ILlmClient
 {
     private static readonly TimeSpan ProgressUpdateInterval = TimeSpan.FromMilliseconds(75);
+    private const int DefaultRepetitionMinLength = 500;
+    private const int RepetitionMinCycleLength = 20;
+    private const int RepetitionMaxCycleLength = 300;
+    private const int RepetitionRequiredRepeats = 3;
 
     public async Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
     {
@@ -258,6 +262,24 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completed |= chunk.Done;
             chunkCount++;
 
+            var repetitionMinLength = options.RepetitionDetectionMinLength > 0
+                ? options.RepetitionDetectionMinLength
+                : DefaultRepetitionMinLength;
+
+            if (!chunk.Done && DetectRepetitionLoop(thinking, repetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Ollama thinking output entered a repetition loop after {thinking.Length} characters. " +
+                    $"The model may need a lower temperature or a different prompt.");
+            }
+
+            if (!chunk.Done && DetectRepetitionLoop(content, repetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Ollama content output entered a repetition loop after {content.Length} characters. " +
+                    $"The model may need a lower temperature or a different prompt.");
+            }
+
             var hasStreamedVisibleContent = content.Length > 0 || thinking.Length > 0;
             var hasNewVisibleContent = content.Length != lastReportedContentLength || thinking.Length != lastReportedThinkingLength;
             if (hasStreamedVisibleContent && hasNewVisibleContent && (stopwatch.Elapsed >= nextProgressAt || chunk.Done))
@@ -410,6 +432,52 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             responseContent,
             thinkingContent,
             sequence));
+
+    /// <summary>
+    /// Detects whether a streaming text buffer has entered a repetition loop by checking
+    /// if the tail consists of a short pattern repeated multiple times consecutively.
+    /// </summary>
+    internal static bool DetectRepetitionLoop(StringBuilder buffer, int minLength)
+    {
+        if (minLength <= 0 || buffer.Length < minLength)
+        {
+            return false;
+        }
+
+        // Check a window at the tail of the buffer for repeating cycles.
+        var tailLength = Math.Min(buffer.Length, RepetitionMaxCycleLength * (RepetitionRequiredRepeats + 1));
+        var tailStart = buffer.Length - tailLength;
+        var tail = buffer.ToString(tailStart, tailLength);
+
+        for (var cycleLength = RepetitionMinCycleLength; cycleLength <= RepetitionMaxCycleLength; cycleLength++)
+        {
+            if (tail.Length < cycleLength * RepetitionRequiredRepeats)
+            {
+                break;
+            }
+
+            var candidate = tail[^cycleLength..];
+            var matched = 0;
+
+            for (var offset = tail.Length - cycleLength; offset >= cycleLength; offset -= cycleLength)
+            {
+                var segment = tail.Substring(offset - cycleLength, cycleLength);
+                if (!segment.Equals(candidate, StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                matched++;
+            }
+
+            if (matched >= RepetitionRequiredRepeats - 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string? BuildThinkingPreview(StringBuilder thinking)
     {

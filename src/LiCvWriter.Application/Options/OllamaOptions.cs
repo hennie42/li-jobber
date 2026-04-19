@@ -21,4 +21,10 @@ public sealed class OllamaOptions
     public string Think { get; set; } = "low";
 
     public double Temperature { get; set; } = 0.2;
+
+    /// <summary>
+    /// Minimum character count before repetition-loop detection kicks in during streaming.
+    /// Set to 0 or negative to disable. Default is 500.
+    /// </summary>
+    public int RepetitionDetectionMinLength { get; set; } = 500;
 }
