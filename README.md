@@ -4,7 +4,7 @@ Local-first AI-powered CV generation from LinkedIn data.
 
 ## Overview
 
-LI CV Writer is a local-first Blazor application that imports your LinkedIn profile through the DMA Portability API, analyzes target job postings, reviews candidate-job fit, ranks supporting evidence, and generates tailored application documents — all running on your machine with a local LLM via Ollama.
+LI CV Writer is a local-first Blazor application that imports your LinkedIn profile through the DMA Portability API (or a CSV data export), analyzes target job postings, reviews candidate-job fit, ranks supporting evidence, and generates tailored application documents — all running on your machine with a local LLM via Ollama.
 
 The application walks a senior professional through a structured pipeline: establish a session with a local model, import the full LinkedIn member snapshot, optionally capture applicant differentiators (manually or from an Insights Discovery PDF), then open parallel job tabs where each target role gets its own research, fit review, evidence ranking, technology gap analysis, and multi-document generation. LLM-backed job-context analysis, fit enhancement, technology-gap analysis, refresh-all, and draft generation stream progress into the UI through a brokered SSE pipeline, with persistent sidebar reasoning and status monitors. The output is a set of ATS-friendly Word (.docx) and Markdown files ready for direct submission.
 
@@ -18,24 +18,30 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 | Web framework | Blazor Server (interactive SSR) |
 | LLM inference | Ollama (local, `http://localhost:11434`) |
 | Architecture | Domain-Driven Design — Core → Application → Infrastructure → Web |
-| Profile import | LinkedIn DMA Portability API (`r_dma_portability_self_serve`) |
-| Word export | OpenXml SDK + HtmlToOpenXml + Markdig — built-in heading styles, Calibri, single-column ATS layout |
-| Testing | xUnit |
+| Profile import | LinkedIn DMA Portability API (`r_dma_portability_self_serve`) or CSV data export |
+| Word export | Embedded .dotx template with OpenXml content controls, Markdig, HtmlToOpenXml — built-in heading styles, Calibri, single-column ATS layout |
+| Testing | xUnit (206 tests) |
 
 ## Key Features
 
-- **LinkedIn DMA member snapshot import** — typed mapping of experience, education, skills, certifications, projects, recommendations, and enrichment domains
+- **LinkedIn DMA member snapshot import** — typed mapping of experience, education, skills, certifications, projects, recommendations, and enrichment domains; CSV data export import also supported
 - **LLM-powered job analysis** — structured parsing of job postings and company context pages
-- **Fit review with optional LLM enhancement** — deterministic apply / stretch / skip scoring with semantic enhancement when requested
-- **Ranked evidence selection** — interactive evidence ranking by requirement alignment, differentiator alignment, and recommendation strength
+- **Fit review with optional LLM enhancement** — deterministic apply / stretch / skip scoring with semantic enhancement when requested; fingerprint-based caching skips redundant recalculations
+- **Ranked evidence selection** — interactive multi-criteria evidence ranking by requirement alignment, differentiator alignment, and recommendation strength
 - **Technology gap analysis** — surfaces underrepresented technologies from the target role
+- **Two-pass CV generation** — first pass generates experience highlights, refinement pass fills must-have theme gaps with grounded evidence
+- **Template-based Word export** — embedded .dotx template with named content controls, ATS-friendly unwrapping, hyperlink flattening, and underline stripping
+- **Early career separation** — roles ending before 2009 rendered in a compact "Early Career" section; modern roles get full detail with achievement bullets
+- **Umbrella role detection** — consulting roles covering 3+ projects shown with client sub-items inline
 - **Multi-document generation** — CV, cover letter, profile summary, and interview notes per job tab
-- **Word + Markdown export** — ATS/AI-friendly .docx with built-in heading styles, keyword-rich professional profile, and all recommendations with language detection and translation annotation
+- **Output language selection** — English or Danish per job tab, with automatic recommendation translation annotation
 - **Applicant differentiator profiling** — manual capture or automated drafting from Insights Discovery PDF
 - **Brokered streaming UI** — SSE-backed operations keep the workbench responsive while reasoning and status stream into dual retro CRT sidebar monitors
-- **Session model control** — change model and thinking later in the session; rerun completed analysis or draft generation when you want outputs refreshed with the new settings
+- **Repetition loop detection** — automatically aborts LLM streaming when thinking or content output enters a degenerate repetition cycle
+- **Session model control** — change model and thinking level at any time; rerun completed analysis or draft generation with the new settings
+- **Refresh-all orchestration** — single-button re-analysis of job context, fit review, and technology gaps with shared progress streaming
+- **Workspace recovery** — full session state persists across restarts via JSON snapshot
 - **Session diagnostics** — detailed telemetry, import diagnostics, response capture, and audit trail
-- **Workspace recovery** — session state persists across restarts
 
 ## Workflow
 
@@ -50,8 +56,9 @@ graph TD
     G --> H[Fit review, evidence ranking, and optional LLM enhancement]
     H --> I[Optional technology gap check]
     I --> J[Generate and export Word + Markdown drafts]
-    F --> K[Session Diagnostics]
-    J --> K
+    J --> K[Two-pass refinement for must-have theme coverage]
+    F --> L[Refresh All — rerun analysis pipeline in one step]
+    F --> M[Session Diagnostics]
 ```
 
 ## Prerequisites
@@ -59,7 +66,7 @@ graph TD
 - .NET 10 SDK
 - Ollama running locally at `http://localhost:11434`
 - At least one locally installed Ollama model
-- A LinkedIn DMA portability access token with `r_dma_portability_self_serve` — see the [LinkedIn DMA docs](https://learn.microsoft.com/en-us/linkedin/dma/member-data-portability/member-data-portability-member/?view=li-dma-data-portability-2025-11)
+- A LinkedIn DMA portability access token with `r_dma_portability_self_serve` — see the [LinkedIn DMA docs](https://learn.microsoft.com/en-us/linkedin/dma/member-data-portability/member-data-portability-member/?view=li-dma-data-portability-2025-11) — or a LinkedIn CSV data export
 
 ## Running Locally
 
