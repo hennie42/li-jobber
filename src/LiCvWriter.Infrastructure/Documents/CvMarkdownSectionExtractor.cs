@@ -148,7 +148,7 @@ internal static class CvMarkdownSectionExtractor
             if (IsHeadingLine(lines[index], out var headingText)
                 && MatchesHeading(headingText, englishHeading, danishHeading))
             {
-                startIndex = index + 1;
+                startIndex = index;
                 break;
             }
         }
@@ -159,7 +159,7 @@ internal static class CvMarkdownSectionExtractor
         }
 
         var endIndex = lines.Length;
-        for (var index = startIndex; index < lines.Length; index++)
+        for (var index = startIndex + 1; index < lines.Length; index++)
         {
             if (IsHeadingLine(lines[index], out _))
             {
