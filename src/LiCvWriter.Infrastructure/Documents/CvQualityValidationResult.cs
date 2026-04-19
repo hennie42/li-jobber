@@ -18,7 +18,8 @@ public sealed record CvQualityReport(
     IReadOnlyList<string> TrimmedOptionalSections,
     IReadOnlyList<string> AppliedFixes,
     IReadOnlyList<string> MissingMustHaveThemes = null!,
-    int AtsKeywordCoveragePercent = 0)
+    int AtsKeywordCoveragePercent = 0,
+    int EstimatedPageCount = 0)
 {
-    public static CvQualityReport Empty { get; } = new(0, 0, false, false, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), 0);
+    public static CvQualityReport Empty { get; } = new(0, 0, false, false, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), 0, 0);
 }

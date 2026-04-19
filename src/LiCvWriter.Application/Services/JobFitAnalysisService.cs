@@ -97,7 +97,45 @@ public sealed class JobFitAnalysisService(CandidateEvidenceService candidateEvid
         var supportingEvidence = FindSupportingEvidence(aliases, evidenceCatalog);
         var differentiatorMatch = MatchesDifferentiator(aliases, differentiatorProfile);
         var match = DetermineMatch(supportingEvidence, differentiatorMatch);
-        var rationale = BuildRationale(match, supportingEvidence, differentiatorMatch);
+
+        // When a requirement is Missing, check for transferable skills that demonstrate
+        // adjacent capability and upgrade to Partial with a specific rationale.
+        IReadOnlyList<string> transferableMatches = Array.Empty<string>();
+        if (match == JobRequirementMatch.Missing)
+        {
+            var transferable = TransferableSkillsMatrix.GetTransferableSkills(requirement.Requirement);
+            if (transferable.Count > 0)
+            {
+                var transferableEvidence = transferable
+                    .SelectMany(skill =>
+                    {
+                        var skillAliases = JobSignalExtractor.GetAliases(skill);
+                        return FindSupportingEvidence(skillAliases, evidenceCatalog)
+                            .Select(e => (Skill: skill, Evidence: e));
+                    })
+                    .Where(pair => pair.Evidence.Type is CandidateEvidenceType.Experience or CandidateEvidenceType.Project)
+                    .ToArray();
+
+                if (transferableEvidence.Length > 0)
+                {
+                    match = JobRequirementMatch.Partial;
+                    transferableMatches = transferableEvidence
+                        .Select(static pair => pair.Skill)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(3)
+                        .ToArray();
+                    supportingEvidence = transferableEvidence
+                        .Select(static pair => pair.Evidence)
+                        .DistinctBy(static e => e.Id, StringComparer.OrdinalIgnoreCase)
+                        .Take(3)
+                        .ToArray();
+                }
+            }
+        }
+
+        var rationale = transferableMatches.Count > 0
+            ? $"No direct {requirement.Requirement} experience, but transferable skills via {string.Join(", ", transferableMatches)} ({string.Join(", ", supportingEvidence.Select(static e => e.Title).Take(2))})."
+            : BuildRationale(match, supportingEvidence, differentiatorMatch);
 
         return new JobRequirementAssessment(
             requirement.Category,
