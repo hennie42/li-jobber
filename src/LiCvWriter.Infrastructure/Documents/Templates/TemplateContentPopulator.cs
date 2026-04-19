@@ -2,6 +2,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using HtmlToOpenXml;
+using LiCvWriter.Infrastructure.Workflows;
 using Markdig;
 
 namespace LiCvWriter.Infrastructure.Documents.Templates;
@@ -51,7 +52,8 @@ public static class TemplateContentPopulator
 
         content.RemoveAllChildren();
 
-        var html = Markdown.ToHtml(markdownContent.Trim(), MarkdownPipeline);
+        var normalized = LlmMarkdownNormalizer.Normalize(markdownContent);
+        var html = Markdown.ToHtml(normalized.Trim(), MarkdownPipeline);
         var elements = ConvertHtmlToBlockElements(mainPart, html);
 
         if (elements.Count == 0)
@@ -59,6 +61,22 @@ public static class TemplateContentPopulator
             // Always leave at least an empty paragraph so the document remains valid.
             content.AppendChild(new Paragraph());
             return true;
+        }
+
+        // Post-process: flatten hyperlinks into plain runs so ATS and print
+        // consumers don't see spurious underlines from HtmlToOpenXml's
+        // automatic link generation.
+        foreach (var element in elements)
+        {
+            FlattenHyperlinks(element);
+        }
+
+        // Strip any remaining underline formatting that survived hyperlink
+        // flattening (e.g. from <ins>, <u>, or emphasis-extra markdown
+        // extensions). CV body text should never contain underlined fragments.
+        foreach (var element in elements)
+        {
+            StripUnderlines(element);
         }
 
         foreach (var element in elements)
@@ -99,6 +117,53 @@ public static class TemplateContentPopulator
     }
 
     /// <summary>
+    /// Lifts every remaining <see cref="SdtBlock"/>'s content out of its
+    /// structured-document-tag wrapper so the saved document contains plain
+    /// paragraphs/lists/headings only. ATS parsers and LLM-based CV readers
+    /// often skip or mishandle SDT-wrapped content; unwrapping makes the
+    /// document portable for downstream consumers.
+    /// </summary>
+    /// <param name="body">The document body to unwrap.</param>
+    /// <returns>The number of SDT wrappers removed.</returns>
+    public static int UnwrapAllSdtBlocks(Body body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        // Materialize first because we mutate the tree as we iterate.
+        var sdtBlocks = body.Descendants<SdtBlock>().ToArray();
+        var removed = 0;
+
+        foreach (var sdt in sdtBlocks)
+        {
+            var parent = sdt.Parent;
+            if (parent is null)
+            {
+                continue;
+            }
+
+            var content = sdt.GetFirstChild<SdtContentBlock>();
+            if (content is null)
+            {
+                sdt.Remove();
+                removed++;
+                continue;
+            }
+
+            var children = content.ChildElements.ToArray();
+            foreach (var child in children)
+            {
+                child.Remove();
+                parent.InsertBefore(child, sdt);
+            }
+
+            sdt.Remove();
+            removed++;
+        }
+
+        return removed;
+    }
+
+    /// <summary>
     /// Returns the <see cref="SdtBlock"/> whose <see cref="Tag.Val"/> matches
     /// <paramref name="tag"/>, or <see langword="null"/> when no such control exists.
     /// </summary>
@@ -116,14 +181,59 @@ public static class TemplateContentPopulator
     }
 
     /// <summary>
+    /// Replaces <see cref="Hyperlink"/> elements inside <paramref name="element"/>
+    /// with their child <see cref="Run"/>s so the text renders as normal body
+    /// text without underline or link colour. HtmlToOpenXml automatically
+    /// converts <c>&lt;a href&gt;</c> tags to hyperlinks, but CV body text
+    /// should not contain clickable links or underlined fragments.
+    /// </summary>
+    private static void FlattenHyperlinks(OpenXmlElement element)
+    {
+        var hyperlinks = element.Descendants<Hyperlink>().ToArray();
+        foreach (var hyperlink in hyperlinks)
+        {
+            var parent = hyperlink.Parent;
+            if (parent is null)
+            {
+                continue;
+            }
+
+            var runs = hyperlink.Elements<Run>().ToArray();
+            foreach (var run in runs)
+            {
+                // Strip underline and blue colour that HtmlToOpenXml adds for links.
+                var rpr = run.RunProperties;
+                rpr?.RemoveAllChildren<Underline>();
+                rpr?.RemoveAllChildren<Color>();
+
+                run.Remove();
+                parent.InsertBefore(run, hyperlink);
+            }
+
+            hyperlink.Remove();
+        }
+    }
+
+    /// <summary>
+    /// Removes all <see cref="Underline"/> elements from runs inside
+    /// <paramref name="element"/> so no text in the CV appears underlined.
+    /// </summary>
+    private static void StripUnderlines(OpenXmlElement element)
+    {
+        foreach (var underline in element.Descendants<Underline>().ToArray())
+        {
+            underline.Remove();
+        }
+    }
+
+    /// <summary>
     /// Converts an HTML fragment into block-level OpenXml elements suitable for
     /// inserting into a content control. Uses <see cref="HtmlConverter"/> to
     /// parse the HTML, captures the elements it appends to the document body,
     /// then detaches them so the caller can place them where needed.
     /// </summary>
     private static List<OpenXmlElement> ConvertHtmlToBlockElements(MainDocumentPart mainPart, string html)
-    {
-        var body = mainPart.Document?.Body
+    {        var body = mainPart.Document?.Body
             ?? throw new InvalidOperationException("Document body is missing — cannot convert HTML.");
         var existingChildren = body.ChildElements.ToHashSet();
 

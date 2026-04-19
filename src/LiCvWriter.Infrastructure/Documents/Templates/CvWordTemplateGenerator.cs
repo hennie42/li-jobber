@@ -91,12 +91,12 @@ public static class CvWordTemplateGenerator
             new PageSize { Width = 12240, Height = 15840 },
             new PageMargin
             {
-                Top = 1440,
-                Right = 1440,
-                Bottom = 1440,
-                Left = 1440,
-                Header = 720,
-                Footer = 720,
+                Top = 864,   // 0.6 in
+                Right = 1080, // 0.75 in
+                Bottom = 864, // 0.6 in
+                Left = 1080,  // 0.75 in
+                Header = 432,
+                Footer = 432,
                 Gutter = 0
             },
             new Columns { Space = "720", ColumnCount = 1 },
@@ -108,9 +108,9 @@ public static class CvWordTemplateGenerator
         var stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>();
         stylesPart.Styles = new Styles(
             CreateBodyStyle(),
-            CreateHeadingStyle("Heading1", "heading 1", fontSize: "28"),
-            CreateHeadingStyle("Heading2", "heading 2", fontSize: "24"),
-            CreateHeadingStyle("Heading3", "heading 3", fontSize: "22"));
+            CreateHeadingStyle("Heading1", "heading 1", fontSize: "26"),
+            CreateHeadingStyle("Heading2", "heading 2", fontSize: "22"),
+            CreateHeadingStyle("Heading3", "heading 3", fontSize: "20"));
         stylesPart.Styles.Save();
     }
 
@@ -126,13 +126,13 @@ public static class CvWordTemplateGenerator
                         HighAnsi = "Calibri",
                         ComplexScript = "Calibri"
                     },
-                    new FontSize { Val = "22" })),
+                    new FontSize { Val = "20" })),
             new ParagraphPropertiesDefault(
                 new ParagraphPropertiesBaseStyle(
                     new SpacingBetweenLines
                     {
-                        After = "120",
-                        Line = "276",
+                        After = "40",
+                        Line = "240",
                         LineRule = LineSpacingRuleValues.Auto
                     }))));
         stylesPart.Styles.Save();
@@ -149,13 +149,13 @@ public static class CvWordTemplateGenerator
                     HighAnsi = "Calibri",
                     ComplexScript = "Calibri"
                 },
-                new FontSize { Val = "22" },
+                new FontSize { Val = "20" },
                 new Color { Val = "000000" }),
             new StyleParagraphProperties(
                 new SpacingBetweenLines
                 {
-                    After = "120",
-                    Line = "276",
+                    After = "40",
+                    Line = "240",
                     LineRule = LineSpacingRuleValues.Auto
                 }))
         {
@@ -182,7 +182,7 @@ public static class CvWordTemplateGenerator
                 new FontSize { Val = fontSize },
                 new Color { Val = "1F1F1F" }),
             new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "240", After = "120" }))
+                new SpacingBetweenLines { Before = "120", After = "40" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = styleId

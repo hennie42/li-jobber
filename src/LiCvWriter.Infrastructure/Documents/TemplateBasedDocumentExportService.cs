@@ -31,15 +31,15 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
     /// </summary>
     private static readonly IReadOnlyList<CvSectionMapping> CvSectionMappings =
     [
-        new("CandidateHeader", null, CvMarkdownSectionExtractor.ExtractCandidateHeader),
-        new("ProfileSummary", CvSection.ProfileSummary, CvMarkdownSectionExtractor.ExtractProfileSummary),
-        new("KeySkills", CvSection.KeySkills, CvMarkdownSectionExtractor.ExtractKeySkills),
-        new("FitSnapshot", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Fit Snapshot", "Matchvurdering")),
-        new("Experience", CvSection.ExperienceHighlights, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
-        new("Projects", CvSection.ProjectHighlights, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
-        new("EarlyCareer", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early career", "Tidlig karriere")),
-        new("Recommendations", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
-        new("Certifications", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
+        new("CandidateHeader", null, null, CvMarkdownSectionExtractor.ExtractCandidateHeader),
+        new("ProfileSummary", CvSection.ProfileSummary, "Professional Profile", CvMarkdownSectionExtractor.ExtractProfileSummary),
+        new("KeySkills", CvSection.KeySkills, "Key Technologies & Competencies", CvMarkdownSectionExtractor.ExtractKeySkills),
+        new("FitSnapshot", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Fit Snapshot", "Matchvurdering")),
+        new("Experience", CvSection.ExperienceHighlights, "Professional Experience", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
+        new("Projects", CvSection.ProjectHighlights, "Projects", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
+        new("EarlyCareer", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early career", "Tidlig karriere")),
+        new("Recommendations", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
+        new("Certifications", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
     ];
 
     public async Task<DocumentExportResult> ExportAsync(GeneratedDocument document, CancellationToken cancellationToken = default)
@@ -63,7 +63,6 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
 
         return new DocumentExportResult(document.Kind, wordPath);
     }
-
     /// <summary>
     /// Clones the embedded CV template, splits the rendered CV markdown into
     /// sections, populates each tagged content control, and removes any
@@ -90,7 +89,7 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         var mainPart = wordDoc.MainDocumentPart
             ?? throw new InvalidOperationException("CV template is missing its main document part.");
 
-        SetCoreProperties(wordDoc, document.Title, document.Kind.ToString());
+        SetCoreProperties(wordDoc, document);
 
         var populatedTags = new HashSet<string>(StringComparer.Ordinal);
 
@@ -106,12 +105,23 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         foreach (var mapping in CvSectionMappings)
         {
             string? sectionMarkdown = null;
+            var usedRawSection = false;
             if (mapping.GeneratedSection is { } gs && generatedSectionLookup.TryGetValue(gs, out var generated))
             {
                 sectionMarkdown = generated;
+                usedRawSection = true;
             }
 
             sectionMarkdown ??= mapping.Extract(document.Markdown);
+
+            // When the raw LLM section is used directly (not extracted from the
+            // assembled markdown), it lacks the "## Section Title" heading the
+            // renderer normally prepends. Add it so the exported document has a
+            // visible section heading inside each content control.
+            if (usedRawSection && mapping.SectionHeading is not null && !string.IsNullOrWhiteSpace(sectionMarkdown))
+            {
+                sectionMarkdown = $"## {mapping.SectionHeading}\n\n{sectionMarkdown}";
+            }
 
             if (TemplateContentPopulator.PopulateContentControl(mainPart, mapping.Tag, sectionMarkdown))
             {
@@ -119,9 +129,16 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
             }
         }
 
-        TemplateContentPopulator.RemoveEmptyControls(
-            mainPart.Document?.Body ?? throw new InvalidOperationException("CV template body missing."),
-            populatedTags);
+        var body = mainPart.Document?.Body
+            ?? throw new InvalidOperationException("CV template body missing.");
+
+        TemplateContentPopulator.RemoveEmptyControls(body, populatedTags);
+
+        // Unwrap remaining structured-document-tag (SdtBlock) wrappers so the
+        // saved document contains plain paragraphs/lists/headings. Many ATS
+        // parsers (Workday, Taleo, Greenhouse) and most LLM-based CV parsers
+        // treat SDT-wrapped content as opaque or skip it entirely.
+        TemplateContentPopulator.UnwrapAllSdtBlocks(body);
 
         mainPart.Document!.Save();
     }
@@ -136,7 +153,7 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         var html = Markdown.ToHtml(document.Markdown, MarkdownPipeline);
 
         using var wordDoc = WordprocessingDocument.Create(outputPath, WordprocessingDocumentType.Document);
-        SetCoreProperties(wordDoc, document.Title, document.Kind.ToString());
+        SetCoreProperties(wordDoc, document);
 
         var mainPart = wordDoc.AddMainDocumentPart();
         mainPart.Document = new Document(new Body());
@@ -150,18 +167,30 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         mainPart.Document.Save();
     }
 
-    private static void SetCoreProperties(WordprocessingDocument document, string title, string subject)
+    private static void SetCoreProperties(WordprocessingDocument document, GeneratedDocument generated)
     {
         var properties = document.CoreFilePropertiesPart
             ?? document.AddCoreFilePropertiesPart();
+
+        var keywords = string.Join(", ", new[]
+            {
+                generated.Title,
+                generated.Kind.ToString()
+            }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        var description = $"{generated.Kind} generated by LiCvWriter on {generated.GeneratedAtUtc:yyyy-MM-dd}.";
 
         using var stream = properties.GetStream(FileMode.Create);
         using var writer = new System.Xml.XmlTextWriter(stream, System.Text.Encoding.UTF8);
         writer.WriteStartDocument();
         writer.WriteStartElement("cp", "coreProperties", "http://schemas.openxmlformats.org/package/2006/metadata/core-properties");
         writer.WriteAttributeString("xmlns", "dc", null, "http://purl.org/dc/elements/1.1/");
-        writer.WriteElementString("dc", "title", "http://purl.org/dc/elements/1.1/", title);
-        writer.WriteElementString("dc", "subject", "http://purl.org/dc/elements/1.1/", subject);
+        writer.WriteElementString("dc", "title", "http://purl.org/dc/elements/1.1/", generated.Title);
+        writer.WriteElementString("dc", "subject", "http://purl.org/dc/elements/1.1/", generated.Kind.ToString());
+        writer.WriteElementString("dc", "creator", "http://purl.org/dc/elements/1.1/", "LiCvWriter");
+        writer.WriteElementString("dc", "description", "http://purl.org/dc/elements/1.1/", description);
+        writer.WriteElementString("cp", "keywords", "http://schemas.openxmlformats.org/package/2006/metadata/core-properties", keywords);
         writer.WriteEndElement();
         writer.WriteEndDocument();
     }
@@ -249,5 +278,5 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         return string.Concat(value.Select(character => invalid.Contains(character) ? '-' : character));
     }
 
-    private sealed record CvSectionMapping(string Tag, CvSection? GeneratedSection, Func<string, string?> Extract);
+    private sealed record CvSectionMapping(string Tag, CvSection? GeneratedSection, string? SectionHeading, Func<string, string?> Extract);
 }

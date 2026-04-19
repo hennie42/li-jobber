@@ -1,4 +1,5 @@
 @using LiCvWriter.Application.Models
+@using System.IO
 
 <div class="overview-row">
     <div class="overview-row-header">
@@ -41,7 +42,17 @@
         }
         @if (JobSet.Exports.Count > 0)
         {
-            <span class="meta-chip">@JobSet.Exports.Count export(s)</span>
+            @foreach (var export in JobSet.Exports)
+            {
+                @if (!string.IsNullOrWhiteSpace(export.FilePath))
+                {
+                    <a class="meta-chip meta-chip-link" href="@BuildOpenFileUrl(export.FilePath)" target="_blank" rel="noopener">@export.Kind: @Path.GetFileName(export.FilePath)</a>
+                }
+                else
+                {
+                    <span class="meta-chip">@export.Kind</span>
+                }
+            }
         }
     </div>
 
@@ -82,4 +93,7 @@
         JobSetSourceLanguage.Danish => "Danish",
         _ => "Auto"
     };
+
+    private static string BuildOpenFileUrl(string filePath)
+        => $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder=false";
 }

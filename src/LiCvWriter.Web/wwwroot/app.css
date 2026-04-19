@@ -1427,6 +1427,16 @@ textarea.inline-edit-input {
   font-size: 0.8rem;
 }
 
+a.meta-chip-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.meta-chip-link:hover {
+  background: rgba(0, 0, 0, 0.12);
+  text-decoration: underline;
+}
+
 
 /* -- Per-jobset page strip ----------------- */
 

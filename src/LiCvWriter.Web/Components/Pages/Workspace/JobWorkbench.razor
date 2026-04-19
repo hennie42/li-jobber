@@ -150,7 +150,7 @@ else
     </section>
 }
 
-<details class="card-panel stack-gap" open>
+<details class="card-panel stack-gap" open="@(analysis is null)">
     <summary><h3>Research</h3></summary>
 
     @if (CurrentJobSet.InputMode == JobSetInputMode.LinkToUrls)
@@ -274,7 +274,7 @@ else
 
 @if (CurrentJobSet.JobFitAssessment.HasSignals)
 {
-    <details class="card-panel stack-gap" open>
+    <details class="card-panel stack-gap">
         <summary>
             <div class="fit-header">
                 <div>
@@ -374,7 +374,7 @@ else if (CanRunFitReview)
 
 @if (Workspace.CandidateProfile is not null && CurrentJobSet.TechnologyGapAssessment.HasSignals)
 {
-    <details class="card-panel stack-gap" open>
+    <details class="card-panel stack-gap">
         <summary><h3>Technology gap check</h3></summary>
 
         <p class="muted-text">This LLM-based check compares the current job context with profile skills, experience, projects, certifications, headline, summary, and manual notes.</p>
@@ -426,7 +426,7 @@ else if (CurrentJobSet.JobPosting is not null)
 
 @if (CurrentJobSet.EvidenceSelection.HasSignals)
 {
-    <details class="card-panel stack-gap" open>
+    <details class="card-panel stack-gap">
         <summary>
             <div class="fit-header">
                 <div>
@@ -484,7 +484,7 @@ else if (CanRunFitReview)
     </details>
 }
 
-<details class="card-panel stack-gap" open>
+<details class="card-panel stack-gap" open="@(CurrentJobSet.GeneratedDocuments.Count == 0)">
     <summary><h3>Draft generation</h3></summary>
 
     <div class="status-chip @(Workspace.CanStartDraftGenerationForJobSet(JobSetId!) ? "status-ok" : "status-pending")">
@@ -610,6 +610,7 @@ else if (CanRunFitReview)
         </ul>
     </details>
 }
+
 }
 
 @code {
@@ -1898,8 +1899,15 @@ else if (CanRunFitReview)
     /// exported file (or its containing folder when <paramref name="revealFolder"/>
     /// is true) using the OS shell.
     /// </summary>
-    private static string BuildOpenFileUrl(string filePath, bool revealFolder)
-        => $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder={(revealFolder ? "true" : "false")}";
+    private static string BuildOpenFileUrl(string? filePath, bool revealFolder)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return "#";
+        }
+
+        return $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder={(revealFolder ? "true" : "false")}";
+    }
 
     private LlmOperationSnapshot? GetActiveDraftStreamSnapshot()
         => activeStreamSnapshot is { Kind: "generate-drafts" } snapshot

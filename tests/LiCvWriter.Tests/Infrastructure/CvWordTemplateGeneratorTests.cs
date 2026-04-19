@@ -8,6 +8,25 @@ namespace LiCvWriter.Tests.Infrastructure;
 public sealed class CvWordTemplateGeneratorTests
 {
     [Fact]
+    public void RegenerateEmbeddedTemplate()
+    {
+        // Walk up from the test output directory to find the repo root,
+        // then overwrite the embedded template so the build picks it up.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "LiCvWriter.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        var templatePath = Path.Combine(dir.FullName,
+            "src", "LiCvWriter.Infrastructure", "Documents", "Templates", "cv-template.dotx");
+
+        CvWordTemplateGenerator.Generate(templatePath);
+        Assert.True(File.Exists(templatePath));
+    }
+
+    [Fact]
     public void Generate_ProducesTemplateWithAllTaggedSections()
     {
         var outputPath = Path.Combine(
