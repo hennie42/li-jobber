@@ -81,8 +81,9 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains("Trust", result.CulturalSignals);
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.Confidence == 97 && signal.SourceLabel == "jobs.example.test");
         Assert.Contains(result.Signals, signal => signal.Requirement == "Azure" && signal.EffectiveAliases.Contains("azure platform"));
-        Assert.Equal("session-model", llmClient.LastRequest!.Model);
-        Assert.Equal("high", llmClient.LastRequest.Think);
+        Assert.Equal("session-model", llmClient.AllRequests[0].Model);
+        Assert.Equal("low", llmClient.AllRequests[0].Think);
+        Assert.Equal(4_096, llmClient.AllRequests[0].NumPredict);
     }
 
     [Fact]
@@ -555,6 +556,103 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains(result.MustHaveThemes, theme => theme.Equals("Azure", StringComparison.OrdinalIgnoreCase));
       }
 
+      [Theory]
+      [InlineData("high", "low")]
+      [InlineData("medium", "low")]
+      [InlineData("low", "low")]
+      [InlineData("off", "off")]
+      public void ResolveExtractionThinkingLevel_CapsHighAndMediumToLow(string input, string expected)
+      {
+          Assert.Equal(expected, HttpJobResearchService.ResolveExtractionThinkingLevel(input));
+      }
+
+      [Fact]
+      public async Task AnalyzeAsync_CapsThinkingToLowForExtraction()
+      {
+          var handler = new StubHttpMessageHandler(_ =>
+              CreateHtmlResponse(
+              """
+              <html>
+                <head><title>DevOps Engineer</title></head>
+                <body><h1>DevOps Engineer</h1><p>Must have CI/CD experience.</p></body>
+              </html>
+              """));
+
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "roleTitle": "DevOps Engineer",
+                "companyName": "Acme",
+                "summary": "Build CI/CD pipelines.",
+                "requirements": [
+                  {
+                    "category": "Must have",
+                    "requirement": "CI/CD",
+                    "sourceSnippet": "Must have CI/CD experience.",
+                    "confidence": 95,
+                    "sourceUrl": "https://jobs.example.test/devops"
+                  }
+                ]
+              }
+              """);
+          var service = new HttpJobResearchService(new HttpClient(handler), llmClient, new OllamaOptions());
+
+          await service.AnalyzeAsync(new Uri("https://jobs.example.test/devops"), "model", "high");
+
+          Assert.Equal("low", llmClient.AllRequests[0].Think);
+          Assert.Equal(4_096, llmClient.AllRequests[0].NumPredict);
+          // Second call is InferHiddenRequirementsAsync — also capped.
+          Assert.Equal("low", llmClient.AllRequests[1].Think);
+          Assert.Equal(2_048, llmClient.AllRequests[1].NumPredict);
+      }
+
+      [Fact]
+      public async Task BuildCompanyProfileAsync_CapsThinkingAndSetsNumPredict()
+      {
+          var handler = new StubHttpMessageHandler(_ =>
+              CreateHtmlResponse("<html><body><p>Acme builds software.</p></body></html>"));
+
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "name": "Acme",
+                "summary": "Acme builds software.",
+                "guidingPrinciples": ["Innovation"],
+                "differentiators": ["Speed"],
+                "requirements": []
+              }
+              """);
+          var service = new HttpJobResearchService(new HttpClient(handler), llmClient, new OllamaOptions());
+
+          await service.BuildCompanyProfileAsync([new Uri("https://company.example.test/about")], "model", "high");
+
+          Assert.Equal("low", llmClient.LastRequest!.Think);
+          Assert.Equal(4_096, llmClient.LastRequest.NumPredict);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_CapsThinkingAndSetsNumPredict()
+      {
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "roleTitle": "Engineer",
+                "companyName": "Acme",
+                "summary": "Build things.",
+                "requirements": []
+              }
+              """);
+          var service = new HttpJobResearchService(
+              new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException())),
+              llmClient,
+              new OllamaOptions());
+
+          await service.AnalyzeTextAsync("Engineer at Acme. Build things.", "model", "medium");
+
+          Assert.Equal("low", llmClient.LastRequest!.Think);
+          Assert.Equal(4_096, llmClient.LastRequest.NumPredict);
+      }
+
       private static HttpResponseMessage CreateHtmlResponse(string html)
         => new(HttpStatusCode.OK)
         {
@@ -570,6 +668,7 @@ public sealed class HttpJobResearchServiceTests
       private sealed class FakeLlmClient(string content) : ILlmClient
       {
         public LlmRequest? LastRequest { get; private set; }
+        public List<LlmRequest> AllRequests { get; } = [];
 
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
           => throw new NotSupportedException();
@@ -580,6 +679,7 @@ public sealed class HttpJobResearchServiceTests
           CancellationToken cancellationToken = default)
         {
           LastRequest = request;
+          AllRequests.Add(request);
           return Task.FromResult(new LlmResponse(request.Model, content, null, true, 12, 34, TimeSpan.FromSeconds(2)));
         }
       }

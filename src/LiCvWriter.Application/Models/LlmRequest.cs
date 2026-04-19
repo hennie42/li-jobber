@@ -8,4 +8,5 @@ public sealed record LlmRequest(
     bool Stream = false,
     string? Think = null,
     string? KeepAlive = null,
-    double? Temperature = null);
+    double? Temperature = null,
+    int? NumPredict = null);
