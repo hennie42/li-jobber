@@ -184,11 +184,91 @@ public sealed class MarkdownDocumentRendererTests
         Assert.DoesNotContain("roles and", result.Markdown);
     }
 
+    [Fact]
+    public async Task RenderAsync_Cv_UsesProfileSummarySectionOverrideWhenProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            generatedBody: "Fallback profile.",
+            generatedSections:
+            [
+                new CvSectionContent(CvSection.ProfileSummary, "Section-driven profile paragraph.")
+            ]);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("Section-driven profile paragraph.", result.Markdown);
+        Assert.DoesNotContain("Fallback profile.", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_UsesKeySkillsSectionOverrideWhenProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            mustHaveThemes: ["Azure"],
+            evidenceTags: ["Azure"],
+            generatedSections:
+            [
+                new CvSectionContent(CvSection.KeySkills, "Azure, .NET, Kubernetes, GitOps")
+            ]);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("**Key Technologies & Competencies:** Azure, .NET, Kubernetes, GitOps", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_UsesExperienceHighlightsOverrideWhenProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            generatedSections:
+            [
+                new CvSectionContent(CvSection.ExperienceHighlights,
+                    "### Lead Architect | Contoso\n\n- Cut migration time 40% using infra-as-code.")
+            ]);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("Cut migration time 40% using infra-as-code.", result.Markdown);
+        Assert.DoesNotContain("Built microservices.", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_UsesProjectHighlightsOverrideWhenProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            generatedSections:
+            [
+                new CvSectionContent(CvSection.ProjectHighlights,
+                    "### Cloud Migration Portal\n\n- Saved 200 hours/month for migration teams.")
+            ]);
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("Saved 200 hours/month for migration teams.", result.Markdown);
+        Assert.DoesNotContain("Built a self-service migration portal.", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_FallsBackToGeneratedBodyWhenNoSectionsProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(generatedBody: "Backward-compatible profile.");
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("Backward-compatible profile.", result.Markdown);
+    }
+
     private static DocumentRenderRequest BuildCvRequest(
         string? generatedBody = "Experienced cloud architect.",
         OutputLanguage outputLanguage = OutputLanguage.English,
         IReadOnlyList<string>? mustHaveThemes = null,
-        IReadOnlyList<string>? evidenceTags = null)
+        IReadOnlyList<string>? evidenceTags = null,
+        IReadOnlyList<CvSectionContent>? generatedSections = null)
     {
         var candidate = new CandidateProfile
         {
@@ -238,6 +318,7 @@ public sealed class MarkdownDocumentRendererTests
             null,
             generatedBody,
             outputLanguage,
-            EvidenceSelection: evidence);
+            EvidenceSelection: evidence,
+            GeneratedSections: generatedSections);
     }
 }
