@@ -26,8 +26,8 @@ public static class CvWordTemplateGenerator
         new("Experience", "Professional Experience", "[Recent roles with title, company, period, and achievements]"),
         new("Projects", "Projects", "[Project entries with period, description, and links]"),
         new("EarlyCareer", "Earlier Career", "[Pre-cutoff roles and projects]"),
-        new("Recommendations", "Recommendations", "[Recommendation quotes with attribution]"),
         new("Certifications", "Certifications", "[Selected certifications]"),
+        new("Recommendations", "Recommendations", "[Recommendation quotes with attribution]"),
     ];
 
     /// <summary>

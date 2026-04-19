@@ -42,7 +42,7 @@ public sealed class MarkdownDocumentRendererTests
         var result = await renderer.RenderAsync(request);
 
         Assert.Contains("## Projects", result.Markdown);
-        Assert.Contains("### Cloud Migration Portal", result.Markdown);
+        Assert.Contains("**Cloud Migration Portal**", result.Markdown);
         Assert.Contains("Built a self-service migration portal.", result.Markdown);
     }
 
@@ -55,8 +55,9 @@ public sealed class MarkdownDocumentRendererTests
         var result = await renderer.RenderAsync(request);
 
         Assert.Contains("## Recommendations", result.Markdown);
-        Assert.Contains("### Jane Smith", result.Markdown);
-        Assert.Contains("### Lars Nielsen", result.Markdown);
+        Assert.Contains("> *\"", result.Markdown);
+        Assert.Contains("Jane Smith", result.Markdown);
+        Assert.Contains("Lars Nielsen", result.Markdown);
     }
 
     [Fact]
@@ -150,12 +151,11 @@ public sealed class MarkdownDocumentRendererTests
 
         var result = await renderer.RenderAsync(datedRequest);
 
-        Assert.Contains("## Early career", result.Markdown);
-        Assert.Contains("Early career highlights from 1 roles and 1 projects (2004-2006).", result.Markdown);
-        Assert.DoesNotContain("### Junior Engineer | LegacyCorp", result.Markdown);
-        Assert.DoesNotContain("### Legacy Platform Upgrade", result.Markdown);
+        Assert.Contains("## Earlier Career", result.Markdown);
+        Assert.Contains("**Junior Engineer** | LegacyCorp", result.Markdown);
+        Assert.Contains("**Legacy Platform Upgrade**", result.Markdown);
         Assert.Contains("### Lead Architect | Contoso", result.Markdown);
-        Assert.Contains("### Cloud Migration Portal", result.Markdown);
+        Assert.Contains("**Cloud Migration Portal**", result.Markdown);
     }
 
     [Fact]
@@ -180,8 +180,8 @@ public sealed class MarkdownDocumentRendererTests
 
         var result = await renderer.RenderAsync(datedRequest);
 
-        Assert.Contains("Early career highlights from 1 roles (2003-2003).", result.Markdown);
-        Assert.DoesNotContain("roles and", result.Markdown);
+        Assert.Contains("## Earlier Career", result.Markdown);
+        Assert.Contains("**Junior Engineer** | LegacyCorp", result.Markdown);
     }
 
     [Fact]
