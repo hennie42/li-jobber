@@ -186,7 +186,7 @@ public sealed class WorkspaceSessionTests
 
         session.SetJobSetGeneratedDocuments(jobSetId, 
             [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
-            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.md")]);
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.docx")]);
 
         Assert.Equal(JobSetProgressState.Done, session.GetJobSet(jobSetId).ProgressState);
         Assert.Equal("Markdown drafts generated for this job set.", session.GetJobSet(jobSetId).ProgressDetail);
@@ -316,7 +316,7 @@ public sealed class WorkspaceSessionTests
         session.RecordJobSetFitReviewRefresh("job-set-01", "fingerprint", includedLlmEnhancement: true);
         session.SetJobSetGeneratedDocuments(jobSetId, 
             [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
-            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.md")]);
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.docx")]);
 
         session.UpdateCandidateProfile(new CandidateProfile
         {

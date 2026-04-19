@@ -108,7 +108,7 @@ public sealed class DraftGenerationService(
                     ["PromptTokens"] = response.PromptTokens?.ToString() ?? string.Empty,
                     ["CompletionTokens"] = response.CompletionTokens?.ToString() ?? string.Empty,
                     ["Duration"] = response.Duration?.ToString() ?? string.Empty,
-                    ["MarkdownPath"] = export?.MarkdownPath ?? string.Empty,
+                    ["FilePath"] = export?.FilePath ?? string.Empty,
                     ["CvMissingMustHaveThemes"] = cvQualityResult.Report.MissingMustHaveThemeCount.ToString(),
                     ["CvQuantifiedBulletCount"] = cvQualityResult.Report.QuantifiedBulletCount.ToString(),
                     ["CvSummaryTrimmed"] = cvQualityResult.Report.SummaryTrimmed.ToString(),

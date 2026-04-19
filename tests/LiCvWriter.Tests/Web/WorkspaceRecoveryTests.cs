@@ -124,7 +124,7 @@ public sealed class WorkspaceRecoveryTests
             session.SetJobSetOutputLanguage(jobSetId, OutputLanguage.Danish);
             session.SetJobSetGeneratedDocuments(jobSetId, 
                 [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
-                [new DocumentExportResult(DocumentKind.Cv, Path.Combine(root, "Exports", "job-set-02", "cv.md"))]);
+                [new DocumentExportResult(DocumentKind.Cv, Path.Combine(root, "Exports", "job-set-02", "cv.docx"))]);
 
             var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
 
