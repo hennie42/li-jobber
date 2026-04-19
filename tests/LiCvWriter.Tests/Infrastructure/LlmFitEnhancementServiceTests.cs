@@ -14,12 +14,11 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("Azure", "Strong", ["Recommendation from CTO"], "CTO praises Azure expertise")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("Azure", "Strong", ["Recommendation from CTO"], "CTO praises Azure expertise")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         var requirement = Assert.Single(result.Requirements);
         Assert.Equal(JobRequirementMatch.Strong, requirement.Match);
@@ -35,12 +34,11 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("Kubernetes", JobRequirementImportance.NiceToHave, JobRequirementMatch.Missing));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("Kubernetes", "Partial", ["Container orchestration in project X"], "Indirect")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("Kubernetes", "Partial", ["Container orchestration in project X"], "Indirect")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         var requirement = Assert.Single(result.Requirements);
         Assert.Equal(JobRequirementMatch.Partial, requirement.Match);
@@ -53,12 +51,11 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("AI", JobRequirementImportance.MustHave, JobRequirementMatch.Missing));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("AI", "Strong", ["Led AI POC delivery"], "Direct evidence")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("AI", "Strong", ["Led AI POC delivery"], "Direct evidence")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         var requirement = Assert.Single(result.Requirements);
         Assert.Equal(JobRequirementMatch.Strong, requirement.Match);
@@ -70,12 +67,11 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Strong));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("Azure", "Partial", ["Weaker evidence"], "Should not apply")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("Azure", "Partial", ["Weaker evidence"], "Should not apply")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         Assert.Same(baseline, result);
     }
@@ -87,12 +83,11 @@ public sealed class LlmFitEnhancementServiceTests
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial));
 
         // "Missing" is not a valid newMatch value, so ParseMatch returns null → no upgrade
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("Azure", "Missing", [], "Invalid")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("Azure", "Missing", [], "Invalid")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         Assert.Same(baseline, result);
     }
@@ -103,7 +98,7 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Strong));
 
-        var result = LlmFitEnhancementService.Merge(baseline, []);
+        var result = LlmFitEnhancementService.Merge(baseline, EnhancementParseResult.Empty);
 
         Assert.Same(baseline, result);
     }
@@ -114,12 +109,11 @@ public sealed class LlmFitEnhancementServiceTests
         var baseline = BuildBaseline(
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("azure", "Strong", ["Evidence"], "Rationale")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("azure", "Strong", ["Evidence"], "Rationale")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         var requirement = Assert.Single(result.Requirements);
         Assert.Equal(JobRequirementMatch.Strong, requirement.Match);
@@ -132,12 +126,11 @@ public sealed class LlmFitEnhancementServiceTests
             MakeAssessment("Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Strong),
             MakeAssessment("AI", JobRequirementImportance.MustHave, JobRequirementMatch.Missing));
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("AI", "Partial", ["AI POC work"], "Some evidence")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("AI", "Partial", ["AI POC work"], "Some evidence")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         Assert.Equal(2, result.Requirements.Count);
         Assert.Equal(JobRequirementMatch.Strong, result.Requirements[0].Match);
@@ -154,12 +147,11 @@ public sealed class LlmFitEnhancementServiceTests
 
         Assert.Equal(0, baseline.OverallScore);
 
-        var enhancements = new[]
-        {
-            new EnhancedRequirement("Azure", "Strong", ["Evidence"], "Direct match")
-        };
+        var parseResult = new EnhancementParseResult(
+            [new EnhancedRequirement("Azure", "Strong", ["Evidence"], "Direct match")],
+            Array.Empty<string>(), null);
 
-        var result = LlmFitEnhancementService.Merge(baseline, enhancements);
+        var result = LlmFitEnhancementService.Merge(baseline, parseResult);
 
         Assert.Equal(100, result.OverallScore);
     }
@@ -182,8 +174,8 @@ public sealed class LlmFitEnhancementServiceTests
             }
             """;
 
-        Assert.True(LlmFitEnhancementService.TryParse(json, out var enhancements));
-        var single = Assert.Single(enhancements);
+        Assert.True(LlmFitEnhancementService.TryParse(json, out var result));
+        var single = Assert.Single(result.Enhancements);
         Assert.Equal("Azure", single.Requirement);
         Assert.Equal("Strong", single.NewMatch);
         Assert.Single(single.Evidence);
@@ -208,15 +200,15 @@ public sealed class LlmFitEnhancementServiceTests
             ```
             """;
 
-        Assert.True(LlmFitEnhancementService.TryParse(json, out var enhancements));
-        Assert.Single(enhancements);
+        Assert.True(LlmFitEnhancementService.TryParse(json, out var result));
+        Assert.Single(result.Enhancements);
     }
 
     [Fact]
     public void TryParse_MalformedJson_ReturnsFalse()
     {
-        Assert.False(LlmFitEnhancementService.TryParse("{not json at all", out var enhancements));
-        Assert.Empty(enhancements);
+        Assert.False(LlmFitEnhancementService.TryParse("{not json at all", out var result));
+        Assert.Empty(result.Enhancements);
     }
 
     [Fact]
@@ -224,17 +216,17 @@ public sealed class LlmFitEnhancementServiceTests
     {
         var json = """{"enhancedRequirements": []}""";
 
-        Assert.False(LlmFitEnhancementService.TryParse(json, out var enhancements));
-        Assert.Empty(enhancements);
+        Assert.False(LlmFitEnhancementService.TryParse(json, out var result));
+        Assert.Empty(result.Enhancements);
     }
 
     [Fact]
     public void TryParse_MissingEnhancedRequirementsProperty_ReturnsFalse()
     {
-        var json = """{"results": []}""";
+        var json = """{ "results": []}""";
 
-        Assert.False(LlmFitEnhancementService.TryParse(json, out var enhancements));
-        Assert.Empty(enhancements);
+        Assert.False(LlmFitEnhancementService.TryParse(json, out var result));
+        Assert.Empty(result.Enhancements);
     }
 
     [Fact]
@@ -258,9 +250,9 @@ public sealed class LlmFitEnhancementServiceTests
             }
             """;
 
-        Assert.True(LlmFitEnhancementService.TryParse(json, out var enhancements));
-        Assert.Single(enhancements);
-        Assert.Equal("Azure", enhancements[0].Requirement);
+        Assert.True(LlmFitEnhancementService.TryParse(json, out var result));
+        Assert.Single(result.Enhancements);
+        Assert.Equal("Azure", result.Enhancements[0].Requirement);
     }
 
     // ─── Helpers ────────────────────────────────────────────────────

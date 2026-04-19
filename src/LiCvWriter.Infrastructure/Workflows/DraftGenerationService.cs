@@ -143,7 +143,11 @@ public sealed class DraftGenerationService(
                         : string.Join(",", cvQualityResult.Report.TrimmedOptionalSections),
                     ["CvAppliedFixes"] = cvQualityResult.Report.AppliedFixes.Count == 0
                         ? string.Empty
-                        : string.Join(",", cvQualityResult.Report.AppliedFixes)
+                        : string.Join(",", cvQualityResult.Report.AppliedFixes),
+                    ["CvAtsKeywordCoveragePercent"] = cvQualityResult.Report.AtsKeywordCoveragePercent.ToString(),
+                    ["CvMissingMustHaveThemes"] = cvQualityResult.Report.MissingMustHaveThemes is { Count: > 0 }
+                        ? string.Join(",", cvQualityResult.Report.MissingMustHaveThemes)
+                        : string.Empty
                 }), cancellationToken);
 
             documentStopwatch.Stop();
@@ -197,7 +201,18 @@ public sealed class DraftGenerationService(
             DocumentKind.Cv =>
                 $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements. Weave as many of the job's key technologies and themes into the professional profile as truthfully possible. If any recommendation text is not in {lang}, translate it to {lang} and append '(translated from <original language>)' after the translated text.",
             DocumentKind.CoverLetter =>
-                $"Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule} Keep the tone credible, practical, and specific to the target employer and role.",
+                $"""
+                Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule}
+
+                Structure the letter in exactly five parts:
+                1. Opening hook: reference something specific about the company (from company context or differentiators) that genuinely resonates with the candidate's background.
+                2. Value proposition: map the top 2-3 pieces of evidence directly to the role's must-have requirements. Use concrete outcomes and numbers where available.
+                3. Cultural alignment: connect the candidate's work style or values to the company's culture signals with a brief, specific example.
+                4. Bridge any partial-fit areas by reframing adjacent experience as transferable strengths — do not mention gaps directly.
+                5. Confident close: express genuine interest without desperation, and mention a specific next step.
+
+                Keep the tone credible, practical, and specific to the target employer and role. Aim for 300-400 words total.
+                """,
             DocumentKind.ProfileSummary =>
                 $"Write a short {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it crisp, concrete, and senior without hype.",
             DocumentKind.InterviewNotes =>
@@ -297,6 +312,17 @@ Additional instructions:
 
         lines.AddRange(assessment.Strengths.Take(4).Select(static strength => $"- Strength: {strength}"));
         lines.AddRange(assessment.Gaps.Take(3).Select(static gap => $"- Gap to frame around: {gap}"));
+
+        if (!string.IsNullOrWhiteSpace(assessment.PositioningAngle))
+        {
+            lines.Add($"- Positioning angle: {assessment.PositioningAngle}");
+        }
+
+        foreach (var strategy in assessment.GapFramingStrategies.Take(4))
+        {
+            lines.Add($"- Reframing strategy: {strategy}");
+        }
+
         return string.Join(Environment.NewLine, lines);
     }
 
@@ -442,18 +468,63 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
         var lastModel = selectedModel;
         var lastThinking = string.Empty;
 
-        var sectionPlan = new List<CvSection>
+        var hasProjects = GetStandaloneProjects(request.Candidate).Count > 0;
+
+        // Wave 1: ProfileSummary + KeySkills are independent — generate in parallel.
+        var wave1 = new[] { CvSection.ProfileSummary, CvSection.KeySkills };
+        var wave1Results = await GenerateSectionWaveAsync(wave1, request, selectedModel, selectedThinkingLevel, outputLanguage, progress, cancellationToken);
+
+        // Wave 2: ExperienceHighlights + ProjectHighlights are independent — generate in parallel.
+        var wave2 = hasProjects
+            ? new[] { CvSection.ExperienceHighlights, CvSection.ProjectHighlights }
+            : new[] { CvSection.ExperienceHighlights };
+        var wave2Results = await GenerateSectionWaveAsync(wave2, request, selectedModel, selectedThinkingLevel, outputLanguage, progress, cancellationToken);
+
+        foreach (var (content, response) in wave1Results.Concat(wave2Results))
         {
-            CvSection.ProfileSummary,
-            CvSection.KeySkills,
-            CvSection.ExperienceHighlights
-        };
-        if (GetStandaloneProjects(request.Candidate).Count > 0)
-        {
-            sectionPlan.Add(CvSection.ProjectHighlights);
+            sections.Add(content);
+
+            if (response.Duration is { } d)
+            {
+                totalDuration += d;
+            }
+
+            totalPromptTokens += response.PromptTokens ?? 0;
+            totalCompletionTokens += response.CompletionTokens ?? 0;
+            lastModel = response.Model;
+            lastThinking = response.Thinking ?? lastThinking;
         }
 
-        foreach (var section in sectionPlan)
+        var combinedContent = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            sections.Select(s => $"<!-- {s.Section} -->{Environment.NewLine}{s.Markdown}"));
+
+        var aggregate = new LlmResponse(
+            lastModel,
+            combinedContent,
+            string.IsNullOrWhiteSpace(lastThinking) ? null : lastThinking,
+            Completed: true,
+            PromptTokens: totalPromptTokens > 0 ? totalPromptTokens : null,
+            CompletionTokens: totalCompletionTokens > 0 ? totalCompletionTokens : null,
+            Duration: totalDuration > TimeSpan.Zero ? totalDuration : null);
+
+        return (sections, aggregate);
+    }
+
+    /// <summary>
+    /// Generates multiple CV sections in parallel using <see cref="Task.WhenAll"/>.
+    /// Sections within a wave are independent and can safely run concurrently.
+    /// </summary>
+    private async Task<IReadOnlyList<(CvSectionContent Content, LlmResponse Response)>> GenerateSectionWaveAsync(
+        IReadOnlyList<CvSection> sections,
+        DraftGenerationRequest request,
+        string selectedModel,
+        string selectedThinkingLevel,
+        OutputLanguage outputLanguage,
+        Action<LlmProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        var tasks = sections.Select(async section =>
         {
             var systemPrompt = GetCvSectionSystemPrompt(section, outputLanguage, request.JobPosting);
             var userPrompt = BuildCvSectionUserPrompt(section, request);
@@ -471,38 +542,18 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
                 progress is null ? null : update => progress(PrefixCvSectionProgress(sectionLabel, update)),
                 cancellationToken);
 
-            sections.Add(new CvSectionContent(
+            var content = new CvSectionContent(
                 section,
                 sectionResponse.Content.Trim(),
                 sectionResponse.Duration,
                 sectionResponse.PromptTokens,
-                sectionResponse.CompletionTokens));
+                sectionResponse.CompletionTokens);
 
-            if (sectionResponse.Duration is { } d)
-            {
-                totalDuration += d;
-            }
+            return (Content: content, Response: sectionResponse);
+        });
 
-            totalPromptTokens += sectionResponse.PromptTokens ?? 0;
-            totalCompletionTokens += sectionResponse.CompletionTokens ?? 0;
-            lastModel = sectionResponse.Model;
-            lastThinking = sectionResponse.Thinking ?? lastThinking;
-        }
-
-        var combinedContent = string.Join(
-            Environment.NewLine + Environment.NewLine,
-            sections.Select(s => $"<!-- {s.Section} -->{Environment.NewLine}{s.Markdown}"));
-
-        var aggregate = new LlmResponse(
-            lastModel,
-            combinedContent,
-            string.IsNullOrWhiteSpace(lastThinking) ? null : lastThinking,
-            Completed: true,
-            PromptTokens: totalPromptTokens > 0 ? totalPromptTokens : null,
-            CompletionTokens: totalCompletionTokens > 0 ? totalCompletionTokens : null,
-            Duration: totalDuration > TimeSpan.Zero ? totalDuration : null);
-
-        return (sections, aggregate);
+        var results = await Task.WhenAll(tasks);
+        return results;
     }
 
     private static LlmProgressUpdate PrefixCvSectionProgress(string sectionLabel, LlmProgressUpdate update)
@@ -544,9 +595,9 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
             CvSection.ProfileSummary =>
                 $"Write a 3-4 line {lang} professional profile paragraph positioning the candidate for a {role} role at {company}. Lead with seniority and domain, fold in 2-3 of the role's key technologies/themes truthfully, and emphasize impact over duties.{commonRules}",
             CvSection.KeySkills =>
-                $"Produce a single comma-separated keyword line of {lang} technologies and competencies tailored to the {role} role at {company}. Order keywords by relevance to the role's must-have themes; include only items the candidate has evidence for. No headings, no bullets — just the comma-separated line.{commonRules}",
+                $"Produce a single comma-separated keyword line of {lang} technologies and competencies tailored to the {role} role at {company}. Order keywords by relevance to the role's must-have themes; include only items the candidate has evidence for. No headings, no bullets — just the comma-separated line. ATS tip: ensure every must-have theme the candidate has evidence for appears verbatim in the output.{commonRules}",
             CvSection.ExperienceHighlights =>
-                $"Rewrite the candidate's role descriptions as achievement-focused {lang} bullets for a {role} position at {company}.{commonRules}\n\nFor each role use exactly this layout, with one item per line and a blank line between roles:\n\n### {{Title}} | {{Company}} | {{Period}}\n\n- {{Achievement bullet starting with a strong verb}}\n- {{Another achievement bullet}}\n\nAim for 2-4 bullets per role. If client engagements are provided for a consulting/freelance role, list the 3-5 most relevant engagements as bullets with a bold 'Client:' prefix, e.g.:\n- **Client: {{Client name}}** — {{description}} ({{period}})\nDo not create a separate section for them. Do not write the bullets inline; each `-` must start a new line.",
+                $"Rewrite the candidate's role descriptions as achievement-focused {lang} bullets for a {role} position at {company}.{commonRules}\n\nFor each role use exactly this layout, with one item per line and a blank line between roles:\n\n### {{Title}} | {{Company}} | {{Period}}\n\n- {{Achievement bullet starting with a strong verb}}\n- {{Another achievement bullet}}\n\nAim for 2-4 bullets per role. Where truthful, weave must-have theme keywords into bullet text for ATS matching. If client engagements are provided for a consulting/freelance role, list the 3-5 most relevant engagements as bullets with a bold 'Client:' prefix, e.g.:\n- **Client: {{Client name}}** — {{description}} ({{period}})\nDo not create a separate section for them. Do not write the bullets inline; each `-` must start a new line.",
             CvSection.ProjectHighlights =>
                 $"Rewrite the candidate's project descriptions as achievement-focused {lang} bullets relevant to the {role} role at {company}.{commonRules}\n\nFor each project use exactly this layout, with one item per line and a blank line between projects:\n\n### {{Title}} | {{Period}}\n\n- {{Outcome bullet}}\n- {{Outcome bullet}}\n\nAim for 2-3 bullets per project. Do not write the bullets inline; each `-` must start a new line.",
             _ => GetSystemPrompt(DocumentKind.Cv, outputLanguage, jobPosting)

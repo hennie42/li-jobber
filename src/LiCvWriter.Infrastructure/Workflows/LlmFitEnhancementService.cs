@@ -65,8 +65,8 @@ public sealed class LlmFitEnhancementService(
                 }),
                 cancellationToken);
 
-            return TryParse(response.Content, out var enhancements)
-                ? Merge(baseline, enhancements)
+            return TryParse(response.Content, out var parseResult)
+                ? Merge(baseline, parseResult)
                 : baseline;
         }
         catch
@@ -75,12 +75,9 @@ public sealed class LlmFitEnhancementService(
         }
     }
 
-    internal static JobFitAssessment Merge(JobFitAssessment baseline, IReadOnlyList<EnhancedRequirement> enhancements)
+    internal static JobFitAssessment Merge(JobFitAssessment baseline, EnhancementParseResult parseResult)
     {
-        if (enhancements.Count == 0)
-        {
-            return baseline;
-        }
+        var enhancements = parseResult.Enhancements;
 
         var lookup = enhancements.ToDictionary(
             static enhancement => enhancement.Requirement,
@@ -110,12 +107,27 @@ public sealed class LlmFitEnhancementService(
             };
         }).ToArray();
 
-        if (!anyUpgraded)
+        var hasStrategicEnhancements = parseResult.GapFramingStrategies.Count > 0
+            || !string.IsNullOrWhiteSpace(parseResult.PositioningAngle);
+
+        if (!anyUpgraded && !hasStrategicEnhancements)
         {
             return baseline;
         }
 
-        return JobFitScoring.BuildAssessment(merged, isLlmEnhanced: true);
+        var result = anyUpgraded
+            ? JobFitScoring.BuildAssessment(merged, isLlmEnhanced: true)
+            : baseline with { IsLlmEnhanced = true };
+
+        return result with
+        {
+            GapFramingStrategies = parseResult.GapFramingStrategies.Count > 0
+                ? parseResult.GapFramingStrategies
+                : result.GapFramingStrategies,
+            PositioningAngle = !string.IsNullOrWhiteSpace(parseResult.PositioningAngle)
+                ? parseResult.PositioningAngle
+                : result.PositioningAngle
+        };
     }
 
     private static bool IsUpgrade(JobRequirementMatch current, JobRequirementMatch proposed)
@@ -162,15 +174,21 @@ public sealed class LlmFitEnhancementService(
                   "evidence": ["Evidence title or description"],
                   "rationale": "Brief explanation of why this evidence supports the requirement"
                 }
-              ]
+              ],
+              "gapFramingStrategies": [
+                "For each remaining gap or partial requirement, a short reframing strategy that positions the candidate positively. Examples: 'No Kubernetes, but deep Docker + cloud infra experience', 'Adopted Terraform within 3 months at previous role'."
+              ],
+              "positioningAngle": "A single paragraph (2-3 sentences) describing the candidate's most compelling competitive angle for this specific role — what makes them uniquely valuable vs. typical applicants."
             }
 
             Rules:
             - {{PromptConstraints.JsonOnlyOutput}}
-            - Only include requirements where you found genuine supporting evidence.
+            - Only include requirements in enhancedRequirements where you found genuine supporting evidence.
             - Set newMatch to "Strong" only when the evidence clearly and directly supports the requirement.
             - Set newMatch to "Partial" when the evidence is indirect but relevant.
             - Be conservative: only upgrade when the semantic connection is clear.
+            - For gapFramingStrategies, write reframing strategies only for requirements that remain Partial or Missing after your enhancements. Frame gaps as transferable strengths or learning velocity — never mention the gap itself.
+            - For positioningAngle, identify the candidate's unique combination of skills, experience depth, and domain knowledge that a typical applicant for this role would lack.
             """;
     }
 
@@ -248,7 +266,7 @@ public sealed class LlmFitEnhancementService(
         return builder.ToString();
     }
 
-    internal static bool TryParse(string content, out IReadOnlyList<EnhancedRequirement> enhancements)
+    internal static bool TryParse(string content, out EnhancementParseResult result)
     {
         try
         {
@@ -256,33 +274,38 @@ public sealed class LlmFitEnhancementService(
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
 
-            if (!root.TryGetProperty("enhancedRequirements", out var array) || array.ValueKind != JsonValueKind.Array)
+            var enhancements = new List<EnhancedRequirement>();
+            if (root.TryGetProperty("enhancedRequirements", out var array) && array.ValueKind == JsonValueKind.Array)
             {
-                enhancements = Array.Empty<EnhancedRequirement>();
-                return false;
-            }
-
-            var results = new List<EnhancedRequirement>();
-
-            foreach (var element in array.EnumerateArray())
-            {
-                var requirement = ReadString(element, "requirement");
-                var newMatch = ReadString(element, "newMatch");
-                var rationale = ReadString(element, "rationale");
-                var evidence = ReadStringArray(element, "evidence");
-
-                if (!string.IsNullOrWhiteSpace(requirement) && !string.IsNullOrWhiteSpace(newMatch))
+                foreach (var element in array.EnumerateArray())
                 {
-                    results.Add(new EnhancedRequirement(requirement, newMatch, evidence, rationale ?? string.Empty));
+                    var requirement = ReadString(element, "requirement");
+                    var newMatch = ReadString(element, "newMatch");
+                    var rationale = ReadString(element, "rationale");
+                    var evidence = ReadStringArray(element, "evidence");
+
+                    if (!string.IsNullOrWhiteSpace(requirement) && !string.IsNullOrWhiteSpace(newMatch))
+                    {
+                        enhancements.Add(new EnhancedRequirement(requirement, newMatch, evidence, rationale ?? string.Empty));
+                    }
                 }
             }
 
-            enhancements = results;
-            return results.Count > 0;
+            var gapFramingStrategies = ReadStringArray(root, "gapFramingStrategies");
+            var positioningAngle = ReadString(root, "positioningAngle");
+
+            if (enhancements.Count > 0 || gapFramingStrategies.Count > 0 || !string.IsNullOrWhiteSpace(positioningAngle))
+            {
+                result = new EnhancementParseResult(enhancements, gapFramingStrategies, positioningAngle);
+                return true;
+            }
+
+            result = EnhancementParseResult.Empty;
+            return false;
         }
         catch
         {
-            enhancements = Array.Empty<EnhancedRequirement>();
+            result = EnhancementParseResult.Empty;
             return false;
         }
     }
@@ -337,4 +360,15 @@ public sealed class LlmFitEnhancementService(
         string NewMatch,
         IReadOnlyList<string> Evidence,
         string Rationale);
+
+    internal sealed record EnhancementParseResult(
+        IReadOnlyList<EnhancedRequirement> Enhancements,
+        IReadOnlyList<string> GapFramingStrategies,
+        string? PositioningAngle)
+    {
+        public static EnhancementParseResult Empty { get; } = new(
+            Array.Empty<EnhancedRequirement>(),
+            Array.Empty<string>(),
+            null);
+    }
 }
