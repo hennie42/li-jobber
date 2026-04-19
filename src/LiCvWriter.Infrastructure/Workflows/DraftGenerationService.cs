@@ -348,6 +348,82 @@ Additional instructions:
         return $"- {role.Title} at {role.CompanyName} ({role.Period.DisplayValue}).{description}";
     }
 
+    private static string FormatCoveredProjects(CandidateProfile candidate)
+    {
+        var covered = GetCoveredProjects(candidate);
+        if (covered.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var lines = string.Join(
+            Environment.NewLine,
+            covered.Select(static project =>
+                $"- {project.Title} ({project.Period.DisplayValue}). {project.Description}"));
+
+        return $"""
+
+Client engagements during consulting/freelance roles (list the most relevant 3-5 as sub-bullets under that role; omit the rest):
+{lines}
+
+""";
+    }
+
+    private static IEnumerable<ExperienceEntry> GetModernExperience(CandidateProfile candidate)
+        => candidate.Experience.Where(static role => !IsBeforeCutoff(role.Period));
+
+    private static IEnumerable<ProjectEntry> GetModernProjects(CandidateProfile candidate)
+        => candidate.Projects.Where(static project => !IsBeforeCutoff(project.Period));
+
+    /// <summary>
+    /// Returns modern projects that are NOT sub-engagements of an umbrella
+    /// consulting/freelance role. A role is considered an umbrella role when
+    /// it covers 3+ projects within its date range.
+    /// </summary>
+    private static IReadOnlyList<ProjectEntry> GetStandaloneProjects(CandidateProfile candidate)
+    {
+        var modernExperience = GetModernExperience(candidate).ToArray();
+        var modernProjects = GetModernProjects(candidate).ToArray();
+        var umbrellaRoles = modernExperience
+            .Where(exp => modernProjects.Count(p => PeriodContains(exp.Period, p.Period)) >= 3)
+            .ToArray();
+        return modernProjects
+            .Where(project => !umbrellaRoles.Any(exp => PeriodContains(exp.Period, project.Period)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns modern projects whose period IS contained within an umbrella
+    /// consulting/freelance role (3+ covered projects).
+    /// </summary>
+    private static IReadOnlyList<ProjectEntry> GetCoveredProjects(CandidateProfile candidate)
+    {
+        var modernExperience = GetModernExperience(candidate).ToArray();
+        var modernProjects = GetModernProjects(candidate).ToArray();
+        var umbrellaRoles = modernExperience
+            .Where(exp => modernProjects.Count(p => PeriodContains(exp.Period, p.Period)) >= 3)
+            .ToArray();
+        return modernProjects
+            .Where(project => umbrellaRoles.Any(exp => PeriodContains(exp.Period, project.Period)))
+            .ToList();
+    }
+
+    private static bool PeriodContains(DateRange outer, DateRange inner)
+    {
+        var outerStartYear = outer.StartedOn?.Year;
+        var outerEndYear = outer.FinishedOn?.Year ?? 9999;
+        var innerStartYear = inner.StartedOn?.Year;
+        if (outerStartYear is null || innerStartYear is null) return false;
+        var innerEndYear = inner.FinishedOn?.Year ?? innerStartYear.Value;
+        return innerStartYear >= outerStartYear && innerEndYear <= outerEndYear;
+    }
+
+    private static bool IsBeforeCutoff(DateRange period)
+    {
+        var year = period.StartedOn?.Year ?? period.FinishedOn?.Year;
+        return year is not null && year.Value < EarlyCareerCutoffYear;
+    }
+
     private static string FormatOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : value;
 
@@ -372,7 +448,7 @@ Additional instructions:
             CvSection.KeySkills,
             CvSection.ExperienceHighlights
         };
-        if (request.Candidate.Projects.Count > 0)
+        if (GetStandaloneProjects(request.Candidate).Count > 0)
         {
             sectionPlan.Add(CvSection.ProjectHighlights);
         }
@@ -461,7 +537,7 @@ Additional instructions:
             ? " Keep technology names, company names, quoted job phrases, and file names in their original or English form."
             : string.Empty;
         var commonRules =
-            $" Use only the supplied evidence — do not invent employers, dates, certifications, tools, metrics, or outcomes.{nameRule} Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks.";
+            $" Use only the supplied evidence — do not invent employers, dates, certifications, tools, metrics, or outcomes.{nameRule} Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks. Use `-` (hyphen + space) for every bullet, never `*`. Put each bullet on its own line.";
 
         return section switch
         {
@@ -470,12 +546,14 @@ Additional instructions:
             CvSection.KeySkills =>
                 $"Produce a single comma-separated keyword line of {lang} technologies and competencies tailored to the {role} role at {company}. Order keywords by relevance to the role's must-have themes; include only items the candidate has evidence for. No headings, no bullets — just the comma-separated line.{commonRules}",
             CvSection.ExperienceHighlights =>
-                $"Rewrite the candidate's role descriptions as achievement-focused {lang} bullets for a {role} position at {company}. Use the format `### {{Title}} | {{Company}}` followed by the period on its own line, then 2-4 bullets per role starting with strong verbs and quantified outcomes where evidence allows.{commonRules}",
+                $"Rewrite the candidate's role descriptions as achievement-focused {lang} bullets for a {role} position at {company}.{commonRules}\n\nFor each role use exactly this layout, with one item per line and a blank line between roles:\n\n### {{Title}} | {{Company}} | {{Period}}\n\n- {{Achievement bullet starting with a strong verb}}\n- {{Another achievement bullet}}\n\nAim for 2-4 bullets per role. If client engagements are provided for a consulting/freelance role, list the 3-5 most relevant engagements as bullets with a bold 'Client:' prefix, e.g.:\n- **Client: {{Client name}}** — {{description}} ({{period}})\nDo not create a separate section for them. Do not write the bullets inline; each `-` must start a new line.",
             CvSection.ProjectHighlights =>
-                $"Rewrite the candidate's project descriptions as achievement-focused {lang} bullets relevant to the {role} role at {company}. Use the format `### {{Title}}` followed by the period on its own line, then 2-3 bullets per project highlighting outcomes and technologies used.{commonRules}",
+                $"Rewrite the candidate's project descriptions as achievement-focused {lang} bullets relevant to the {role} role at {company}.{commonRules}\n\nFor each project use exactly this layout, with one item per line and a blank line between projects:\n\n### {{Title}} | {{Period}}\n\n- {{Outcome bullet}}\n- {{Outcome bullet}}\n\nAim for 2-3 bullets per project. Do not write the bullets inline; each `-` must start a new line.",
             _ => GetSystemPrompt(DocumentKind.Cv, outputLanguage, jobPosting)
         };
     }
+
+    private const int EarlyCareerCutoffYear = 2008;
 
     private static string BuildCvSectionUserPrompt(CvSection section, DraftGenerationRequest request)
     {
@@ -547,8 +625,8 @@ Fit review:
 {fitSummary}
 
 Experience (use these as source material; preserve titles, companies, and periods exactly):
-{string.Join(Environment.NewLine, candidate.Experience.Take(8).Select(FormatExperience))}
-
+{string.Join(Environment.NewLine, GetModernExperience(candidate).Take(8).Select(FormatExperience))}
+{FormatCoveredProjects(candidate)}
 Selected evidence:
 {selectedEvidence}
 
@@ -563,7 +641,7 @@ Additional instructions:
 {roleHeader}
 
 Projects (use these as source material; preserve titles and periods exactly):
-{string.Join(Environment.NewLine, candidate.Projects.Select(static project =>
+{string.Join(Environment.NewLine, GetStandaloneProjects(candidate).Select(static project =>
     $"- {project.Title} ({project.Period.DisplayValue}). {project.Description}"))}
 
 Selected evidence:

@@ -66,12 +66,30 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                     .Where(static project => IsBeforeCutoff(project.Period, EarlyCareerCutoffYear))
                     .ToArray();
 
+                // Projects whose period falls within an experience entry are
+                // potentially client engagements (freelance/consulting). Only
+                // fold them into the experience section when a single role
+                // covers 3+ projects — indicating an umbrella consulting/freelance role.
+                var umbrellaRoles = modernExperience
+                    .Where(exp => modernProjects.Count(p => PeriodContains(exp.Period, p.Period)) >= 3)
+                    .ToArray();
+                var coveredProjects = modernProjects
+                    .Where(project => umbrellaRoles.Any(exp => PeriodContains(exp.Period, project.Period)))
+                    .ToArray();
+                var standaloneProjects = modernProjects
+                    .Except(coveredProjects)
+                    .ToArray();
+
                 AppendProfileOverview(builder, generatedBody, request, selectedEvidence, outputLanguage);
                 AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
-                AppendExperienceList(builder, modernExperience, outputLanguage, FindSection(request.GeneratedSections, CvSection.ExperienceHighlights));
-                AppendProjects(builder, modernProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ProjectHighlights));
+                AppendExperienceList(builder, modernExperience, coveredProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ExperienceHighlights));
+                if (standaloneProjects.Length > 0)
+                {
+                    AppendProjects(builder, standaloneProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ProjectHighlights));
+                }
+
                 AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
-                AppendAllRecommendations(builder, request.Candidate, outputLanguage);
+                AppendTopRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
                 if (HasSelectedCertifications(selectedEvidence))
                 {
                     AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
@@ -184,8 +202,15 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
     /// <summary>
     /// Renders all experience entries with ATS-standard section title and clear Title/Company/Date pattern.
+    /// When <paramref name="coveredProjects"/> are provided, they are rendered as key client
+    /// engagements under the experience entry whose period contains them.
     /// </summary>
-    private static void AppendExperienceList(StringBuilder builder, IReadOnlyList<ExperienceEntry> experience, OutputLanguage outputLanguage, string? sectionOverride = null)
+    private static void AppendExperienceList(
+        StringBuilder builder,
+        IReadOnlyList<ExperienceEntry> experience,
+        IReadOnlyList<ProjectEntry> coveredProjects,
+        OutputLanguage outputLanguage,
+        string? sectionOverride = null)
     {
         if (experience.Count == 0)
         {
@@ -202,18 +227,34 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             return;
         }
 
-        foreach (var role in experience.Take(12))
+        foreach (var role in experience.Take(8))
         {
-            builder.AppendLine($"### {role.Title} | {role.CompanyName}");
-            if (!string.IsNullOrWhiteSpace(role.Period.DisplayValue))
-            {
-                builder.AppendLine(role.Period.DisplayValue);
-            }
+            var periodSuffix = string.IsNullOrWhiteSpace(role.Period.DisplayValue)
+                ? string.Empty
+                : $" | {role.Period.DisplayValue}";
+            builder.AppendLine($"### {role.Title} | {role.CompanyName}{periodSuffix}");
 
             if (!string.IsNullOrWhiteSpace(role.Description))
             {
                 builder.AppendLine();
                 builder.AppendLine(role.Description.Trim());
+            }
+
+            // Append any client engagements (projects) whose period falls
+            // within this experience entry with bold "Client:" prefix.
+            var roleProjects = coveredProjects
+                .Where(project => PeriodContains(role.Period, project.Period))
+                .ToArray();
+            if (roleProjects.Length > 0)
+            {
+                builder.AppendLine();
+                foreach (var project in roleProjects)
+                {
+                    var desc = string.IsNullOrWhiteSpace(project.Description)
+                        ? string.Empty
+                        : $" — {project.Description.Trim()}";
+                    builder.AppendLine($"- **Client: {project.Title}**{desc} ({project.Period.DisplayValue})");
+                }
             }
 
             builder.AppendLine();
@@ -242,11 +283,10 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         foreach (var project in projects)
         {
-            builder.AppendLine($"### {project.Title}");
-            if (!string.IsNullOrWhiteSpace(project.Period.DisplayValue))
-            {
-                builder.AppendLine(project.Period.DisplayValue);
-            }
+            var periodSuffix = string.IsNullOrWhiteSpace(project.Period.DisplayValue)
+                ? string.Empty
+                : $" | {project.Period.DisplayValue}";
+            builder.AppendLine($"### {project.Title}{periodSuffix}");
 
             if (!string.IsNullOrWhiteSpace(project.Description))
             {
@@ -319,29 +359,49 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     }
 
     /// <summary>
-    /// Renders all recommendations with language detection and translation annotation.
-    /// If a recommendation is in a different language than the output, it is annotated
-    /// with "(translated from &lt;original language&gt;)".
+    /// Renders the top 3 recommendations ranked by evidence score for the
+    /// current job context, each with a heading and blockquote.
     /// </summary>
-    private static void AppendAllRecommendations(StringBuilder builder, CandidateProfile candidate, OutputLanguage outputLanguage)
+    private static void AppendTopRecommendations(
+        StringBuilder builder,
+        CandidateProfile candidate,
+        IReadOnlyList<RankedEvidenceItem> selectedEvidence,
+        OutputLanguage outputLanguage)
     {
         if (candidate.Recommendations.Count == 0)
         {
             return;
         }
 
+        // Build a lookup of evidence scores for recommendation authors.
+        var recommendationScores = selectedEvidence
+            .Where(static item => item.Evidence.Type is CandidateEvidenceType.Recommendation)
+            .ToDictionary(
+                static item => item.Evidence.Title,
+                static item => item.Score,
+                StringComparer.OrdinalIgnoreCase);
+
+        // Rank: evidence-backed first (by score), then original order. Cap at 3.
+        var ranked = candidate.Recommendations
+            .OrderByDescending(rec =>
+                recommendationScores.TryGetValue($"Recommendation from {rec.Author.FullName}", out var score)
+                    ? score
+                    : -1)
+            .Take(3)
+            .ToArray();
+
         builder.AppendLine($"## {Translate(outputLanguage, "Recommendations", "Anbefalinger")}");
         builder.AppendLine();
 
-        foreach (var recommendation in candidate.Recommendations)
+        foreach (var recommendation in ranked)
         {
-            var authorLabel = $"**{recommendation.Author.FullName}**{FormatAt(recommendation.Company, outputLanguage)}";
+            var authorHeading = $"{recommendation.Author.FullName}{FormatAt(recommendation.Company, outputLanguage)}";
             if (!string.IsNullOrWhiteSpace(recommendation.JobTitle))
             {
-                authorLabel += $", {recommendation.JobTitle}";
+                authorHeading += $", {recommendation.JobTitle}";
             }
 
-            builder.AppendLine(authorLabel);
+            builder.AppendLine($"### {authorHeading}");
             builder.AppendLine();
 
             var translationNote = GetTranslationAnnotation(recommendation.Text, outputLanguage);
@@ -399,6 +459,16 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
     private static int? GetReferenceYear(DateRange period)
         => period.StartedOn?.Year ?? period.FinishedOn?.Year;
+
+    private static bool PeriodContains(DateRange outer, DateRange inner)
+    {
+        var outerStartYear = outer.StartedOn?.Year;
+        var outerEndYear = outer.FinishedOn?.Year ?? 9999;
+        var innerStartYear = inner.StartedOn?.Year;
+        if (outerStartYear is null || innerStartYear is null) return false;
+        var innerEndYear = inner.FinishedOn?.Year ?? innerStartYear.Value;
+        return innerStartYear >= outerStartYear && innerEndYear <= outerEndYear;
+    }
 
     private static void AppendSection(StringBuilder builder, string title, string? content)
     {

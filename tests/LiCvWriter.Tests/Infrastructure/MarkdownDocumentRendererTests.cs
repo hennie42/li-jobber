@@ -55,8 +55,8 @@ public sealed class MarkdownDocumentRendererTests
         var result = await renderer.RenderAsync(request);
 
         Assert.Contains("## Recommendations", result.Markdown);
-        Assert.Contains("**Jane Smith**", result.Markdown);
-        Assert.Contains("**Lars Nielsen**", result.Markdown);
+        Assert.Contains("### Jane Smith", result.Markdown);
+        Assert.Contains("### Lars Nielsen", result.Markdown);
     }
 
     [Fact]

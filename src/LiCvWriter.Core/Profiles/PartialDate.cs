@@ -20,26 +20,24 @@ public sealed record PartialDate(string RawValue, int? Year = null, int? Month =
 
     public override string ToString()
     {
-        if (!string.IsNullOrWhiteSpace(RawValue))
+        // Prefer the structured date components over RawValue so that
+        // input quirks ("May2008", extra whitespace, locale differences)
+        // are normalised to a consistent display format.
+        if (Year is not null)
         {
-            return RawValue;
+            if (Month is null)
+            {
+                return Year.Value.ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (Day is null)
+            {
+                return new DateTime(Year.Value, Month.Value, 1).ToString("MMM yyyy", CultureInfo.InvariantCulture);
+            }
+
+            return new DateTime(Year.Value, Month.Value, Day.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
-        if (Year is null)
-        {
-            return string.Empty;
-        }
-
-        if (Month is null)
-        {
-            return Year.Value.ToString(CultureInfo.InvariantCulture);
-        }
-
-        if (Day is null)
-        {
-            return new DateTime(Year.Value, Month.Value, 1).ToString("MMM yyyy", CultureInfo.InvariantCulture);
-        }
-
-        return new DateTime(Year.Value, Month.Value, Day.Value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return string.IsNullOrWhiteSpace(RawValue) ? string.Empty : RawValue;
     }
 }

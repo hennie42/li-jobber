@@ -5,7 +5,7 @@ namespace LiCvWriter.Infrastructure.LinkedIn;
 
 public sealed class LinkedInPartialDateParser
 {
-    private static readonly string[] MonthYearFormats = ["MMM yyyy", "MMMM yyyy"];
+    private static readonly string[] MonthYearFormats = ["MMM yyyy", "MMMM yyyy", "MMMyyyy", "MMMMyyyy"];
     private static readonly string[] TimestampFormats =
     [
         "M/d/yy, h:mm tt",

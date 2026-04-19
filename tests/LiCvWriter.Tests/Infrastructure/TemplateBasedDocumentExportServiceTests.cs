@@ -54,10 +54,13 @@ Led the cloud migration program.
 
             var result = await service.ExportAsync(document);
 
-            Assert.EndsWith(".docx", result.FilePath, StringComparison.OrdinalIgnoreCase);
-            Assert.True(File.Exists(result.FilePath));
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
 
-            var folderFiles = Directory.GetFiles(Path.GetDirectoryName(result.FilePath)!);
+            Assert.EndsWith(".docx", filePath, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(filePath));
+
+            var folderFiles = Directory.GetFiles(Path.GetDirectoryName(filePath)!);
             Assert.DoesNotContain(folderFiles, file => file.EndsWith(".md", StringComparison.OrdinalIgnoreCase));
         }
         finally
@@ -86,7 +89,10 @@ Led the cloud migration program.
 
             var result = await service.ExportAsync(document);
 
-            using var wordDoc = WordprocessingDocument.Open(result.FilePath, isEditable: false);
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
             var body = mainPart.Document?.Body;
@@ -127,7 +133,10 @@ Led the cloud migration program.
 
             var result = await service.ExportAsync(document);
 
-            using var wordDoc = WordprocessingDocument.Open(result.FilePath, isEditable: false);
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
             var body = mainPart.Document?.Body;
@@ -166,8 +175,11 @@ Led the cloud migration program.
 
             var result = await service.ExportAsync(document);
 
-            Assert.True(File.Exists(result.FilePath));
-            using var wordDoc = WordprocessingDocument.Open(result.FilePath, isEditable: false);
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            Assert.True(File.Exists(filePath));
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
             var body = mainPart.Document?.Body;
@@ -201,9 +213,12 @@ Led the cloud migration program.
 
             var result = await service.ExportAsync(document);
 
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
             Assert.StartsWith(
                 Path.Combine(root, "job-set-01-contoso-lead-architect"),
-                result.FilePath,
+                filePath,
                 StringComparison.OrdinalIgnoreCase);
         }
         finally
@@ -263,7 +278,10 @@ Generic placeholder body.
 
             var result = await service.ExportAsync(document);
 
-            using var wordDoc = WordprocessingDocument.Open(result.FilePath, isEditable: false);
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
             var body = mainPart.Document?.Body;
@@ -274,6 +292,76 @@ Generic placeholder body.
             Assert.Contains("Azure, Kubernetes, Terraform", allText);
             Assert.Contains("Cut migration time 40% via infra-as-code.", allText);
             Assert.DoesNotContain("Generic placeholder body.", allText);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_UnwrapsSdtBlocksAndNormalizesMalformedBullets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+
+            // ExperienceHighlights uses the malformed pattern observed from
+            // local LLMs: bullets glued to the previous sentence with "*".
+            const string malformedExperience =
+                "### Senior Architect | Contoso.*Architected the cloud migration program.*Drove API-first adoption across 12 teams.";
+
+            var document = new GeneratedDocument(
+                DocumentKind.Cv,
+                "Alex Taylor CV",
+                SampleCvMarkdown,
+                "Alex Taylor",
+                DateTimeOffset.UtcNow,
+                GeneratedSections:
+                [
+                    new CvSectionMarkdown(CvSection.ExperienceHighlights, malformedExperience)
+                ]);
+
+            var result = await service.ExportAsync(document);
+
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
+            var mainPart = wordDoc.MainDocumentPart;
+            Assert.NotNull(mainPart);
+            var body = mainPart.Document?.Body;
+            Assert.NotNull(body);
+
+            // No SdtBlock wrappers should remain — the document must be plain
+            // paragraphs/lists for ATS and LLM-based parsers.
+            Assert.Empty(body.Descendants<SdtBlock>());
+
+            // Bullets must render as a real list with NumberingProperties,
+            // not as a single paragraph with literal "*" characters.
+            var listParagraphs = body.Descendants<Paragraph>()
+                .Where(p => p.ParagraphProperties?.NumberingProperties is not null
+                    || p.ParagraphProperties?.ParagraphStyleId?.Val?.Value == "ListParagraph")
+                .ToArray();
+            Assert.NotEmpty(listParagraphs);
+
+            // Heading paragraphs from the rewritten "### ..." line must use a
+            // real Heading style id.
+            var headingParagraphs = body.Descendants<Paragraph>()
+                .Where(p => p.ParagraphProperties?.ParagraphStyleId?.Val?.Value is { } id
+                    && id.StartsWith("Heading", StringComparison.Ordinal))
+                .ToArray();
+            Assert.NotEmpty(headingParagraphs);
+
+            var allText = body.InnerText;
+            Assert.DoesNotContain(".*", allText);
+            Assert.Contains("Architected the cloud migration program", allText);
+            Assert.Contains("Drove API-first adoption across 12 teams", allText);
         }
         finally
         {
