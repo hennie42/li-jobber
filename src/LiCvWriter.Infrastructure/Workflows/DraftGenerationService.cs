@@ -480,6 +480,30 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
             : new[] { CvSection.ExperienceHighlights };
         var wave2Results = await GenerateSectionWaveAsync(wave2, request, selectedModel, selectedThinkingLevel, outputLanguage, progress, cancellationToken);
 
+        // Two-pass refinement: review ExperienceHighlights against must-have themes and improve.
+        var experienceResult = wave2Results.FirstOrDefault(r => r.Content.Section == CvSection.ExperienceHighlights);
+        if (experienceResult.Content is not null && request.JobPosting.MustHaveThemes.Count > 0)
+        {
+            var refined = await RefineExperienceHighlightsAsync(
+                experienceResult.Content.Markdown,
+                request,
+                selectedModel,
+                selectedThinkingLevel,
+                outputLanguage,
+                progress,
+                cancellationToken);
+
+            if (refined is not null)
+            {
+                var refinedValue = refined.Value;
+                wave2Results = wave2Results
+                    .Select(r => r.Content.Section == CvSection.ExperienceHighlights
+                        ? (r.Content with { Markdown = refinedValue.Content }, refinedValue.Response)
+                        : r)
+                    .ToArray();
+            }
+        }
+
         foreach (var (content, response) in wave1Results.Concat(wave2Results))
         {
             sections.Add(content);
@@ -554,6 +578,87 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
 
         var results = await Task.WhenAll(tasks);
         return results;
+    }
+
+    /// <summary>
+    /// Second-pass refinement: reviews generated experience bullets against the must-have themes
+    /// and asks the LLM to improve coverage for themes not yet addressed.
+    /// Returns null if no refinement is needed or if the pass fails.
+    /// </summary>
+    private async Task<(string Content, LlmResponse Response)?> RefineExperienceHighlightsAsync(
+        string firstPassMarkdown,
+        DraftGenerationRequest request,
+        string selectedModel,
+        string selectedThinkingLevel,
+        OutputLanguage outputLanguage,
+        Action<LlmProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        var mustHaveThemes = request.JobPosting.MustHaveThemes
+            .Where(static t => !string.IsNullOrWhiteSpace(t))
+            .ToArray();
+
+        var missingThemes = mustHaveThemes
+            .Where(theme => !firstPassMarkdown.Contains(theme, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (missingThemes.Length == 0)
+        {
+            return null;
+        }
+
+        var lang = outputLanguage == OutputLanguage.Danish ? "Danish" : "English";
+        var systemPrompt =
+            $"You are a CV refinement editor. Review the candidate's experience bullets against the job's must-have themes. " +
+            $"For each theme not yet addressed, improve or replace the weakest bullet to incorporate it — but only if the candidate has evidence for it. " +
+            $"For bullets that could be more specific or quantified, suggest improvements. Output the complete refined {lang} experience section in markdown. " +
+            $"Preserve exact role titles, companies, and date periods. Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks.";
+
+        var userPrompt = $"""
+Must-have themes NOT yet covered in the experience section: {string.Join(", ", missingThemes)}
+All must-have themes: {string.Join(", ", mustHaveThemes)}
+
+Current experience section (refine this):
+{firstPassMarkdown}
+
+Selected evidence (use for grounding only):
+{FormatSelectedEvidence(request.EvidenceSelection)}
+
+Rules:
+- Only add theme keywords if the candidate has genuine evidence for them.
+- Do not invent employers, dates, certifications, tools, metrics, or outcomes.
+- Preserve the exact ### heading format for each role.
+- Each `-` must start a new line.
+""";
+
+        var sectionLabel = outputLanguage == OutputLanguage.Danish ? "Erhvervserfaring (raffinering)" : "Experience (refinement)";
+
+        try
+        {
+            var response = await llmClient.GenerateAsync(new LlmRequest(
+                selectedModel,
+                systemPrompt,
+                [new LlmChatMessage("user", userPrompt)],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: selectedThinkingLevel,
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: ollamaOptions.Temperature),
+                progress is null ? null : update => progress(PrefixCvSectionProgress(sectionLabel, update)),
+                cancellationToken);
+
+            var refined = response.Content.Trim();
+            if (string.IsNullOrWhiteSpace(refined) || refined.Length < firstPassMarkdown.Length / 2)
+            {
+                return null;
+            }
+
+            return (refined, response);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static LlmProgressUpdate PrefixCvSectionProgress(string sectionLabel, LlmProgressUpdate update)

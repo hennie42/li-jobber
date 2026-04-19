@@ -32,7 +32,11 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             return EvidenceSelectionResult.Empty;
         }
 
-        var selectedIds = SelectDefaults(ranked, defaultSelectedEvidenceCount);
+        var mustHaveThemes = jobFitAssessment.Requirements
+            .Where(static r => r.Importance == JobRequirementImportance.MustHave)
+            .Select(static r => r.Requirement)
+            .ToArray();
+        var selectedIds = SelectDiversified(ranked, defaultSelectedEvidenceCount, mustHaveThemes);
         var selectedRanked = ranked
             .Select(item => item with { IsSelected = selectedIds.Contains(item.Evidence.Id) })
             .ToArray();
@@ -170,11 +174,103 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
         return JobSignalExtractor.ContainsTermOrOverlap(evidenceText, term);
     }
 
-    private static HashSet<string> SelectDefaults(IReadOnlyList<RankedEvidenceItem> rankedEvidence, int maxCount)
-        => rankedEvidence
-            .Take(maxCount)
-            .Select(static item => item.Evidence.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    private const int MaxPerSourceEntry = 5;
+    private const int MaxPerEvidenceType = 8;
+
+    /// <summary>
+    /// Selects up to <paramref name="maxCount"/> evidence items while enforcing diversity:
+    /// max <see cref="MaxPerSourceEntry"/> items per source experience/project,
+    /// max <see cref="MaxPerEvidenceType"/> from any one evidence type,
+    /// and ensures at least one recommendation and one certification when available.
+    /// Also ensures every must-have theme has at least one backing evidence item.
+    /// </summary>
+    private static HashSet<string> SelectDiversified(
+        IReadOnlyList<RankedEvidenceItem> rankedEvidence,
+        int maxCount,
+        IReadOnlyList<string> mustHaveThemes)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var typeCount = new Dictionary<CandidateEvidenceType, int>();
+        var sourceCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        bool TryAdd(RankedEvidenceItem item)
+        {
+            if (selected.Contains(item.Evidence.Id))
+            {
+                return false;
+            }
+
+            var type = item.Evidence.Type;
+            var typeUsed = typeCount.GetValueOrDefault(type);
+            if (typeUsed >= MaxPerEvidenceType)
+            {
+                return false;
+            }
+
+            var source = item.Evidence.SourceReference ?? item.Evidence.Id;
+            var sourceUsed = sourceCount.GetValueOrDefault(source);
+            if (sourceUsed >= MaxPerSourceEntry)
+            {
+                return false;
+            }
+
+            selected.Add(item.Evidence.Id);
+            typeCount[type] = typeUsed + 1;
+            sourceCount[source] = sourceUsed + 1;
+            return true;
+        }
+
+        // Pass 1: ensure at least one recommendation if available.
+        var topRecommendation = rankedEvidence.FirstOrDefault(static r => r.Evidence.Type == CandidateEvidenceType.Recommendation);
+        if (topRecommendation is not null)
+        {
+            TryAdd(topRecommendation);
+        }
+
+        // Pass 2: ensure at least one certification if available.
+        var topCertification = rankedEvidence.FirstOrDefault(static r => r.Evidence.Type == CandidateEvidenceType.Certification);
+        if (topCertification is not null)
+        {
+            TryAdd(topCertification);
+        }
+
+        // Pass 3: ensure at least one evidence item per must-have theme.
+        foreach (var theme in mustHaveThemes)
+        {
+            if (selected.Count >= maxCount)
+            {
+                break;
+            }
+
+            var alreadyCovered = rankedEvidence
+                .Any(r => selected.Contains(r.Evidence.Id)
+                    && MatchText(r.Evidence, theme));
+            if (alreadyCovered)
+            {
+                continue;
+            }
+
+            var bestForTheme = rankedEvidence
+                .FirstOrDefault(r => !selected.Contains(r.Evidence.Id) && MatchText(r.Evidence, theme));
+            if (bestForTheme is not null)
+            {
+                TryAdd(bestForTheme);
+            }
+        }
+
+        // Pass 4: fill remaining slots by rank, respecting diversity caps.
+        foreach (var item in rankedEvidence)
+        {
+            if (selected.Count >= maxCount)
+            {
+                break;
+            }
+
+            TryAdd(item);
+        }
+
+        return selected;
+    }
 
     private static int BaseScore(CandidateEvidenceType type)
         => type switch
@@ -225,7 +321,11 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
     }
 
     private static string NormalizeEvidenceId(string value)
-        => value.Trim().ToLowerInvariant().Replace(' ', '-');
+        => string.Concat(value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(static character => char.IsLetterOrDigit(character) ? character : '-'))
+            .Trim('-');
 
     /// <summary>
     /// Returns a recency bonus: +6 for last 3 years, +3 for 3-7 years, 0 for older.

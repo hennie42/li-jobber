@@ -10,6 +10,10 @@ public sealed class CvQualityValidator
 {
     private const int MaxProfileNonEmptyLines = 4;
     private const int MaxCvNonEmptyLines = 80;
+    private const int CharsPerPage = 3000;
+    private const int ExtraCharsPerHeading = 80;
+    private const int MaxBulletsPerRoleWhenTrimming = 3;
+    private const int MaxRecommendationSentencesWhenTrimming = 2;
     private static readonly string[] OptionalTrimOrder =
     [
         "Recommendations",
@@ -48,6 +52,32 @@ public sealed class CvQualityValidator
             fixes.Add("TrimmedOptionalSectionsForLength");
         }
 
+        var careerYears = request.Candidate.Experience.Count > 0
+            ? DateTime.UtcNow.Year - (request.Candidate.Experience.Min(static e => e.Period.StartedOn?.Year) ?? DateTime.UtcNow.Year)
+            : 0;
+        var targetPages = careerYears switch
+        {
+            < 10 => 2,
+            < 20 => 3,
+            _ => 4
+        };
+
+        var estimatedPages = EstimatePageCount(processedMarkdown);
+        if (estimatedPages > targetPages)
+        {
+            processedMarkdown = TrimBulletsPerRole(processedMarkdown, out var bulletsTrimmed);
+            if (bulletsTrimmed)
+            {
+                fixes.Add("TrimmedBulletsPerRoleForPageCount");
+            }
+
+            processedMarkdown = TrimRecommendationQuotes(processedMarkdown, out var recsTrimmed);
+            if (recsTrimmed)
+            {
+                fixes.Add("TrimmedRecommendationQuotesForPageCount");
+            }
+        }
+
         var quantifiedBulletCount = CountQuantifiedBullets(processedMarkdown);
         var missingThemes = request.JobPosting.MustHaveThemes
             .Where(theme => !string.IsNullOrWhiteSpace(theme)
@@ -71,7 +101,8 @@ public sealed class CvQualityValidator
             trimmedSections,
             fixes,
             missingThemes,
-            atsKeywordCoveragePercent);
+            atsKeywordCoveragePercent,
+            EstimatePageCount(processedMarkdown));
 
         return new CvQualityValidationResult(updatedDocument, report);
     }
@@ -257,5 +288,100 @@ public sealed class CvQualityValidator
     private sealed record MarkdownSection(string Heading, IReadOnlyList<string> Lines)
     {
         public string Body => string.Join(Environment.NewLine, Lines.Skip(1));
+    }
+
+    private static int EstimatePageCount(string markdown)
+    {
+        var headingCount = markdown.Split(["\r\n", "\n"], StringSplitOptions.None)
+            .Count(static line => line.StartsWith("##", StringComparison.Ordinal));
+        var totalChars = markdown.Length + (headingCount * ExtraCharsPerHeading);
+        return Math.Max(1, (int)Math.Ceiling((double)totalChars / CharsPerPage));
+    }
+
+    /// <summary>
+    /// Caps bullets per role at <see cref="MaxBulletsPerRoleWhenTrimming"/> to reduce page count.
+    /// Only trims within experience/project sections (### headings followed by bullet lists).
+    /// </summary>
+    private static string TrimBulletsPerRole(string markdown, out bool changed)
+    {
+        var lines = markdown.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var result = new List<string>();
+        var bulletCount = 0;
+        var inRoleBlock = false;
+        changed = false;
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("### ", StringComparison.Ordinal))
+            {
+                inRoleBlock = true;
+                bulletCount = 0;
+                result.Add(line);
+                continue;
+            }
+
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                inRoleBlock = false;
+                bulletCount = 0;
+                result.Add(line);
+                continue;
+            }
+
+            var trimmed = line.TrimStart();
+            if (inRoleBlock && (trimmed.StartsWith("- ", StringComparison.Ordinal) || trimmed.StartsWith("* ", StringComparison.Ordinal)))
+            {
+                bulletCount++;
+                if (bulletCount > MaxBulletsPerRoleWhenTrimming)
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+
+            result.Add(line);
+        }
+
+        return changed ? string.Join(Environment.NewLine, result) : markdown;
+    }
+
+    /// <summary>
+    /// Trims recommendation blockquotes to max <see cref="MaxRecommendationSentencesWhenTrimming"/> sentences.
+    /// </summary>
+    private static string TrimRecommendationQuotes(string markdown, out bool changed)
+    {
+        var lines = markdown.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var result = new List<string>();
+        changed = false;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (!line.StartsWith("> ", StringComparison.Ordinal))
+            {
+                result.Add(line);
+                continue;
+            }
+
+            var quoteText = line[2..];
+            var sentences = quoteText.Split([". ", "! ", "? "], StringSplitOptions.RemoveEmptyEntries);
+            if (sentences.Length > MaxRecommendationSentencesWhenTrimming)
+            {
+                var trimmedQuote = string.Join(". ", sentences.Take(MaxRecommendationSentencesWhenTrimming));
+                if (!trimmedQuote.EndsWith('.'))
+                {
+                    trimmedQuote += ".";
+                }
+
+                result.Add($"> {trimmedQuote}");
+                changed = true;
+            }
+            else
+            {
+                result.Add(line);
+            }
+        }
+
+        return changed ? string.Join(Environment.NewLine, result) : markdown;
     }
 }
