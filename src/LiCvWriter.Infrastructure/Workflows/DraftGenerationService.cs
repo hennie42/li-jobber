@@ -88,7 +88,10 @@ public sealed class DraftGenerationService(
                 LlmDuration = response.Duration,
                 PromptTokens = response.PromptTokens,
                 CompletionTokens = response.CompletionTokens,
-                Model = response.Model
+                Model = response.Model,
+                GeneratedSections = generatedSections is null
+                    ? null
+                    : generatedSections.Select(s => new CvSectionMarkdown(s.Section, s.Markdown)).ToList()
             };
 
             var cvQualityResult = cvQualityValidator.ValidateAndAutoFix(document, request);
