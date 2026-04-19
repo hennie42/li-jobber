@@ -89,6 +89,8 @@ public sealed class CvQualityValidator
             ? (int)Math.Round(100.0 * (totalMustHave - missingMustHaveThemeCount) / totalMustHave)
             : 0;
 
+        var keywordDensity = ComputeKeywordDensity(processedMarkdown, request.JobPosting.MustHaveThemes);
+
         var updatedDocument = fixes.Count > 0
             ? document with { Markdown = processedMarkdown, PlainText = processedMarkdown }
             : document;
@@ -102,7 +104,8 @@ public sealed class CvQualityValidator
             fixes,
             missingThemes,
             atsKeywordCoveragePercent,
-            EstimatePageCount(processedMarkdown));
+            EstimatePageCount(processedMarkdown),
+            keywordDensity);
 
         return new CvQualityValidationResult(updatedDocument, report);
     }
@@ -383,5 +386,45 @@ public sealed class CvQualityValidator
         }
 
         return changed ? string.Join(Environment.NewLine, result) : markdown;
+    }
+
+    /// <summary>
+    /// Counts occurrences of each must-have keyword in the CV text (case-insensitive).
+    /// Returns per-keyword density entries that power the ATS keyword coverage report.
+    /// </summary>
+    private static IReadOnlyList<KeywordDensityEntry> ComputeKeywordDensity(
+        string markdown, IReadOnlyList<string> mustHaveThemes)
+    {
+        var normalizedText = markdown.ToUpperInvariant();
+        var entries = new List<KeywordDensityEntry>();
+
+        foreach (var theme in mustHaveThemes)
+        {
+            if (string.IsNullOrWhiteSpace(theme))
+            {
+                continue;
+            }
+
+            var keyword = theme.Trim();
+            var normalizedKeyword = keyword.ToUpperInvariant();
+            var occurrences = CountOccurrences(normalizedText, normalizedKeyword);
+            entries.Add(new KeywordDensityEntry(keyword, occurrences, occurrences > 0));
+        }
+
+        return entries;
+    }
+
+    private static int CountOccurrences(string text, string keyword)
+    {
+        var count = 0;
+        var index = 0;
+
+        while ((index = text.IndexOf(keyword, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += keyword.Length;
+        }
+
+        return count;
     }
 }
