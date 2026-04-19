@@ -93,17 +93,15 @@ public sealed class DraftGenerationServiceTests
 
         await service.GenerateAsync(request);
 
-        var prompt = llmClient.LastRequest!.Messages[0].Content;
-        Assert.Contains("Fit review:", prompt);
-        Assert.Contains("Strength: Azure", prompt);
-        Assert.Contains("Overall fit score: 81/100 (Apply)", prompt);
-        Assert.Contains("Do not expose fit scores", prompt);
-        Assert.Contains("professional profile concise", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("one-page-first mindset", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Applicant differentiators", prompt);
-        Assert.Contains("Pragmatic AI architect", prompt);
-        Assert.Contains("Selected evidence:", prompt);
-        Assert.Contains("Lead Architect @ Contoso", prompt);
+        var combinedPrompts = string.Join("\n", llmClient.AllRequests.Select(r => r.Messages[0].Content));
+        Assert.Contains("Fit review:", combinedPrompts);
+        Assert.Contains("Strength: Azure", combinedPrompts);
+        Assert.Contains("Overall fit score: 81/100 (Apply)", combinedPrompts);
+        Assert.Contains("Do not expose fit scores", combinedPrompts);
+        Assert.Contains("Applicant differentiators", combinedPrompts);
+        Assert.Contains("Pragmatic AI architect", combinedPrompts);
+        Assert.Contains("Selected evidence:", combinedPrompts);
+        Assert.Contains("Lead Architect @ Contoso", combinedPrompts);
     }
 
     [Fact]
@@ -152,10 +150,113 @@ public sealed class DraftGenerationServiceTests
         var result = await service.GenerateAsync(CreateRequest());
         var document = Assert.Single(result.Documents);
 
-        Assert.Equal(TimeSpan.FromSeconds(2), document.LlmDuration);
-        Assert.Equal(12, document.PromptTokens);
-        Assert.Equal(34, document.CompletionTokens);
+        // CV path makes one call per section (3 default sections: ProfileSummary, KeySkills, ExperienceHighlights).
+        var calls = llmClient.AllRequests.Count;
+        Assert.Equal(3, calls);
+        Assert.Equal(TimeSpan.FromSeconds(2 * calls), document.LlmDuration);
+        Assert.Equal(12L * calls, document.PromptTokens);
+        Assert.Equal(34L * calls, document.CompletionTokens);
         Assert.Equal("configured-model", document.Model);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_Cv_MakesOneLlmCallPerSection()
+    {
+        var llmClient = new CapturingLlmClient();
+        var service = CreateService(llmClient, new RecordingAuditStore(), new OllamaOptions
+        {
+            Model = "configured-model",
+            Think = "medium",
+            UseChatEndpoint = true,
+            KeepAlive = "5m",
+            Temperature = 0.1
+        });
+
+        await service.GenerateAsync(CreateRequest());
+
+        // No projects in default candidate → ProjectHighlights skipped → 3 calls.
+        Assert.Equal(3, llmClient.AllRequests.Count);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_Cv_AddsProjectHighlightsCallWhenProjectsExist()
+    {
+        var llmClient = new CapturingLlmClient();
+        var service = CreateService(llmClient, new RecordingAuditStore(), new OllamaOptions
+        {
+            Model = "configured-model",
+            Think = "medium",
+            UseChatEndpoint = true,
+            KeepAlive = "5m",
+            Temperature = 0.1
+        });
+
+        var baseRequest = CreateRequest();
+        var requestWithProjects = baseRequest with
+        {
+            Candidate = baseRequest.Candidate with
+            {
+                Projects =
+                [
+                    new ProjectEntry("Cloud Migration Portal", "Built a self-service migration portal.", null, new DateRange())
+                ]
+            }
+        };
+
+        await service.GenerateAsync(requestWithProjects);
+
+        Assert.Equal(4, llmClient.AllRequests.Count);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_NonCvKind_MakesSingleLlmCall()
+    {
+        var llmClient = new CapturingLlmClient();
+        var service = CreateService(llmClient, new RecordingAuditStore(), new OllamaOptions
+        {
+            Model = "configured-model",
+            Think = "medium",
+            UseChatEndpoint = true,
+            KeepAlive = "5m",
+            Temperature = 0.1
+        });
+
+        var baseRequest = CreateRequest();
+        var coverLetterRequest = baseRequest with { DocumentKinds = [DocumentKind.CoverLetter] };
+
+        await service.GenerateAsync(coverLetterRequest);
+
+        Assert.Single(llmClient.AllRequests);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_Cv_PassesGeneratedSectionsToRenderer()
+    {
+        var llmClient = new CapturingLlmClient();
+        var capturingRenderer = new CapturingDocumentRenderer();
+        var service = new DraftGenerationService(
+            llmClient,
+            capturingRenderer,
+            new UnexpectedExportService(),
+            new RecordingAuditStore(),
+            new CvQualityValidator(),
+            new OllamaOptions
+            {
+                Model = "configured-model",
+                Think = "medium",
+                UseChatEndpoint = true,
+                KeepAlive = "5m",
+                Temperature = 0.1
+            });
+
+        await service.GenerateAsync(CreateRequest());
+
+        Assert.NotNull(capturingRenderer.LastRequest);
+        Assert.NotNull(capturingRenderer.LastRequest!.GeneratedSections);
+        var sections = capturingRenderer.LastRequest.GeneratedSections!;
+        Assert.Contains(sections, s => s.Section == CvSection.ProfileSummary);
+        Assert.Contains(sections, s => s.Section == CvSection.KeySkills);
+        Assert.Contains(sections, s => s.Section == CvSection.ExperienceHighlights);
     }
 
     private static DraftGenerationService CreateService(CapturingLlmClient llmClient, RecordingAuditStore auditStore, OllamaOptions options)
@@ -198,6 +299,7 @@ public sealed class DraftGenerationServiceTests
     private sealed class CapturingLlmClient : ILlmClient
     {
         public LlmRequest? LastRequest { get; private set; }
+        public List<LlmRequest> AllRequests { get; } = [];
 
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
@@ -208,6 +310,7 @@ public sealed class DraftGenerationServiceTests
             CancellationToken cancellationToken = default)
         {
             LastRequest = request;
+            AllRequests.Add(request);
             return Task.FromResult(new LlmResponse(
                 request.Model,
                 "Generated content",
@@ -228,6 +331,22 @@ public sealed class DraftGenerationServiceTests
                 "# Draft",
                 "Draft",
                 DateTimeOffset.UtcNow));
+    }
+
+    private sealed class CapturingDocumentRenderer : IDocumentRenderer
+    {
+        public DocumentRenderRequest? LastRequest { get; private set; }
+
+        public Task<GeneratedDocument> RenderAsync(DocumentRenderRequest request, CancellationToken cancellationToken = default)
+        {
+            LastRequest = request;
+            return Task.FromResult(new GeneratedDocument(
+                request.Kind,
+                $"{request.JobPosting.RoleTitle} draft",
+                "# Draft",
+                "Draft",
+                DateTimeOffset.UtcNow));
+        }
     }
 
     private sealed class UnexpectedExportService : IDocumentExportService
