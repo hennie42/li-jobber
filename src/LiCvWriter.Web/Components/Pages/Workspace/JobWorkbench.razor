@@ -1343,6 +1343,10 @@ else if (CanRunFitReview)
             {
                 // Ignore disconnects during teardown.
             }
+            catch (TaskCanceledException)
+            {
+                // Circuit may already be torn down when dispose runs.
+            }
         }
 
         activeStreamOperationId = null;

@@ -116,6 +116,10 @@
         {
             // Ignore disconnects during live updates.
         }
+        catch (TaskCanceledException)
+        {
+            // Circuit may already be torn down.
+        }
     }
 
     private IReadOnlyList<OperationStatusEntry> GetFinishedActivityEntries()
