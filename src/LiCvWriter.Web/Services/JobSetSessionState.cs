@@ -6,6 +6,21 @@ using LiCvWriter.Core.Profiles;
 
 namespace LiCvWriter.Web.Services;
 
+public enum JobSetSubtask
+{
+    JobContext,
+    FitReview,
+    TechnologyGap,
+    DraftGeneration
+}
+
+public enum JobSetSubtaskStatus
+{
+    NotStarted,
+    Running,
+    Done
+}
+
 public sealed record JobSetSessionState
 {
     public required string Id { get; init; }
@@ -25,6 +40,8 @@ public sealed record JobSetSessionState
     public JobSetProgressState ProgressState { get; init; } = JobSetProgressState.NotStarted;
 
     public string ProgressDetail { get; init; } = "LLM work not started for this job set.";
+
+    public JobSetSubtask? ActiveSubtask { get; init; }
 
     public string JobUrl { get; init; } = string.Empty;
 
@@ -59,4 +76,21 @@ public sealed record JobSetSessionState
     public string Title => JobPosting is not null
         ? $"{JobPosting.RoleTitle} @ {JobPosting.CompanyName}".Trim()
         : DefaultTitle;
+
+    public JobSetSubtaskStatus GetSubtaskStatus(JobSetSubtask subtask) => subtask switch
+    {
+        JobSetSubtask.JobContext => ActiveSubtask == JobSetSubtask.JobContext
+            ? JobSetSubtaskStatus.Running
+            : JobPosting is not null ? JobSetSubtaskStatus.Done : JobSetSubtaskStatus.NotStarted,
+        JobSetSubtask.FitReview => ActiveSubtask == JobSetSubtask.FitReview
+            ? JobSetSubtaskStatus.Running
+            : JobFitAssessment.HasSignals ? JobSetSubtaskStatus.Done : JobSetSubtaskStatus.NotStarted,
+        JobSetSubtask.TechnologyGap => ActiveSubtask == JobSetSubtask.TechnologyGap
+            ? JobSetSubtaskStatus.Running
+            : TechnologyGapAssessment.HasSignals ? JobSetSubtaskStatus.Done : JobSetSubtaskStatus.NotStarted,
+        JobSetSubtask.DraftGeneration => ActiveSubtask == JobSetSubtask.DraftGeneration
+            ? JobSetSubtaskStatus.Running
+            : GeneratedDocuments.Count > 0 ? JobSetSubtaskStatus.Done : JobSetSubtaskStatus.NotStarted,
+        _ => JobSetSubtaskStatus.NotStarted
+    };
 }

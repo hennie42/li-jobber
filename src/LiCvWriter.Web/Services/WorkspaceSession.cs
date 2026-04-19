@@ -144,12 +144,13 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
-    public void MarkJobSetRunning(string jobSetId, string detail)
+    public void MarkJobSetRunning(string jobSetId, string detail, JobSetSubtask? activeSubtask = null)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.Running,
-            ProgressDetail = detail
+            ProgressDetail = detail,
+            ActiveSubtask = activeSubtask ?? jobSet.ActiveSubtask
         });
     }
 
@@ -158,7 +159,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.Failed,
-            ProgressDetail = detail
+            ProgressDetail = detail,
+            ActiveSubtask = null
         });
     }
 
@@ -167,7 +169,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         UpdateJobSet(jobSetId, jobSet => jobSet with
         {
             ProgressState = JobSetProgressState.NotStarted,
-            ProgressDetail = detail
+            ProgressDetail = detail,
+            ActiveSubtask = null
         });
     }
 
@@ -363,10 +366,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             EvidenceSelection = EvidenceSelectionResult.Empty,
             LastFitReviewFingerprint = null,
             LastFitReviewIncludedLlmEnhancement = false,
-            ProgressState = JobSetProgressState.NotStarted,
-            ProgressDetail = "LLM work not started for this job set.",
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
-            Exports = Array.Empty<DocumentExportResult>()
+            Exports = Array.Empty<DocumentExportResult>(),
+            ActiveSubtask = null
         });
     }
 
@@ -380,10 +382,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             EvidenceSelection = EvidenceSelectionResult.Empty,
             LastFitReviewFingerprint = null,
             LastFitReviewIncludedLlmEnhancement = false,
-            ProgressState = JobSetProgressState.NotStarted,
-            ProgressDetail = "LLM work not started for this job set.",
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
-            Exports = Array.Empty<DocumentExportResult>()
+            Exports = Array.Empty<DocumentExportResult>(),
+            ActiveSubtask = null
         });
     }
 
@@ -470,7 +471,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ProgressState = JobSetProgressState.Done,
             ProgressDetail = "Markdown drafts generated for this job set.",
             GeneratedDocuments = documents,
-            Exports = exports
+            Exports = exports,
+            ActiveSubtask = null
         });
     }
 
@@ -481,7 +483,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ProgressState = JobSetProgressState.NotStarted,
             ProgressDetail = "LLM work not started for this job set.",
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
-            Exports = Array.Empty<DocumentExportResult>()
+            Exports = Array.Empty<DocumentExportResult>(),
+            ActiveSubtask = null
         }, notifyChanged);
     }
 

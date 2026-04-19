@@ -32,6 +32,13 @@
     </div>
 
     <div class="overview-row-signals">
+        <div class="subtask-indicators">
+            @foreach (var subtask in Subtasks)
+            {
+                var status = JobSet.GetSubtaskStatus(subtask);
+                <span class="subtask-chip subtask-@GetSubtaskStatusClass(status)" title="@FormatSubtaskLabel(subtask): @status">@FormatSubtaskLabel(subtask)</span>
+            }
+        </div>
         @if (JobSet.JobFitAssessment.HasSignals)
         {
             <span class="meta-chip">Fit: @JobSet.JobFitAssessment.Recommendation (@JobSet.JobFitAssessment.OverallScore)</span>
@@ -65,6 +72,14 @@
     [Parameter, EditorRequired] public JobSetSessionState JobSet { get; set; } = default!;
     [Parameter] public string ReadinessMessage { get; set; } = string.Empty;
 
+    private static readonly JobSetSubtask[] Subtasks =
+    [
+        JobSetSubtask.JobContext,
+        JobSetSubtask.FitReview,
+        JobSetSubtask.TechnologyGap,
+        JobSetSubtask.DraftGeneration
+    ];
+
     private static string GetIndicatorState(JobSetProgressState state) => state switch
     {
         JobSetProgressState.Done => "done",
@@ -96,4 +111,20 @@
 
     private static string BuildOpenFileUrl(string filePath)
         => $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder=false";
+
+    private static string GetSubtaskStatusClass(JobSetSubtaskStatus status) => status switch
+    {
+        JobSetSubtaskStatus.Done => "done",
+        JobSetSubtaskStatus.Running => "running",
+        _ => "not-started"
+    };
+
+    private static string FormatSubtaskLabel(JobSetSubtask subtask) => subtask switch
+    {
+        JobSetSubtask.JobContext => "Context",
+        JobSetSubtask.FitReview => "Fit",
+        JobSetSubtask.TechnologyGap => "Gap",
+        JobSetSubtask.DraftGeneration => "Drafts",
+        _ => subtask.ToString()
+    };
 }

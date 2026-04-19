@@ -46,7 +46,7 @@ public sealed class LlmOperationBroker(
 
         workspace.MarkLlmWorkStarted();
         workspace.ClearJobSetGeneratedArtifacts(input.JobSet.Id);
-        workspace.MarkJobSetRunning(input.JobSet.Id, "Draft generation is running for this tab.");
+        workspace.MarkJobSetRunning(input.JobSet.Id, "Draft generation is running for this tab.", JobSetSubtask.DraftGeneration);
         operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunDraftGenerationAsync(state, input);
@@ -77,7 +77,7 @@ public sealed class LlmOperationBroker(
         var state = BeginOperation(input.JobSet.Id, initialSnapshot);
 
         workspace.MarkLlmWorkStarted();
-        workspace.MarkJobSetRunning(input.JobSet.Id, "Job and company context analysis is running for this tab.");
+        workspace.MarkJobSetRunning(input.JobSet.Id, "Job and company context analysis is running for this tab.", JobSetSubtask.JobContext);
         operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunJobContextAnalysisAsync(state, input);
@@ -105,7 +105,7 @@ public sealed class LlmOperationBroker(
         var state = BeginOperation(input.JobSet.Id, initialSnapshot);
 
         workspace.MarkLlmWorkStarted();
-        workspace.MarkJobSetRunning(input.JobSet.Id, "Technology gap analysis is running for this tab.");
+        workspace.MarkJobSetRunning(input.JobSet.Id, "Technology gap analysis is running for this tab.", JobSetSubtask.TechnologyGap);
         operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunTechnologyGapAnalysisAsync(state, input);
@@ -132,7 +132,7 @@ public sealed class LlmOperationBroker(
 
         var state = BeginOperation(input.JobSet.Id, initialSnapshot);
 
-        workspace.MarkJobSetRunning(input.JobSet.Id, "Fit review is running for this tab.");
+        workspace.MarkJobSetRunning(input.JobSet.Id, "Fit review is running for this tab.", JobSetSubtask.FitReview);
         operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunFitReviewAnalysisAsync(state, input);
@@ -160,7 +160,7 @@ public sealed class LlmOperationBroker(
         var state = BeginOperation(input.JobSet.Id, initialSnapshot);
 
         workspace.MarkLlmWorkStarted();
-        workspace.MarkJobSetRunning(input.JobSet.Id, "Refresh all analysis is running for this tab.");
+        workspace.MarkJobSetRunning(input.JobSet.Id, "Refresh all analysis is running for this tab.", JobSetSubtask.JobContext);
         operations.BeginLlmOperation(initialSnapshot.Message, initialSnapshot.Detail);
 
         _ = RunRefreshAllAnalysisAsync(state, input);
@@ -508,7 +508,8 @@ public sealed class LlmOperationBroker(
                     state,
                     input.JobSet.Id,
                     "Reusing current fit review",
-                    $"Fit review is already current for {input.JobSet.Title}; skipping the preflight refresh.");
+                    $"Fit review is already current for {input.JobSet.Title}; skipping the preflight refresh.",
+                    activeSubtask: JobSetSubtask.FitReview);
             }
             else
             {
@@ -544,7 +545,8 @@ public sealed class LlmOperationBroker(
                 input.JobSet.Id,
                 "Generating targeted drafts",
                 $"{input.DocumentKinds.Count} document type(s) queued for {input.JobSet.Title}.",
-                input.SelectedModel);
+                input.SelectedModel,
+                JobSetSubtask.DraftGeneration);
 
             var result = await draftGenerationService.GenerateAsync(
                 new DraftGenerationRequest(
@@ -703,6 +705,9 @@ public sealed class LlmOperationBroker(
             var detail = companyProfile is null
                 ? "The job tab now has the latest target role context. Fit review and generation are still idle until you run them."
                 : "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.";
+
+            workspace.ResetJobSetProgress(input.JobSet.Id, detail);
+
             var completedSnapshot = state.GetSnapshot() with
             {
                 Status = "completed",
@@ -999,7 +1004,8 @@ public sealed class LlmOperationBroker(
                 input.InputMode == JobSetInputMode.PasteText
                     ? $"Refreshing pasted job text for {input.JobSet.Title}."
                     : $"Refreshing {input.JobUri} for {input.JobSet.Title}.",
-                input.SelectedModel);
+                input.SelectedModel,
+                JobSetSubtask.JobContext);
 
             if (input.InputMode == JobSetInputMode.PasteText)
             {
@@ -1083,7 +1089,8 @@ public sealed class LlmOperationBroker(
                     input.JobSet.Id,
                     "Analyzing technology gaps",
                     $"Comparing profile evidence against {input.JobSet.Title}.",
-                    input.SelectedModel);
+                    input.SelectedModel,
+                    JobSetSubtask.TechnologyGap);
 
                 var latestJobSetAfterFitReview = GetJobSetOrThrow(input.JobSet.Id);
                 var technologyGapAssessment = await gapAnalysisService.AnalyzeAsync(
@@ -1201,7 +1208,8 @@ public sealed class LlmOperationBroker(
             state,
             jobSetId,
             "Refreshing deterministic fit review",
-            $"Refreshing deterministic fit signals for {jobSetTitle}.");
+            $"Refreshing deterministic fit signals for {jobSetTitle}.",
+            activeSubtask: JobSetSubtask.FitReview);
 
         if (!fitRefreshService.RefreshJobSet(jobSetId))
         {
@@ -1219,7 +1227,8 @@ public sealed class LlmOperationBroker(
                 jobSetId,
                 "Enhancing fit review with LLM",
                 $"Semantic evidence matching is running for {jobSetTitle}.",
-                selectedModel);
+                selectedModel,
+                JobSetSubtask.FitReview);
 
             var enhanced = await fitEnhancementService.EnhanceAsync(
                 refreshedJobSet.JobFitAssessment,
@@ -1283,10 +1292,10 @@ public sealed class LlmOperationBroker(
         Publish(state, update.Completed ? "progress-completed" : "progress", progressSnapshot);
     }
 
-    private void PublishStage(LlmOperationState state, string jobSetId, string message, string detail, string? model = null)
+    private void PublishStage(LlmOperationState state, string jobSetId, string message, string detail, string? model = null, JobSetSubtask? activeSubtask = null)
     {
         operations.UpdateCurrent(message, detail);
-        workspace.MarkJobSetRunning(jobSetId, detail);
+        workspace.MarkJobSetRunning(jobSetId, detail, activeSubtask);
 
         var currentSnapshot = state.GetSnapshot();
         var snapshot = currentSnapshot with
