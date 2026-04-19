@@ -130,6 +130,15 @@ else
     {
         <p class="muted-text">@GetCurrentTaskStatusDetail()</p>
     }
+
+    <div class="subtask-indicators">
+        @foreach (var subtask in SubtaskList)
+        {
+            var status = CurrentJobSet.GetSubtaskStatus(subtask);
+            <span class="subtask-chip subtask-@GetSubtaskIndicatorClass(status)" title="@FormatSubtaskName(subtask): @status">@FormatSubtaskName(subtask)</span>
+        }
+    </div>
+
     @if (Workspace.JobSets.Count == 1)
     {
         <p class="muted-text">At least one jobset must remain in the workspace.</p>
@@ -672,6 +681,14 @@ else if (CanRunFitReview)
 
     private bool CanRunTechnologyGapCheck => Workspace.IsLlmReady && Workspace.CandidateProfile is not null && CurrentJobSet.JobPosting is not null;
 
+    private static readonly JobSetSubtask[] SubtaskList =
+    [
+        JobSetSubtask.JobContext,
+        JobSetSubtask.FitReview,
+        JobSetSubtask.TechnologyGap,
+        JobSetSubtask.DraftGeneration
+    ];
+
     private JobSetSessionState CurrentJobSet
     {
         get
@@ -873,13 +890,14 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.", JobSetSubtask.JobContext);
             analysis = await Operations.RunAsync(
                 AnalyzeJobMessage,
                 $"{uri} via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.AnalyzeAsync(uri, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
             Workspace.SetJobSetJobPosting(JobSetId!, analysis);
+            Workspace.ResetJobSetProgress(JobSetId!, "Job context ready. Fit review and generation idle.");
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -926,13 +944,14 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.", JobSetSubtask.JobContext);
             companyProfile = await Operations.RunAsync(
                 BuildCompanyContextMessage,
                 $"{urls.Length} source URLs via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.BuildCompanyProfileAsync(urls, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
             Workspace.SetJobSetCompanyProfile(JobSetId!, companyProfile);
+            Workspace.ResetJobSetProgress(JobSetId!, "Job context ready. Fit review and generation idle.");
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -978,13 +997,14 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Job analysis is running for this tab.", JobSetSubtask.JobContext);
             analysis = await Operations.RunAsync(
                 AnalyzeJobMessage,
                 $"pasted text via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.AnalyzeTextAsync(jobPostingText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
             Workspace.SetJobSetJobPosting(JobSetId!, analysis);
+            Workspace.ResetJobSetProgress(JobSetId!, "Job context ready. Fit review and generation idle.");
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -1030,13 +1050,14 @@ else if (CanRunFitReview)
                 Workspace.MarkLlmWorkStarted();
             }
 
-            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.", JobSetSubtask.JobContext);
             companyProfile = await Operations.RunAsync(
                 BuildCompanyContextMessage,
                 $"pasted text via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.BuildCompanyProfileFromTextAsync(companyContextText, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
             Workspace.SetJobSetCompanyProfile(JobSetId!, companyProfile);
+            Workspace.ResetJobSetProgress(JobSetId!, "Job context ready. Fit review and generation idle.");
             SyncFromWorkspace();
 
             if (emitSuccess)
@@ -1519,7 +1540,7 @@ else if (CanRunFitReview)
 
         try
         {
-            Workspace.MarkJobSetRunning(JobSetId!, "Fit review is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Fit review is running for this tab.", JobSetSubtask.FitReview);
             var refreshed = await Operations.RunAsync(
                 RefreshFitReviewMessage,
                 CurrentJobSet.Title,
@@ -1538,7 +1559,7 @@ else if (CanRunFitReview)
             if (CurrentJobSet.JobFitAssessment.Requirements.Any(static r => r.Match != JobRequirementMatch.Strong))
             {
                 Workspace.MarkLlmWorkStarted();
-                Workspace.MarkJobSetRunning(JobSetId!, "Enhancing fit review with LLM semantic matching.");
+                Workspace.MarkJobSetRunning(JobSetId!, "Enhancing fit review with LLM semantic matching.", JobSetSubtask.FitReview);
                 var enhanced = await FitEnhancementService.EnhanceAsync(
                     CurrentJobSet.JobFitAssessment,
                     Workspace.CandidateProfile!,
@@ -1588,7 +1609,7 @@ else if (CanRunFitReview)
         try
         {
             Workspace.MarkLlmWorkStarted();
-            Workspace.MarkJobSetRunning(JobSetId!, "Technology gap analysis is running for this tab.");
+            Workspace.MarkJobSetRunning(JobSetId!, "Technology gap analysis is running for this tab.", JobSetSubtask.TechnologyGap);
             var assessment = await Operations.RunAsync(
                 RefreshTechnologyGapMessage,
                 CurrentJobSet.Title,
@@ -2041,4 +2062,20 @@ else if (CanRunFitReview)
             JobRequirementMatch.Partial => "status-pending",
             _ => "status-error"
         };
+
+    private static string GetSubtaskIndicatorClass(JobSetSubtaskStatus status) => status switch
+    {
+        JobSetSubtaskStatus.Done => "done",
+        JobSetSubtaskStatus.Running => "running",
+        _ => "not-started"
+    };
+
+    private static string FormatSubtaskName(JobSetSubtask subtask) => subtask switch
+    {
+        JobSetSubtask.JobContext => "Context",
+        JobSetSubtask.FitReview => "Fit",
+        JobSetSubtask.TechnologyGap => "Gap",
+        JobSetSubtask.DraftGeneration => "Drafts",
+        _ => subtask.ToString()
+    };
 }
