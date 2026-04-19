@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using LiCvWriter.Core.Jobs;
 using LiCvWriter.Core.Profiles;
 
@@ -105,11 +106,55 @@ public sealed class EvidenceSelectionService(CandidateEvidenceService candidateE
             reasons.Add("Recent and relevant experience.");
         }
 
+        // Recommendation specificity: longer, more specific recommendations score higher.
+        if (evidence.Type == CandidateEvidenceType.Recommendation)
+        {
+            var specificity = ScoreRecommendationStrength(evidence.Summary);
+            score += specificity;
+            if (specificity >= 4)
+            {
+                reasons.Add("Highly specific recommendation with concrete detail.");
+            }
+        }
+
         return new RankedEvidenceItem(
             evidence,
             score,
             reasons.Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToArray(),
             false);
+    }
+
+    /// <summary>
+    /// Scores a recommendation's strength based on specificity indicators.
+    /// Returns 0-6 bonus points.
+    /// </summary>
+    internal static int ScoreRecommendationStrength(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0;
+        }
+
+        var score = 0;
+
+        // Length: longer recommendations tend to be more substantive.
+        if (text.Length > 300) score += 2;
+        else if (text.Length > 150) score += 1;
+
+        // Concrete indicators: numbers, metrics, specific technologies.
+        if (Regex.IsMatch(text, @"\d+[%+xX]|\d+\s*(years?|months?|team|people|projects?)", RegexOptions.IgnoreCase))
+        {
+            score += 2;
+        }
+
+        // Action/impact language indicating specific observations.
+        var impactKeywords = new[] { "led", "delivered", "built", "architected", "transformed", "improved", "drove", "scaled", "mentored", "spearheaded" };
+        if (impactKeywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 2;
+        }
+
+        return Math.Min(score, 6);
     }
 
     private static bool MatchesRequirement(CandidateEvidenceItem evidence, IReadOnlyList<string> aliases)

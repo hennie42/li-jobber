@@ -216,7 +216,22 @@ public sealed class DraftGenerationService(
             DocumentKind.ProfileSummary =>
                 $"Write a short {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it crisp, concrete, and senior without hype.",
             DocumentKind.InterviewNotes =>
-                $"Prepare {lang} interview notes for a {role} position at {company}, grounded in supplied evidence.{nameRule} Focus on likely themes, proof points, and talking angles tied to the job and company context.",
+                $"""
+                Prepare {lang} interview notes for a {role} position at {company}, grounded in supplied evidence.{nameRule}
+
+                Structure:
+                1. **Likely Interview Themes** — 3-5 key themes interviewers will probe, based on the job posting and fit review.
+                2. **STAR Examples** — For each theme, prepare a ready-to-use Situation → Task → Action → Result example drawn from the candidate's actual experience, projects, or certifications. Include 3-5 examples total.
+                3. **Gap-Bridging Talking Points** — For each identified gap in the fit review, prepare a concise talking point that reframes the gap positively using transferable skills or adjacent experience. Reference the gap framing strategies if available.
+                4. **Questions to Ask the Interviewer** — 3-5 insightful questions the candidate should ask, tailored to the company context and role specifics.
+                5. **Key Proof Points** — Bullet list of the strongest evidence items (metrics, achievements, recommendations) to weave into answers naturally.
+
+                Rules:
+                - Every STAR example must reference real experience from the supplied evidence — never fabricate.
+                - Keep each STAR example concise (4-6 sentences covering all four STAR elements).
+                - Questions to ask should demonstrate domain knowledge and genuine interest.
+                - Frame gaps as growth areas or transferable skill opportunities, never as weaknesses.
+                """,
             _ =>
                 $"Write high-quality {lang} application material for a {role} position at {company}, using only supplied evidence.{nameRule}"
         };
