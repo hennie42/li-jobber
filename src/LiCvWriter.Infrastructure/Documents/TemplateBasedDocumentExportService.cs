@@ -37,9 +37,9 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         new("FitSnapshot", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Fit Snapshot", "Matchvurdering")),
         new("Experience", CvSection.ExperienceHighlights, "Professional Experience", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
         new("Projects", CvSection.ProjectHighlights, "Projects", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
-        new("EarlyCareer", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early career", "Tidlig karriere")),
-        new("Recommendations", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
+        new("EarlyCareer", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Earlier Career", "Tidlig karriere")),
         new("Certifications", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
+        new("Recommendations", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
     ];
 
     public async Task<DocumentExportResult> ExportAsync(GeneratedDocument document, CancellationToken cancellationToken = default)

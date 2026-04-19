@@ -89,11 +89,12 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                 }
 
                 AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
-                AppendTopRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
                 if (HasSelectedCertifications(selectedEvidence))
                 {
                     AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
                 }
+
+                AppendTopRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
 
                 break;
             case DocumentKind.CoverLetter:
@@ -285,23 +286,17 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         {
             var periodSuffix = string.IsNullOrWhiteSpace(project.Period.DisplayValue)
                 ? string.Empty
-                : $" | {project.Period.DisplayValue}";
-            builder.AppendLine($"### {project.Title}{periodSuffix}");
-
-            if (!string.IsNullOrWhiteSpace(project.Description))
-            {
-                builder.AppendLine();
-                builder.AppendLine(project.Description.Trim());
-            }
-
-            if (project.Url is not null)
-            {
-                builder.AppendLine();
-                builder.AppendLine($"[{project.Url}]({project.Url})");
-            }
-
-            builder.AppendLine();
+                : $" ({project.Period.DisplayValue})";
+            var desc = string.IsNullOrWhiteSpace(project.Description)
+                ? string.Empty
+                : $" — {project.Description.Trim()}";
+            var urlSuffix = project.Url is not null
+                ? $" [{project.Url}]({project.Url})"
+                : string.Empty;
+            builder.AppendLine($"- **{project.Title}**{periodSuffix}{desc}{urlSuffix}");
         }
+
+        builder.AppendLine();
     }
 
     private static void AppendEarlyCareer(
@@ -315,46 +310,25 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             return;
         }
 
-        builder.AppendLine($"## {Translate(outputLanguage, "Early career", "Tidlig karriere")}");
+        builder.AppendLine($"## {Translate(outputLanguage, "Earlier Career", "Tidlig karriere")}");
         builder.AppendLine();
 
-        var roleCount = earlyCareerExperience.Count;
-        var projectCount = earlyCareerProjects.Count;
-        var years = earlyCareerExperience
-            .Select(static role => GetReferenceYear(role.Period))
-            .Concat(earlyCareerProjects.Select(static project => GetReferenceYear(project.Period)))
-            .Where(static year => year.HasValue)
-            .Select(static year => year!.Value)
-            .ToArray();
-        var yearRange = years.Length > 0
-            ? $" ({years.Min()}-{years.Max()})"
-            : string.Empty;
-
-        var summaryLine = (roleCount, projectCount, outputLanguage) switch
+        foreach (var role in earlyCareerExperience)
         {
-            (_, > 0, OutputLanguage.Danish) when roleCount > 0 =>
-                $"Fremhaevninger fra tidlig karriere paa tvaers af {roleCount} roller og {projectCount} projekter{yearRange}.",
-            (> 0, 0, OutputLanguage.Danish) =>
-                $"Fremhaevninger fra tidlig karriere paa tvaers af {roleCount} roller{yearRange}.",
-            (0, > 0, OutputLanguage.Danish) =>
-                $"Fremhaevninger fra tidlig karriere paa tvaers af {projectCount} projekter{yearRange}.",
-            (_, > 0, OutputLanguage.English) when roleCount > 0 =>
-                $"Early career highlights from {roleCount} roles and {projectCount} projects{yearRange}.",
-            (> 0, 0, OutputLanguage.English) =>
-                $"Early career highlights from {roleCount} roles{yearRange}.",
-            _ =>
-                $"Early career highlights from {projectCount} projects{yearRange}."
-        };
+            var periodSuffix = string.IsNullOrWhiteSpace(role.Period.DisplayValue)
+                ? string.Empty
+                : $" ({role.Period.DisplayValue})";
+            builder.AppendLine($"- **{role.Title}** | {role.CompanyName}{periodSuffix}");
+        }
 
-        builder.AppendLine(summaryLine);
-        builder.AppendLine();
+        foreach (var project in earlyCareerProjects)
+        {
+            var periodSuffix = string.IsNullOrWhiteSpace(project.Period.DisplayValue)
+                ? string.Empty
+                : $" ({project.Period.DisplayValue})";
+            builder.AppendLine($"- **{project.Title}**{periodSuffix}");
+        }
 
-        builder.AppendLine(outputLanguage == OutputLanguage.Danish
-            ? "- Etablerede et staerkt fundament gennem leverancer i varierede miljoeer og samarbejde paa tvaers af teams."
-            : "- Built a strong foundation through delivery in varied environments and cross-functional collaboration.");
-        builder.AppendLine(outputLanguage == OutputLanguage.Danish
-            ? "- Udviklede overfoerbare styrker inden for eksekvering, stakeholder-samarbejde og teknisk bredde."
-            : "- Developed transferable strengths in execution, stakeholder collaboration, and technical breadth.");
         builder.AppendLine();
     }
 
@@ -395,17 +369,15 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
         foreach (var recommendation in ranked)
         {
-            var authorHeading = $"{recommendation.Author.FullName}{FormatAt(recommendation.Company, outputLanguage)}";
+            var authorLine = $"{recommendation.Author.FullName}{FormatAt(recommendation.Company, outputLanguage)}";
             if (!string.IsNullOrWhiteSpace(recommendation.JobTitle))
             {
-                authorHeading += $", {recommendation.JobTitle}";
+                authorLine += $", {recommendation.JobTitle}";
             }
 
-            builder.AppendLine($"### {authorHeading}");
-            builder.AppendLine();
-
             var translationNote = GetTranslationAnnotation(recommendation.Text, outputLanguage);
-            builder.AppendLine($"> {recommendation.Text}{translationNote}");
+            builder.AppendLine($"> *\"{recommendation.Text}\"{translationNote}*");
+            builder.AppendLine($"> — {authorLine}");
             builder.AppendLine();
         }
     }
