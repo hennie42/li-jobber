@@ -187,6 +187,99 @@ public sealed class OllamaClientTests
         Assert.Contains("stopped streaming", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenThinkingEntersRepetitionLoop_ThrowsTimeoutException()
+    {
+        // Build incremental thinking chunks that produce a repeating pattern in the buffer.
+        // Each chunk is a small unique word-level delta so AppendStreamingText appends them.
+        var phrase = "worked with multiple teams doing work with generative AI and I ";
+        var chunks = new StringBuilder();
+        for (var i = 0; i < 15; i++)
+        {
+            foreach (var word in phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                chunks.AppendLine($"{{\"model\":\"session-model\",\"message\":{{\"content\":\"\",\"thinking\":\"{EscapeJson(word + " ")}\"}},\"done\":false}}");
+            }
+        }
+
+        using var httpClient = CreateClient(request => request.RequestUri?.AbsolutePath switch
+        {
+            "/api/chat" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(chunks.ToString(), Encoding.UTF8, "application/x-ndjson")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions
+        {
+            Model = "session-model",
+            RepetitionDetectionMinLength = 200
+        });
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => client.GenerateAsync(
+            new LlmRequest(
+                "session-model",
+                null,
+                [new LlmChatMessage("user", "hi")],
+                UseChatEndpoint: true,
+                Stream: true)));
+
+        Assert.Contains("repetition loop", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("short text", 500, false)]
+    [InlineData("", 500, false)]
+    public void DetectRepetitionLoop_ShortBuffer_ReturnsFalse(string text, int minLength, bool expected)
+    {
+        var buffer = new StringBuilder(text);
+        Assert.Equal(expected, OllamaClient.DetectRepetitionLoop(buffer, minLength));
+    }
+
+    [Fact]
+    public void DetectRepetitionLoop_RepeatingPattern_ReturnsTrue()
+    {
+        var pattern = "worked with multiple teams doing ";
+        var buffer = new StringBuilder();
+        for (var i = 0; i < 20; i++)
+        {
+            buffer.Append(pattern);
+        }
+
+        Assert.True(OllamaClient.DetectRepetitionLoop(buffer, 100));
+    }
+
+    [Fact]
+    public void DetectRepetitionLoop_NormalVariedText_ReturnsFalse()
+    {
+        var buffer = new StringBuilder();
+        buffer.Append("The candidate has extensive experience in software architecture and cloud-native solutions. ");
+        buffer.Append("They led cross-functional teams at multiple organizations, delivering microservice platforms. ");
+        buffer.Append("Key achievements include reducing deployment time by 60% and improving system reliability to 99.9%. ");
+        buffer.Append("Their expertise spans Azure, Kubernetes, and event-driven architectures with strong mentoring skills. ");
+        buffer.Append("This is clearly a strong candidate for the role with relevant domain experience in financial services. ");
+        buffer.Append("The recommendation highlights their ability to communicate complex technical concepts to stakeholders. ");
+
+        Assert.False(OllamaClient.DetectRepetitionLoop(buffer, 100));
+    }
+
+    [Fact]
+    public void DetectRepetitionLoop_DisabledWithZeroMinLength_ReturnsFalse()
+    {
+        var pattern = "repeating phrase ";
+        var buffer = new StringBuilder();
+        for (var i = 0; i < 20; i++)
+        {
+            buffer.Append(pattern);
+        }
+
+        Assert.False(OllamaClient.DetectRepetitionLoop(buffer, 0));
+    }
+
+    private static string EscapeJson(string value)
+        => value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
+
     private static HttpClient CreateClient(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         => new(new StubMessageHandler(responseFactory))
         {
