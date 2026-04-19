@@ -67,18 +67,14 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
 
         messages.AddRange(request.Messages.Select(message => new { role = message.Role, content = message.Content }));
 
-        var payload = new
-        {
-            model = request.Model,
+        var payload = BuildChatPayload(
+            request.Model,
             messages,
-            stream = useStreamingTransport,
-            think = request.Think ?? options.Think,
-            keep_alive = request.KeepAlive ?? options.KeepAlive,
-            options = new
-            {
-                temperature = request.Temperature ?? options.Temperature
-            }
-        };
+            useStreamingTransport,
+            request.Think ?? options.Think,
+            request.KeepAlive ?? options.KeepAlive,
+            request.Temperature ?? options.Temperature,
+            request.NumPredict);
 
         if (useStreamingTransport)
         {
@@ -111,19 +107,15 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         var prompt = string.Join(Environment.NewLine + Environment.NewLine, request.Messages.Select(static message => $"{message.Role}: {message.Content}"));
         var useStreamingTransport = request.Stream || progress is not null;
 
-        var payload = new
-        {
-            model = request.Model,
+        var payload = BuildGeneratePayload(
+            request.Model,
             prompt,
-            system = request.SystemPrompt,
-            stream = useStreamingTransport,
-            think = request.Think ?? options.Think,
-            keep_alive = request.KeepAlive ?? options.KeepAlive,
-            options = new
-            {
-                temperature = request.Temperature ?? options.Temperature
-            }
-        };
+            request.SystemPrompt,
+            useStreamingTransport,
+            request.Think ?? options.Think,
+            request.KeepAlive ?? options.KeepAlive,
+            request.Temperature ?? options.Temperature,
+            request.NumPredict);
 
         if (useStreamingTransport)
         {
@@ -145,6 +137,41 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             ReadLong(root, "prompt_eval_count"),
             ReadLong(root, "eval_count"),
             ReadDuration(root, "total_duration"));
+    }
+
+    /// <summary>
+    /// Builds the JSON payload for the /api/chat endpoint, conditionally including num_predict when set.
+    /// </summary>
+    private static object BuildChatPayload(
+        string model,
+        List<object> messages,
+        bool stream,
+        string think,
+        string keepAlive,
+        double temperature,
+        int? numPredict)
+    {
+        return numPredict is > 0
+            ? new { model, messages, stream, think, keep_alive = keepAlive, options = new { temperature, num_predict = numPredict.Value } }
+            : new { model, messages, stream, think, keep_alive = keepAlive, options = new { temperature } } as object;
+    }
+
+    /// <summary>
+    /// Builds the JSON payload for the /api/generate endpoint, conditionally including num_predict when set.
+    /// </summary>
+    private static object BuildGeneratePayload(
+        string model,
+        string prompt,
+        string? system,
+        bool stream,
+        string think,
+        string keepAlive,
+        double temperature,
+        int? numPredict)
+    {
+        return numPredict is > 0
+            ? new { model, prompt, system, stream, think, keep_alive = keepAlive, options = new { temperature, num_predict = numPredict.Value } }
+            : new { model, prompt, system, stream, think, keep_alive = keepAlive, options = new { temperature } } as object;
     }
 
     private async Task<IReadOnlyList<OllamaRunningModel>> TryGetRunningModelsAsync(CancellationToken cancellationToken)

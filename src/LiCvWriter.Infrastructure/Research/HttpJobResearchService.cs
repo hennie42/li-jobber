@@ -15,6 +15,8 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
 {
     private const int MaxJobContextCharacters = 8_000;
     private const int MaxCompanyContextCharacters = 12_000;
+    private const int ExtractionNumPredict = 4_096;
+    private const int InferenceNumPredict = 2_048;
     private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
@@ -61,6 +63,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
 
         var resolvedModel = ResolveModel(selectedModel);
+        var extractionThinking = ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel));
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 resolvedModel,
@@ -68,9 +71,10 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 [new LlmChatMessage("user", BuildJobUserPrompt(jobPostingUrl, title, heading, text))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
-                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                Think: extractionThinking,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.1,
+                NumPredict: ExtractionNumPredict),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -83,7 +87,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var analysis = ParseJobPostingAnalysis(response.Content, jobPostingUrl, heading, text);
 
         // Second pass: infer unstated requirements commonly expected for this role type.
-        var inferred = await InferHiddenRequirementsAsync(analysis, resolvedModel, ResolveThinkingLevel(selectedThinkingLevel), progress, cancellationToken);
+        var inferred = await InferHiddenRequirementsAsync(analysis, resolvedModel, extractionThinking, progress, cancellationToken);
         if (inferred.Count > 0)
         {
             analysis = analysis with { InferredRequirements = inferred };
@@ -131,9 +135,10 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 [new LlmChatMessage("user", BuildCompanyUserPrompt(sourceDocuments))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
-                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                Think: ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel)),
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.1,
+                NumPredict: ExtractionNumPredict),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -160,6 +165,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
 
         var resolvedModel = ResolveModel(selectedModel);
+        var extractionThinking = ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel));
         var response = await llmClient.GenerateAsync(
             new LlmRequest(
                 resolvedModel,
@@ -167,9 +173,10 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 [new LlmChatMessage("user", BuildPastedJobUserPrompt(jobPostingText))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
-                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                Think: extractionThinking,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.1,
+                NumPredict: ExtractionNumPredict),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -202,9 +209,10 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 [new LlmChatMessage("user", BuildPastedCompanyUserPrompt(companyContextText))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
-                Think: ResolveThinkingLevel(selectedThinkingLevel),
+                Think: ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel)),
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.1,
+                NumPredict: ExtractionNumPredict),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -749,10 +757,11 @@ What implicit requirements are likely expected but unstated for this role?
                     systemPrompt,
                     [new LlmChatMessage("user", userPrompt)],
                     UseChatEndpoint: ollamaOptions.UseChatEndpoint,
-                    Stream: false,
-                    Think: thinkingLevel,
+                    Stream: true,
+                    Think: ResolveExtractionThinkingLevel(thinkingLevel),
                     KeepAlive: ollamaOptions.KeepAlive,
-                    Temperature: 0.2),
+                    Temperature: 0.2,
+                    NumPredict: InferenceNumPredict),
                 progress is null ? null : update => progress(update with
                 {
                     Message = "Inferring hidden requirements",
@@ -798,6 +807,14 @@ What implicit requirements are likely expected but unstated for this role?
 
     private string ResolveThinkingLevel(string? selectedThinkingLevel)
         => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();
+
+    /// <summary>
+    /// Caps the thinking level to "low" for structured extraction tasks.
+    /// Deep reasoning produces degenerate repetition loops on JSON-output prompts
+    /// without improving extraction quality.
+    /// </summary>
+    internal static string ResolveExtractionThinkingLevel(string thinkingLevel)
+        => thinkingLevel is "high" or "medium" ? "low" : thinkingLevel;
 
     private static string BuildJobSystemPrompt(string? sourceLanguageHint = null)
     {
