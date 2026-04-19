@@ -32,32 +32,54 @@ public sealed class DraftGenerationService(
         foreach (var kind in request.DocumentKinds.Distinct())
         {
             var documentStopwatch = Stopwatch.StartNew();
-            var systemPrompt = GetSystemPrompt(kind, outputLanguage, request.JobPosting);
-            var userPrompt = BuildUserPrompt(kind, request);
 
-            var response = await llmClient.GenerateAsync(new LlmRequest(
-                selectedModel,
-                systemPrompt,
-                [new LlmChatMessage("user", userPrompt)],
-                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
-                Stream: true,
-                Think: selectedThinkingLevel,
-                KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: ollamaOptions.Temperature),
-                progress is null ? null : update => progress(PrefixProgress(kind, update)),
-                cancellationToken);
+            string? generatedBody;
+            IReadOnlyList<CvSectionContent>? generatedSections = null;
+            LlmResponse response;
+
+            if (kind == DocumentKind.Cv)
+            {
+                (generatedSections, response) = await GenerateCvSectionsAsync(
+                    request,
+                    selectedModel,
+                    selectedThinkingLevel,
+                    outputLanguage,
+                    progress,
+                    cancellationToken);
+                generatedBody = null;
+            }
+            else
+            {
+                var systemPrompt = GetSystemPrompt(kind, outputLanguage, request.JobPosting);
+                var userPrompt = BuildUserPrompt(kind, request);
+
+                response = await llmClient.GenerateAsync(new LlmRequest(
+                    selectedModel,
+                    systemPrompt,
+                    [new LlmChatMessage("user", userPrompt)],
+                    UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                    Stream: true,
+                    Think: selectedThinkingLevel,
+                    KeepAlive: ollamaOptions.KeepAlive,
+                    Temperature: ollamaOptions.Temperature),
+                    progress is null ? null : update => progress(PrefixProgress(kind, update)),
+                    cancellationToken);
+
+                generatedBody = response.Content;
+            }
 
             var renderedDocument = await documentRenderer.RenderAsync(new DocumentRenderRequest(
                 kind,
                 request.Candidate,
                 request.JobPosting,
                 request.CompanyContext,
-                response.Content,
+                generatedBody,
                 outputLanguage,
                 request.JobFitAssessment,
                 request.ApplicantDifferentiatorProfile,
                 request.EvidenceSelection,
-                request.TechnologyGapAssessment), cancellationToken);
+                request.TechnologyGapAssessment,
+                generatedSections), cancellationToken);
 
             var document = (string.IsNullOrWhiteSpace(request.ExportFolder)
                 ? renderedDocument
@@ -325,4 +347,226 @@ Additional instructions:
 
     private static string FormatOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? string.Empty : value;
+
+    private async Task<(IReadOnlyList<CvSectionContent> Sections, LlmResponse Aggregate)> GenerateCvSectionsAsync(
+        DraftGenerationRequest request,
+        string selectedModel,
+        string selectedThinkingLevel,
+        OutputLanguage outputLanguage,
+        Action<LlmProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        var sections = new List<CvSectionContent>();
+        var totalDuration = TimeSpan.Zero;
+        long totalPromptTokens = 0;
+        long totalCompletionTokens = 0;
+        var lastModel = selectedModel;
+        var lastThinking = string.Empty;
+
+        var sectionPlan = new List<CvSection>
+        {
+            CvSection.ProfileSummary,
+            CvSection.KeySkills,
+            CvSection.ExperienceHighlights
+        };
+        if (request.Candidate.Projects.Count > 0)
+        {
+            sectionPlan.Add(CvSection.ProjectHighlights);
+        }
+
+        foreach (var section in sectionPlan)
+        {
+            var systemPrompt = GetCvSectionSystemPrompt(section, outputLanguage, request.JobPosting);
+            var userPrompt = BuildCvSectionUserPrompt(section, request);
+            var sectionLabel = GetCvSectionLabel(section, outputLanguage);
+
+            var sectionResponse = await llmClient.GenerateAsync(new LlmRequest(
+                selectedModel,
+                systemPrompt,
+                [new LlmChatMessage("user", userPrompt)],
+                UseChatEndpoint: ollamaOptions.UseChatEndpoint,
+                Stream: true,
+                Think: selectedThinkingLevel,
+                KeepAlive: ollamaOptions.KeepAlive,
+                Temperature: ollamaOptions.Temperature),
+                progress is null ? null : update => progress(PrefixCvSectionProgress(sectionLabel, update)),
+                cancellationToken);
+
+            sections.Add(new CvSectionContent(
+                section,
+                sectionResponse.Content.Trim(),
+                sectionResponse.Duration,
+                sectionResponse.PromptTokens,
+                sectionResponse.CompletionTokens));
+
+            if (sectionResponse.Duration is { } d)
+            {
+                totalDuration += d;
+            }
+
+            totalPromptTokens += sectionResponse.PromptTokens ?? 0;
+            totalCompletionTokens += sectionResponse.CompletionTokens ?? 0;
+            lastModel = sectionResponse.Model;
+            lastThinking = sectionResponse.Thinking ?? lastThinking;
+        }
+
+        var combinedContent = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            sections.Select(s => $"<!-- {s.Section} -->{Environment.NewLine}{s.Markdown}"));
+
+        var aggregate = new LlmResponse(
+            lastModel,
+            combinedContent,
+            string.IsNullOrWhiteSpace(lastThinking) ? null : lastThinking,
+            Completed: true,
+            PromptTokens: totalPromptTokens > 0 ? totalPromptTokens : null,
+            CompletionTokens: totalCompletionTokens > 0 ? totalCompletionTokens : null,
+            Duration: totalDuration > TimeSpan.Zero ? totalDuration : null);
+
+        return (sections, aggregate);
+    }
+
+    private static LlmProgressUpdate PrefixCvSectionProgress(string sectionLabel, LlmProgressUpdate update)
+        => update with
+        {
+            Message = $"Generating CV — {sectionLabel}",
+            Detail = string.IsNullOrWhiteSpace(update.Detail)
+                ? $"{sectionLabel} is streaming from {update.Model}."
+                : $"{sectionLabel}: {update.Detail}"
+        };
+
+    private static string GetCvSectionLabel(CvSection section, OutputLanguage outputLanguage)
+        => (section, outputLanguage) switch
+        {
+            (CvSection.ProfileSummary, OutputLanguage.Danish) => "Professionel profil",
+            (CvSection.KeySkills, OutputLanguage.Danish) => "Nøgleteknologier",
+            (CvSection.ExperienceHighlights, OutputLanguage.Danish) => "Erhvervserfaring",
+            (CvSection.ProjectHighlights, OutputLanguage.Danish) => "Projekter",
+            (CvSection.ProfileSummary, _) => "Professional Profile",
+            (CvSection.KeySkills, _) => "Key Skills",
+            (CvSection.ExperienceHighlights, _) => "Experience",
+            (CvSection.ProjectHighlights, _) => "Projects",
+            _ => section.ToString()
+        };
+
+    private static string GetCvSectionSystemPrompt(CvSection section, OutputLanguage outputLanguage, JobPostingAnalysis jobPosting)
+    {
+        var lang = outputLanguage == OutputLanguage.Danish ? "Danish" : "English";
+        var role = jobPosting.RoleTitle;
+        var company = jobPosting.CompanyName;
+        var nameRule = outputLanguage == OutputLanguage.Danish
+            ? " Keep technology names, company names, quoted job phrases, and file names in their original or English form."
+            : string.Empty;
+        var commonRules =
+            $" Use only the supplied evidence — do not invent employers, dates, certifications, tools, metrics, or outcomes.{nameRule} Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks.";
+
+        return section switch
+        {
+            CvSection.ProfileSummary =>
+                $"Write a 3-4 line {lang} professional profile paragraph positioning the candidate for a {role} role at {company}. Lead with seniority and domain, fold in 2-3 of the role's key technologies/themes truthfully, and emphasize impact over duties.{commonRules}",
+            CvSection.KeySkills =>
+                $"Produce a single comma-separated keyword line of {lang} technologies and competencies tailored to the {role} role at {company}. Order keywords by relevance to the role's must-have themes; include only items the candidate has evidence for. No headings, no bullets — just the comma-separated line.{commonRules}",
+            CvSection.ExperienceHighlights =>
+                $"Rewrite the candidate's role descriptions as achievement-focused {lang} bullets for a {role} position at {company}. Use the format `### {{Title}} | {{Company}}` followed by the period on its own line, then 2-4 bullets per role starting with strong verbs and quantified outcomes where evidence allows.{commonRules}",
+            CvSection.ProjectHighlights =>
+                $"Rewrite the candidate's project descriptions as achievement-focused {lang} bullets relevant to the {role} role at {company}. Use the format `### {{Title}}` followed by the period on its own line, then 2-3 bullets per project highlighting outcomes and technologies used.{commonRules}",
+            _ => GetSystemPrompt(DocumentKind.Cv, outputLanguage, jobPosting)
+        };
+    }
+
+    private static string BuildCvSectionUserPrompt(CvSection section, DraftGenerationRequest request)
+    {
+        var languageLabel = request.OutputLanguage == OutputLanguage.Danish ? "Danish" : "English";
+        var candidate = request.Candidate;
+        var fitSummary = BuildFitSummary(request.JobFitAssessment);
+        var differentiators = FormatLines(request.ApplicantDifferentiatorProfile?.ToSummaryLines(), "- No applicant differentiator profile is stored for this session.");
+        var selectedEvidence = FormatSelectedEvidence(request.EvidenceSelection);
+        var languageContextLine = string.IsNullOrWhiteSpace(request.SourceLanguageHint)
+            ? string.Empty
+            : $"Job and company text source language: {request.SourceLanguageHint}. Output language: {languageLabel}.{Environment.NewLine}{Environment.NewLine}";
+
+        var roleHeader =
+            $"Target role: {request.JobPosting.RoleTitle} at {request.JobPosting.CompanyName}{Environment.NewLine}" +
+            $"Summary: {request.JobPosting.Summary}{Environment.NewLine}" +
+            $"Must-have themes: {FormatThemes(request.JobPosting.MustHaveThemes)}{Environment.NewLine}" +
+            $"Nice-to-have themes: {FormatThemes(request.JobPosting.NiceToHaveThemes)}";
+
+        var commonRules =
+            $"Rules:{Environment.NewLine}" +
+            $"- {PromptConstraints.EvidenceGrounding}{Environment.NewLine}" +
+            $"- {PromptConstraints.NoNegativeTraits}{Environment.NewLine}" +
+            $"- Do not expose fit scores, gap lists, or internal assessment data.{Environment.NewLine}" +
+            $"- Use job themes and fit review only to guide emphasis — never surface them directly.";
+
+        return section switch
+        {
+            CvSection.ProfileSummary => $"""
+{languageContextLine}Write the Professional Profile paragraph in {languageLabel}.
+
+{commonRules}
+
+{roleHeader}
+
+Candidate: {candidate.Name.FullName} | {candidate.Headline} | {candidate.Location} | {candidate.Industry}
+Summary: {candidate.Summary}
+
+Fit review:
+{fitSummary}
+
+Applicant differentiators:
+{differentiators}
+
+Additional instructions:
+{request.AdditionalInstructions}
+""",
+            CvSection.KeySkills => $"""
+{languageContextLine}Write the Key Technologies & Competencies keyword line in {languageLabel}.
+
+{commonRules}
+- Output only the comma-separated keyword line. No heading, no surrounding markdown.
+
+{roleHeader}
+
+Technology context:
+{BuildTechnologyContext(request.TechnologyGapAssessment)}
+
+Selected evidence:
+{selectedEvidence}
+""",
+            CvSection.ExperienceHighlights => $"""
+{languageContextLine}Rewrite the Professional Experience entries in {languageLabel}.
+
+{commonRules}
+
+{roleHeader}
+
+Fit review:
+{fitSummary}
+
+Experience (use these as source material; preserve titles, companies, and periods exactly):
+{string.Join(Environment.NewLine, candidate.Experience.Take(8).Select(FormatExperience))}
+
+Selected evidence:
+{selectedEvidence}
+
+Additional instructions:
+{request.AdditionalInstructions}
+""",
+            CvSection.ProjectHighlights => $"""
+{languageContextLine}Rewrite the Project highlights in {languageLabel}.
+
+{commonRules}
+
+{roleHeader}
+
+Projects (use these as source material; preserve titles and periods exactly):
+{string.Join(Environment.NewLine, candidate.Projects.Select(static project =>
+    $"- {project.Title} ({project.Period.DisplayValue}). {project.Description}"))}
+
+Selected evidence:
+{selectedEvidence}
+""",
+            _ => BuildUserPrompt(DocumentKind.Cv, request)
+        };
+    }
 }
