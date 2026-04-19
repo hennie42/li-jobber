@@ -31,15 +31,15 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
     /// </summary>
     private static readonly IReadOnlyList<CvSectionMapping> CvSectionMappings =
     [
-        new("CandidateHeader", CvMarkdownSectionExtractor.ExtractCandidateHeader),
-        new("ProfileSummary", CvMarkdownSectionExtractor.ExtractProfileSummary),
-        new("KeySkills", CvMarkdownSectionExtractor.ExtractKeySkills),
-        new("FitSnapshot", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Fit Snapshot", "Matchvurdering")),
-        new("Experience", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
-        new("Projects", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
-        new("EarlyCareer", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early career", "Tidlig karriere")),
-        new("Recommendations", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
-        new("Certifications", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
+        new("CandidateHeader", null, CvMarkdownSectionExtractor.ExtractCandidateHeader),
+        new("ProfileSummary", CvSection.ProfileSummary, CvMarkdownSectionExtractor.ExtractProfileSummary),
+        new("KeySkills", CvSection.KeySkills, CvMarkdownSectionExtractor.ExtractKeySkills),
+        new("FitSnapshot", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Fit Snapshot", "Matchvurdering")),
+        new("Experience", CvSection.ExperienceHighlights, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
+        new("Projects", CvSection.ProjectHighlights, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
+        new("EarlyCareer", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early career", "Tidlig karriere")),
+        new("Recommendations", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
+        new("Certifications", null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
     ];
 
     public async Task<DocumentExportResult> ExportAsync(GeneratedDocument document, CancellationToken cancellationToken = default)
@@ -94,9 +94,25 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
 
         var populatedTags = new HashSet<string>(StringComparer.Ordinal);
 
+        // Build a fast lookup of any LLM-generated sections attached to the
+        // document so we can skip the markdown round-trip and feed the raw
+        // section content straight into the matching content control.
+        var generatedSectionLookup = document.GeneratedSections is null
+            ? new Dictionary<CvSection, string>(0)
+            : document.GeneratedSections
+                .Where(s => !string.IsNullOrWhiteSpace(s.Markdown))
+                .ToDictionary(s => s.Section, s => s.Markdown);
+
         foreach (var mapping in CvSectionMappings)
         {
-            var sectionMarkdown = mapping.Extract(document.Markdown);
+            string? sectionMarkdown = null;
+            if (mapping.GeneratedSection is { } gs && generatedSectionLookup.TryGetValue(gs, out var generated))
+            {
+                sectionMarkdown = generated;
+            }
+
+            sectionMarkdown ??= mapping.Extract(document.Markdown);
+
             if (TemplateContentPopulator.PopulateContentControl(mainPart, mapping.Tag, sectionMarkdown))
             {
                 populatedTags.Add(mapping.Tag);
@@ -233,5 +249,5 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         return string.Concat(value.Select(character => invalid.Contains(character) ? '-' : character));
     }
 
-    private sealed record CvSectionMapping(string Tag, Func<string, string?> Extract);
+    private sealed record CvSectionMapping(string Tag, CvSection? GeneratedSection, Func<string, string?> Extract);
 }

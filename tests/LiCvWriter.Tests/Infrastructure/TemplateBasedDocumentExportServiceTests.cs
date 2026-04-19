@@ -214,4 +214,73 @@ Led the cloud migration program.
             }
         }
     }
+
+    [Fact]
+    public async Task ExportAsync_UsesGeneratedSectionsDirectlyWhenAttached()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+
+            // Markdown intentionally lacks the LLM-generated phrasing so we can prove
+            // the section content (not the markdown body) reached the template.
+            const string sparseMarkdown = """
+# Alex Taylor
+
+> Senior Architect
+
+## Target Role
+
+- Role: Lead Architect
+- Company: Contoso
+
+## Professional Profile
+
+Generic placeholder body.
+
+## Professional Experience
+
+### Lead Architect | Contoso
+
+2020-2024
+""";
+
+            var document = new GeneratedDocument(
+                DocumentKind.Cv,
+                "Alex Taylor CV",
+                sparseMarkdown,
+                "Alex Taylor",
+                DateTimeOffset.UtcNow,
+                GeneratedSections:
+                [
+                    new CvSectionMarkdown(CvSection.ProfileSummary, "Section-driven profile body for Lead Architect role."),
+                    new CvSectionMarkdown(CvSection.KeySkills, "Azure, Kubernetes, Terraform"),
+                    new CvSectionMarkdown(CvSection.ExperienceHighlights,
+                        "### Lead Architect | Contoso\n\n2020-2024\n\n- Cut migration time 40% via infra-as-code.")
+                ]);
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath, isEditable: false);
+            var mainPart = wordDoc.MainDocumentPart;
+            Assert.NotNull(mainPart);
+            var body = mainPart.Document?.Body;
+            Assert.NotNull(body);
+            var allText = body.InnerText;
+
+            Assert.Contains("Section-driven profile body for Lead Architect role.", allText);
+            Assert.Contains("Azure, Kubernetes, Terraform", allText);
+            Assert.Contains("Cut migration time 40% via infra-as-code.", allText);
+            Assert.DoesNotContain("Generic placeholder body.", allText);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }
