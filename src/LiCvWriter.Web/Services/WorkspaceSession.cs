@@ -26,6 +26,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private bool isLlmSessionConfigured;
     private bool hasStartedLlmWork;
     private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = LoadCapacityVerdicts(recoveryStore);
+    private ModelBenchmarkSession? lastBenchmarkSession = LoadLastBenchmarkSession(recoveryStore);
 
     public event Action? Changed;
 
@@ -95,6 +96,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         lock (gate)
         {
             capacityVerdicts[verdict.Model] = verdict;
+        }
+        NotifyChanged();
+    }
+
+    public ModelBenchmarkSession? LastBenchmarkSession => Read(() => lastBenchmarkSession);
+
+    public void SetLastBenchmarkSession(ModelBenchmarkSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        lock (gate)
+        {
+            lastBenchmarkSession = session;
         }
         NotifyChanged();
     }
@@ -718,6 +731,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         return NormalizeThinkingLevel(string.IsNullOrWhiteSpace(recoveredThinkingLevel) ? configuredThinkingLevel : recoveredThinkingLevel);
     }
 
+    private static ModelBenchmarkSession? LoadLastBenchmarkSession(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.LastBenchmarkSession;
+
     private static Dictionary<string, OllamaCapacityVerdict> LoadCapacityVerdicts(WorkspaceRecoveryStore? recoveryStore)
     {
         var dictionary = new Dictionary<string, OllamaCapacityVerdict>(StringComparer.OrdinalIgnoreCase);
@@ -863,7 +879,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             selectedThinkingLevel,
             linkedInImportDiagnostics,
             linkedInAuthorizationStatus,
-            capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase));
+            capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase),
+            lastBenchmarkSession);
 
     private void NotifyChanged()
     {

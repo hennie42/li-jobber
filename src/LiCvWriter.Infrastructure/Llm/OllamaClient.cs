@@ -243,10 +243,6 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             ReadDuration(root, "eval_duration"));
     }
 
-    /// <summary>
-    /// Builds the JSON payload for the /api/chat endpoint, conditionally including num_predict,
-    /// num_ctx, and the response format directive when set.
-    /// </summary>
     private static object BuildChatPayload(
         string model,
         List<object> messages,
@@ -272,10 +268,6 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         });
     }
 
-    /// <summary>
-    /// Builds the JSON payload for the /api/generate endpoint, conditionally including num_predict,
-    /// num_ctx, and the response format directive when set.
-    /// </summary>
     private static object BuildGeneratePayload(
         string model,
         string prompt,

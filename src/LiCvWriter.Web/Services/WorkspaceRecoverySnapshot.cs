@@ -14,7 +14,8 @@ public sealed record WorkspaceRecoverySnapshot(
     string SelectedThinkingLevel = "",
     LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics = null,
     LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null,
-    IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null);
+    IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null,
+    ModelBenchmarkSession? LastBenchmarkSession = null);
 
 public sealed record JobSetRecoveryState(
     string Id,

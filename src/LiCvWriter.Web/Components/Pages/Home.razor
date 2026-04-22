@@ -11,6 +11,7 @@
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
 @inject OllamaCapacityProbe CapacityProbe
+@inject ModelBenchmarkCoordinator BenchmarkCoordinator
 
 <PageTitle>Start / Setup</PageTitle>
 
@@ -102,7 +103,55 @@
 
                     <div class="button-row">
                         <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
+                        <button class="secondary-button" @onclick="StartBenchmarkAsync" disabled="@(!CanStartBenchmark)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking…" : "Benchmark all installed models")</button>
+                        @if (BenchmarkCoordinator.IsRunning)
+                        {
+                            <button class="link-button" @onclick="CancelBenchmark">Cancel benchmark</button>
+                        }
                     </div>
+
+                    @if (BenchmarkCoordinator.Current is { IsRunning: true } liveBenchmark)
+                    {
+                        <div class="status-chip status-pending">
+                            Benchmarking @liveBenchmark.CompletedCount/@liveBenchmark.TotalCount
+                            @if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel))
+                            {
+                                <span> — currently @liveBenchmark.CurrentModel</span>
+                            }
+                        </div>
+                    }
+                    else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
+                    {
+                        <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
+                            Last benchmark: @lastBenchmark.Results.Count model(s)
+                            @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
+                            — completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
+                        </div>
+                        <table class="compact-grid">
+                            <thead>
+                                <tr><th>#</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var benchmarkRow in lastBenchmark.Results)
+                                {
+                                    <tr>
+                                        <td>@benchmarkRow.Rank</td>
+                                        <td>@benchmarkRow.Model</td>
+                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.OverallScore.ToString("0.00") : "—")</td>
+                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.QualityScore.ToString("0.00") : "—")</td>
+                                        <td>@(benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "—")</td>
+                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.Fit.ToString() : (benchmarkRow.FailedReason ?? "failed"))</td>
+                                        <td>
+                                            @if (benchmarkRow.Succeeded)
+                                            {
+                                                <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(benchmarkRow.Model)">Use</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
                 }
                 else
                 {
@@ -622,6 +671,7 @@
     protected override void OnInitialized()
     {
         Operations.Changed += HandleChanged;
+        BenchmarkCoordinator.Changed += HandleChanged;
         availability = Workspace.OllamaAvailability;
         selectedModel = Workspace.SelectedLlmModel;
         selectedThinkingLevel = Workspace.SelectedThinkingLevel;
@@ -659,6 +709,7 @@
     public void Dispose()
     {
         Operations.Changed -= HandleChanged;
+        BenchmarkCoordinator.Changed -= HandleChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1167,4 +1218,75 @@
     }
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private bool CanStartBenchmark =>
+        !BenchmarkCoordinator.IsRunning
+        && availability is not null
+        && availability.AvailableModels.Count > 0;
+
+    private async Task StartBenchmarkAsync()
+    {
+        if (availability is null || availability.AvailableModels.Count == 0)
+        {
+            return;
+        }
+
+        var models = availability.AvailableModels
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        try
+        {
+            Operations.Info($"Benchmarking {models.Length} installed model(s). This can take a long time.");
+            await BenchmarkCoordinator.StartAsync(models);
+            var completed = BenchmarkCoordinator.Last;
+            if (completed is null)
+            {
+                return;
+            }
+            if (completed.IsCancelled)
+            {
+                Operations.Info("Model benchmark cancelled.", $"Captured {completed.Results.Count} partial result(s).");
+            }
+            else
+            {
+                var top = completed.Results.FirstOrDefault();
+                Operations.Success(
+                    "Model benchmark complete.",
+                    top is null ? null : $"Top model: {top.Model} (overall {top.OverallScore:0.00}).");
+            }
+        }
+        catch (Exception exception)
+        {
+            Operations.Error("Model benchmark failed to start.", exception.Message);
+        }
+    }
+
+    private void CancelBenchmark()
+    {
+        BenchmarkCoordinator.Cancel();
+    }
+
+    private async Task UseBenchmarkedModelAsync(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model) || availability is null)
+        {
+            return;
+        }
+
+        try
+        {
+            selectedModel = model;
+            Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
+            Operations.Success($"Session model set to {model}.");
+            if (OllamaOptions.RunCapacityProbeOnModelSelect)
+            {
+                await RunCapacityProbeAsync(model);
+            }
+        }
+        catch (Exception exception)
+        {
+            Operations.Error($"Could not switch session model to {model}.", exception.Message);
+        }
+    }
 }
