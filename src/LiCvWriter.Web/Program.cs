@@ -66,6 +66,8 @@ builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
 builder.Services.AddScoped<ILlmClient>(provider =>
     provider.GetRequiredService<PromptCapturingLlmClient>());
 builder.Services.AddScoped<OllamaCapacityProbe>();
+builder.Services.AddScoped<OllamaModelBenchmarkService>();
+builder.Services.AddSingleton<ModelBenchmarkCoordinator>();
 
 builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(client =>
 {
