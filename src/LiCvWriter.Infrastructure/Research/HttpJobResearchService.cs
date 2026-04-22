@@ -73,8 +73,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 Stream: true,
                 Think: extractionThinking,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1,
-                NumPredict: ExtractionNumPredict),
+                Temperature: 0.0,
+                NumPredict: ExtractionNumPredict,
+                ResponseFormat: LlmResponseFormat.Json),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -137,8 +138,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 Stream: true,
                 Think: ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel)),
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1,
-                NumPredict: ExtractionNumPredict),
+                Temperature: 0.0,
+                NumPredict: ExtractionNumPredict,
+                ResponseFormat: LlmResponseFormat.Json),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -175,8 +177,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 Stream: true,
                 Think: extractionThinking,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1,
-                NumPredict: ExtractionNumPredict),
+                Temperature: 0.0,
+                NumPredict: ExtractionNumPredict,
+                ResponseFormat: LlmResponseFormat.Json),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -211,8 +214,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 Stream: true,
                 Think: ResolveExtractionThinkingLevel(ResolveThinkingLevel(selectedThinkingLevel)),
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1,
-                NumPredict: ExtractionNumPredict),
+                Temperature: 0.0,
+                NumPredict: ExtractionNumPredict,
+                ResponseFormat: LlmResponseFormat.Json),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -760,8 +764,9 @@ What implicit requirements are likely expected but unstated for this role?
                     Stream: true,
                     Think: ResolveExtractionThinkingLevel(thinkingLevel),
                     KeepAlive: ollamaOptions.KeepAlive,
-                    Temperature: 0.2,
-                    NumPredict: InferenceNumPredict),
+                    Temperature: 0.0,
+                    NumPredict: InferenceNumPredict,
+                    ResponseFormat: LlmResponseFormat.Json),
                 progress is null ? null : update => progress(update with
                 {
                     Message = "Inferring hidden requirements",

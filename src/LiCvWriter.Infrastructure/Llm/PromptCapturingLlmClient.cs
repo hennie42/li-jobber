@@ -23,6 +23,9 @@ public sealed class PromptCapturingLlmClient(ILlmClient inner) : ILlmClient
     public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
         => inner.VerifyModelAvailabilityAsync(cancellationToken);
 
+    public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+        => inner.GetModelInfoAsync(model, cancellationToken);
+
     public async Task<LlmResponse> GenerateAsync(
         LlmRequest request,
         Action<LlmProgressUpdate>? progress = null,

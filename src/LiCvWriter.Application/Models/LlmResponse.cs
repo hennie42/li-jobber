@@ -7,4 +7,7 @@ public sealed record LlmResponse(
     bool Completed,
     long? PromptTokens,
     long? CompletionTokens,
-    TimeSpan? Duration);
+    TimeSpan? Duration,
+    TimeSpan? LoadDuration = null,
+    TimeSpan? PromptEvalDuration = null,
+    TimeSpan? EvalDuration = null);

@@ -39,6 +39,100 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             runningModels);
     }
 
+    public async Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        long? fileSizeBytes = await TryGetTagFileSizeAsync(model, cancellationToken);
+
+        var payload = await TryPostShowAsync(model, cancellationToken);
+        if (payload is null)
+        {
+            return new OllamaModelInfo(model, fileSizeBytes, null, null, null, null);
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+
+        string? parameterSize = null;
+        string? quantization = null;
+        string? family = null;
+        if (root.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Object)
+        {
+            parameterSize = ReadString(details, "parameter_size");
+            quantization = ReadString(details, "quantization_level");
+            family = ReadString(details, "family");
+        }
+
+        long? contextLength = null;
+        if (root.TryGetProperty("model_info", out var modelInfo) && modelInfo.ValueKind == JsonValueKind.Object)
+        {
+            // The context_length key is namespaced by the architecture, e.g. "llama.context_length".
+            foreach (var property in modelInfo.EnumerateObject())
+            {
+                if (property.Name.EndsWith(".context_length", StringComparison.Ordinal)
+                    && property.Value.TryGetInt64(out var length))
+                {
+                    contextLength = length;
+                    break;
+                }
+            }
+        }
+
+        return new OllamaModelInfo(model, fileSizeBytes, parameterSize, quantization, family, contextLength);
+    }
+
+    private async Task<long?> TryGetTagFileSizeAsync(string model, CancellationToken cancellationToken)
+    {
+        var payload = await TryGetOptionalStatusPayloadAsync("tags", cancellationToken);
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        if (!document.RootElement.TryGetProperty("models", out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var element in array.EnumerateArray())
+        {
+            var name = ReadString(element, "name");
+            if (!string.IsNullOrWhiteSpace(name)
+                && string.Equals(name, model, StringComparison.OrdinalIgnoreCase)
+                && element.TryGetProperty("size", out var size)
+                && size.TryGetInt64(out var sizeValue))
+            {
+                return sizeValue;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string?> TryPostShowAsync(string model, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timeoutCancellation = CreateStatusTimeoutCancellation(cancellationToken);
+            using var response = await httpClient.PostAsJsonAsync("show", new { name = model, verbose = true }, timeoutCancellation.Token);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(timeoutCancellation.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
     public async Task<LlmResponse> GenerateAsync(
         LlmRequest request,
         Action<LlmProgressUpdate>? progress = null,
@@ -74,7 +168,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             request.Think ?? options.Think,
             request.KeepAlive ?? options.KeepAlive,
             request.Temperature ?? options.Temperature,
-            request.NumPredict);
+            request.NumPredict,
+            request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
+            request.ResponseFormat);
 
         if (useStreamingTransport)
         {
@@ -96,7 +192,10 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             root.GetProperty("done").GetBoolean(),
             ReadLong(root, "prompt_eval_count"),
             ReadLong(root, "eval_count"),
-            ReadDuration(root, "total_duration"));
+            ReadDuration(root, "total_duration"),
+            ReadDuration(root, "load_duration"),
+            ReadDuration(root, "prompt_eval_duration"),
+            ReadDuration(root, "eval_duration"));
     }
 
     private async Task<LlmResponse> GenerateWithPromptAsync(
@@ -115,7 +214,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             request.Think ?? options.Think,
             request.KeepAlive ?? options.KeepAlive,
             request.Temperature ?? options.Temperature,
-            request.NumPredict);
+            request.NumPredict,
+            request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
+            request.ResponseFormat);
 
         if (useStreamingTransport)
         {
@@ -136,11 +237,15 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             root.GetProperty("done").GetBoolean(),
             ReadLong(root, "prompt_eval_count"),
             ReadLong(root, "eval_count"),
-            ReadDuration(root, "total_duration"));
+            ReadDuration(root, "total_duration"),
+            ReadDuration(root, "load_duration"),
+            ReadDuration(root, "prompt_eval_duration"),
+            ReadDuration(root, "eval_duration"));
     }
 
     /// <summary>
-    /// Builds the JSON payload for the /api/chat endpoint, conditionally including num_predict when set.
+    /// Builds the JSON payload for the /api/chat endpoint, conditionally including num_predict,
+    /// num_ctx, and the response format directive when set.
     /// </summary>
     private static object BuildChatPayload(
         string model,
@@ -149,15 +254,27 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         string think,
         string keepAlive,
         double temperature,
-        int? numPredict)
+        int? numPredict,
+        int? numCtx,
+        LlmResponseFormat? responseFormat)
     {
-        return numPredict is > 0
-            ? new { model, messages, stream, think, keep_alive = keepAlive, options = new { temperature, num_predict = numPredict.Value } }
-            : new { model, messages, stream, think, keep_alive = keepAlive, options = new { temperature } } as object;
+        var optionsObject = BuildOptionsObject(temperature, numPredict, numCtx);
+        var format = ResolveFormatField(responseFormat);
+        return BuildPayload(new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["messages"] = messages,
+            ["stream"] = stream,
+            ["think"] = think,
+            ["keep_alive"] = keepAlive,
+            ["options"] = optionsObject,
+            ["format"] = format
+        });
     }
 
     /// <summary>
-    /// Builds the JSON payload for the /api/generate endpoint, conditionally including num_predict when set.
+    /// Builds the JSON payload for the /api/generate endpoint, conditionally including num_predict,
+    /// num_ctx, and the response format directive when set.
     /// </summary>
     private static object BuildGeneratePayload(
         string model,
@@ -167,11 +284,77 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         string think,
         string keepAlive,
         double temperature,
-        int? numPredict)
+        int? numPredict,
+        int? numCtx,
+        LlmResponseFormat? responseFormat)
     {
-        return numPredict is > 0
-            ? new { model, prompt, system, stream, think, keep_alive = keepAlive, options = new { temperature, num_predict = numPredict.Value } }
-            : new { model, prompt, system, stream, think, keep_alive = keepAlive, options = new { temperature } } as object;
+        var optionsObject = BuildOptionsObject(temperature, numPredict, numCtx);
+        var format = ResolveFormatField(responseFormat);
+        return BuildPayload(new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["prompt"] = prompt,
+            ["system"] = system,
+            ["stream"] = stream,
+            ["think"] = think,
+            ["keep_alive"] = keepAlive,
+            ["options"] = optionsObject,
+            ["format"] = format
+        });
+    }
+
+    private static IDictionary<string, object?> BuildOptionsObject(double temperature, int? numPredict, int? numCtx)
+    {
+        var dictionary = new Dictionary<string, object?>
+        {
+            ["temperature"] = temperature
+        };
+
+        if (numPredict is > 0)
+        {
+            dictionary["num_predict"] = numPredict.Value;
+        }
+
+        if (numCtx is > 0)
+        {
+            dictionary["num_ctx"] = numCtx.Value;
+        }
+
+        return dictionary;
+    }
+
+    private static object? ResolveFormatField(LlmResponseFormat? responseFormat)
+    {
+        if (responseFormat is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(responseFormat.SchemaJson))
+        {
+            // Ollama accepts a JSON Schema object directly as the format field.
+            return JsonSerializer.Deserialize<JsonElement>(responseFormat.SchemaJson);
+        }
+
+        return responseFormat.Format;
+    }
+
+    private static object BuildPayload(IDictionary<string, object?> fields)
+    {
+        // Strip null entries so we never emit them on the wire (Ollama treats some
+        // null fields as overrides rather than absences).
+        var trimmed = new Dictionary<string, object?>();
+        foreach (var (key, value) in fields)
+        {
+            if (value is null)
+            {
+                continue;
+            }
+
+            trimmed[key] = value;
+        }
+
+        return trimmed;
     }
 
     private async Task<IReadOnlyList<OllamaRunningModel>> TryGetRunningModelsAsync(CancellationToken cancellationToken)
@@ -193,7 +376,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
                 ReadString(element, "name") ?? string.Empty,
                 ReadString(element, "model") ?? string.Empty,
                 ReadDateTimeOffset(element, "expires_at"),
-                ReadLong(element, "size_vram")))
+                ReadLong(element, "size_vram"),
+                ReadLong(element, "size")))
             .Where(static runningModel => !string.IsNullOrWhiteSpace(runningModel.Name) || !string.IsNullOrWhiteSpace(runningModel.Model))
             .ToArray();
     }
@@ -238,6 +422,9 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         long? promptTokens = null;
         long? completionTokens = null;
         TimeSpan? duration = null;
+        TimeSpan? loadDuration = null;
+        TimeSpan? promptEvalDuration = null;
+        TimeSpan? evalDuration = null;
 
         while (true)
         {
@@ -284,6 +471,21 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             if (chunk.Duration is not null)
             {
                 duration = chunk.Duration;
+            }
+
+            if (chunk.LoadDuration is not null)
+            {
+                loadDuration = chunk.LoadDuration;
+            }
+
+            if (chunk.PromptEvalDuration is not null)
+            {
+                promptEvalDuration = chunk.PromptEvalDuration;
+            }
+
+            if (chunk.EvalDuration is not null)
+            {
+                evalDuration = chunk.EvalDuration;
             }
 
             completed |= chunk.Done;
@@ -356,7 +558,10 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completed,
             promptTokens,
             completionTokens,
-            finalDuration);
+            finalDuration,
+            loadDuration,
+            promptEvalDuration,
+            evalDuration);
     }
 
     private async Task<string?> ReadStreamingLineAsync(StreamReader reader, CancellationToken cancellationToken)
@@ -419,7 +624,10 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             ReadBool(root, "done"),
             ReadLong(root, "prompt_eval_count"),
             ReadLong(root, "eval_count"),
-            ReadDuration(root, "total_duration"));
+            ReadDuration(root, "total_duration"),
+            ReadDuration(root, "load_duration"),
+            ReadDuration(root, "prompt_eval_duration"),
+            ReadDuration(root, "eval_duration"));
     }
 
     private static StreamingChunk ExtractGenerateChunk(JsonElement root)
@@ -430,7 +638,10 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             ReadBool(root, "done"),
             ReadLong(root, "prompt_eval_count"),
             ReadLong(root, "eval_count"),
-            ReadDuration(root, "total_duration"));
+            ReadDuration(root, "total_duration"),
+            ReadDuration(root, "load_duration"),
+            ReadDuration(root, "prompt_eval_duration"),
+            ReadDuration(root, "eval_duration"));
 
     private static void ReportProgress(
         Action<LlmProgressUpdate>? progress,
@@ -593,5 +804,8 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         bool Done,
         long? PromptTokens,
         long? CompletionTokens,
-        TimeSpan? Duration);
+        TimeSpan? Duration,
+        TimeSpan? LoadDuration,
+        TimeSpan? PromptEvalDuration,
+        TimeSpan? EvalDuration);
 }
