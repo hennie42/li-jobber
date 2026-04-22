@@ -135,6 +135,7 @@ public sealed class ModelBenchmarkCoordinatorTests
         var coordinator = new ModelBenchmarkCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             workspace,
+            new OperationStatusService(),
             Options,
             TimeProvider.System);
 
