@@ -277,6 +277,88 @@ public sealed class OllamaClientTests
         Assert.False(OllamaClient.DetectRepetitionLoop(buffer, 0));
     }
 
+    [Fact]
+    public async Task GenerateAsync_PayloadIncludesFormatJson_AndNumCtx_WhenRequested()
+    {
+        string? capturedBody = null;
+        using var httpClient = CreateClient(request =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/chat")
+            {
+                capturedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"model":"session-model","message":{"content":"{\"ok\":true}"},"done":true,"prompt_eval_count":4,"eval_count":3,"total_duration":1000000000,"load_duration":250000000,"prompt_eval_duration":100000000,"eval_duration":750000000}""",
+                        Encoding.UTF8,
+                        "application/x-ndjson")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions { Model = "session-model" });
+
+        var response = await client.GenerateAsync(new LlmRequest(
+            "session-model",
+            null,
+            [new LlmChatMessage("user", "hi")],
+            UseChatEndpoint: true,
+            Stream: true,
+            NumCtx: 8192,
+            ResponseFormat: LlmResponseFormat.Json));
+
+        Assert.NotNull(capturedBody);
+        using var doc = System.Text.Json.JsonDocument.Parse(capturedBody!);
+        var root = doc.RootElement;
+        Assert.Equal("json", root.GetProperty("format").GetString());
+        var options = root.GetProperty("options");
+        Assert.Equal(8192, options.GetProperty("num_ctx").GetInt32());
+        Assert.True(options.TryGetProperty("temperature", out _));
+
+        // Duration capture from the done chunk.
+        Assert.Equal(TimeSpan.FromMilliseconds(250), response.LoadDuration);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), response.PromptEvalDuration);
+        Assert.Equal(TimeSpan.FromMilliseconds(750), response.EvalDuration);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PayloadOmitsFormat_WhenResponseFormatIsNull()
+    {
+        string? capturedBody = null;
+        using var httpClient = CreateClient(request =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/chat")
+            {
+                capturedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"model":"session-model","message":{"content":"ok"},"done":true,"total_duration":1000000000}""",
+                        Encoding.UTF8,
+                        "application/x-ndjson")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions { Model = "session-model" });
+
+        await client.GenerateAsync(new LlmRequest(
+            "session-model",
+            null,
+            [new LlmChatMessage("user", "hi")],
+            UseChatEndpoint: true,
+            Stream: true));
+
+        Assert.NotNull(capturedBody);
+        using var doc = System.Text.Json.JsonDocument.Parse(capturedBody!);
+        Assert.False(doc.RootElement.TryGetProperty("format", out _));
+        Assert.False(doc.RootElement.GetProperty("options").TryGetProperty("num_ctx", out _));
+    }
+
     private static string EscapeJson(string value)
         => value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
 
