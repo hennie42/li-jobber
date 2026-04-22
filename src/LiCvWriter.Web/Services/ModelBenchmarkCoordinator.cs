@@ -15,6 +15,7 @@ namespace LiCvWriter.Web.Services;
 public sealed class ModelBenchmarkCoordinator(
     IServiceScopeFactory scopeFactory,
     WorkspaceSession workspace,
+    OperationStatusService operations,
     OllamaOptions ollamaOptions,
     TimeProvider timeProvider)
 {
@@ -96,6 +97,9 @@ public sealed class ModelBenchmarkCoordinator(
 
             var model = models[index];
             UpdateProgress(model, results.ToArray(), index);
+            operations.UpdateCurrent(
+                $"Benchmarking {model} ({index + 1}/{models.Count})",
+                "Capacity probe + JSON quality fixture…");
 
             ModelBenchmarkResult result;
             using var perModelCts = perModelTimeoutSeconds > 0
@@ -151,6 +155,7 @@ public sealed class ModelBenchmarkCoordinator(
             }
 
             results.Add(result);
+            EmitPerModelActivity(result);
             UpdateProgress(
                 index + 1 < models.Count ? models[index + 1] : null,
                 results.ToArray(),
@@ -197,6 +202,19 @@ public sealed class ModelBenchmarkCoordinator(
         }
 
         Changed?.Invoke();
+    }
+
+    private void EmitPerModelActivity(ModelBenchmarkResult result)
+    {
+        if (!result.Succeeded)
+        {
+            operations.Error($"Benchmark failed: {result.Model}", result.FailedReason);
+            return;
+        }
+
+        var speed = result.DecodeTokensPerSecond is { } tps ? $"{tps:0.0} tok/s" : "speed n/a";
+        var detail = $"overall {result.OverallScore:0.00} • quality {result.QualityScore:0.00} • {speed} • {result.Fit}";
+        operations.Info($"Benchmarked {result.Model}", detail);
     }
 
     private static IReadOnlyList<ModelBenchmarkResult> RankResults(IEnumerable<ModelBenchmarkResult> results)
