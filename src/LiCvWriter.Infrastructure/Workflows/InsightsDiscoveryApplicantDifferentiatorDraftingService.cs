@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
 using LiCvWriter.Core.Profiles;
 
 namespace LiCvWriter.Infrastructure.Workflows;
@@ -11,6 +12,7 @@ namespace LiCvWriter.Infrastructure.Workflows;
 public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlmClient llmClient, OllamaOptions ollamaOptions)
 {
     private const int MaxPromptCharacters = 24_000;
+    private readonly LlmJsonInvoker jsonInvoker = new(llmClient);
 
     public async Task<ApplicantDifferentiatorProfile> DraftAsync(
         string extractedText,
@@ -25,7 +27,7 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
             throw new InvalidOperationException("The uploaded Insights Discovery PDF did not produce enough readable text to draft applicant differentiators.");
         }
 
-        var response = await llmClient.GenerateAsync(
+        var result = await jsonInvoker.InvokeAsync(
             new LlmRequest(
                 string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel,
                 BuildSystemPrompt(),
@@ -34,7 +36,9 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
                 Stream: true,
                 Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.0,
+                ResponseFormat: LlmResponseFormat.Json),
+            ParseDifferentiator,
             progress is null ? null : update => progress(update with
             {
                 Message = "Drafting applicant differentiators",
@@ -44,7 +48,8 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
             }),
             cancellationToken);
 
-        if (!TryParse(response.Content, out var differentiatorProfile))
+        var differentiatorProfile = result.Value;
+        if (differentiatorProfile is null)
         {
             throw new InvalidOperationException("The model did not return a valid applicant differentiator draft.");
         }
@@ -135,60 +140,33 @@ Insights Discovery profile text:
             + "[Source truncated for prompt length.]";
     }
 
-    private static bool TryParse(string content, out ApplicantDifferentiatorProfile differentiatorProfile)
+    private static ApplicantDifferentiatorProfile? ParseDifferentiator(string content)
     {
-        try
+        var json = LlmJsonInvoker.ExtractJsonObject(content);
+        var draft = JsonSerializer.Deserialize<ApplicantDifferentiatorDraft>(json, new JsonSerializerOptions
         {
-            var json = ExtractJsonObject(content);
-            var draft = JsonSerializer.Deserialize<ApplicantDifferentiatorDraft>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            PropertyNameCaseInsensitive = true
+        });
 
-            if (draft is null)
-            {
-                differentiatorProfile = ApplicantDifferentiatorProfile.Empty;
-                return false;
-            }
-
-            differentiatorProfile = new ApplicantDifferentiatorProfile
-            {
-                WorkStyle = NullIfWhiteSpace(draft.WorkStyle),
-                CommunicationStyle = NullIfWhiteSpace(draft.CommunicationStyle),
-                LeadershipStyle = NullIfWhiteSpace(draft.LeadershipStyle),
-                StakeholderStyle = NullIfWhiteSpace(draft.StakeholderStyle),
-                Motivators = NullIfWhiteSpace(draft.Motivators),
-                TargetNarrative = NullIfWhiteSpace(draft.TargetNarrative),
-                Watchouts = NullIfWhiteSpace(draft.Watchouts),
-                AboutApplicantBasis = NullIfWhiteSpace(draft.AboutApplicantBasis)
-            };
-            return true;
-        }
-        catch
+        if (draft is null)
         {
-            differentiatorProfile = ApplicantDifferentiatorProfile.Empty;
-            return false;
+            return null;
         }
+
+        return new ApplicantDifferentiatorProfile
+        {
+            WorkStyle = NullIfWhiteSpace(draft.WorkStyle),
+            CommunicationStyle = NullIfWhiteSpace(draft.CommunicationStyle),
+            LeadershipStyle = NullIfWhiteSpace(draft.LeadershipStyle),
+            StakeholderStyle = NullIfWhiteSpace(draft.StakeholderStyle),
+            Motivators = NullIfWhiteSpace(draft.Motivators),
+            TargetNarrative = NullIfWhiteSpace(draft.TargetNarrative),
+            Watchouts = NullIfWhiteSpace(draft.Watchouts),
+            AboutApplicantBasis = NullIfWhiteSpace(draft.AboutApplicantBasis)
+        };
     }
 
-    private static string ExtractJsonObject(string content)
-    {
-        var trimmed = content.Trim();
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            var lines = trimmed.Split('\n');
-            trimmed = string.Join('\n', lines.Skip(1).Take(lines.Length - 2));
-        }
-
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-        if (start >= 0 && end > start)
-        {
-            return trimmed[start..(end + 1)];
-        }
-
-        return trimmed;
-    }
+    private static string ExtractJsonObject(string content) => LlmJsonInvoker.ExtractJsonObject(content);
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

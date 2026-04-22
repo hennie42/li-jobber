@@ -10,6 +10,7 @@
 @inject OllamaOptions OllamaOptions
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
+@inject OllamaCapacityProbe CapacityProbe
 
 <PageTitle>Start / Setup</PageTitle>
 
@@ -51,6 +52,15 @@
                 ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
                 : "Model selection is still pending.")
         </div>
+        @{
+            var capacityVerdict = Workspace.CurrentCapacityVerdict;
+        }
+        @if (capacityVerdict is not null)
+        {
+            <div class="status-chip @CapacityChipClass(capacityVerdict.Fit)" title="@string.Join(" \u2022 ", capacityVerdict.Notes)">
+                Hardware fit: @capacityVerdict.Fit — @capacityVerdict.Headline
+            </div>
+        }
         <p class="muted-text">Discover locally available models, then choose which one to use for this session.</p>
 
         @if (isStep1Expanded)
@@ -813,9 +823,39 @@
         {
             llmErrorMessage = exception.Message;
             Operations.Error("Session LLM settings were not updated.", exception.Message);
+            return Task.CompletedTask;
+        }
+
+        if (OllamaOptions.RunCapacityProbeOnModelSelect)
+        {
+            _ = RunCapacityProbeAsync(Workspace.SelectedLlmModel);
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task RunCapacityProbeAsync(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return;
+        }
+
+        try
+        {
+            var verdict = await CapacityProbe.ProbeAsync(model);
+            Workspace.SetCapacityVerdict(verdict);
+            await InvokeAsync(StateHasChanged);
+            Operations.Info(
+                $"Hardware fit for {model}: {verdict.Fit}.",
+                verdict.Headline);
+        }
+        catch (Exception exception)
+        {
+            Operations.Info(
+                $"Could not measure hardware fit for {model}.",
+                exception.Message);
+        }
     }
 
     private async Task LoadDmaMemberSnapshotAsync()
@@ -936,6 +976,16 @@
         => string.IsNullOrWhiteSpace(value)
             ? "Pending"
             : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static string CapacityChipClass(OllamaCapacityFit fit) => fit switch
+    {
+        OllamaCapacityFit.Comfortable => "status-ok",
+        OllamaCapacityFit.Usable => "status-ok",
+        OllamaCapacityFit.PartialOffload => "status-pending",
+        OllamaCapacityFit.CpuOnly => "status-pending",
+        OllamaCapacityFit.TooLargeForInteractive => "status-error",
+        _ => "status-pending"
+    };
 
     private static string FormatRunningModels(OllamaModelAvailability availability)
         => availability.EffectiveRunningModels.Count == 0

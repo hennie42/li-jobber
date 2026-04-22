@@ -11,6 +11,8 @@ namespace LiCvWriter.Infrastructure.Workflows;
 
 public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, OllamaOptions ollamaOptions)
 {
+    private readonly LlmJsonInvoker jsonInvoker = new(llmClient);
+
     public async Task<TechnologyGapAssessment> AnalyzeAsync(
         CandidateProfile candidateProfile,
         JobPostingAnalysis jobPosting,
@@ -21,7 +23,7 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
         string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
-        var response = await llmClient.GenerateAsync(
+        var result = await jsonInvoker.InvokeAsync(
             new LlmRequest(
                 string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel,
                 BuildSystemPrompt(sourceLanguageHint),
@@ -30,7 +32,9 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
                 Stream: true,
                 Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: 0.1),
+                Temperature: 0.0,
+                ResponseFormat: LlmResponseFormat.Json),
+            ParseAssessment,
             progress is null ? null : update => progress(update with
             {
                 Message = "Analyzing technology gaps",
@@ -40,9 +44,7 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
             }),
             cancellationToken);
 
-        return TryParse(response.Content, out var assessment)
-            ? assessment
-            : TechnologyGapAnalyzer.Analyze(candidateProfile, jobPosting, companyProfile);
+        return result.Value ?? TechnologyGapAnalyzer.Analyze(candidateProfile, jobPosting, companyProfile);
     }
 
     private static string BuildSystemPrompt(string? sourceLanguageHint = null)
@@ -124,27 +126,20 @@ Rules:
         return builder.ToString();
     }
 
-    private static bool TryParse(string content, out TechnologyGapAssessment assessment)
+    private static TechnologyGapAssessment? ParseAssessment(string content)
     {
-        try
-        {
-            var json = ExtractJsonObject(content);
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
+        var json = LlmJsonInvoker.ExtractJsonObject(content);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
 
-            var detected = ReadArray(root, "detectedTechnologies");
-            var missing = ReadArray(root, "possiblyUnderrepresentedTechnologies")
-                .Where(item => detected.Contains(item, StringComparer.OrdinalIgnoreCase))
-                .ToArray();
+        var detected = ReadArray(root, "detectedTechnologies");
+        var missing = ReadArray(root, "possiblyUnderrepresentedTechnologies")
+            .Where(item => detected.Contains(item, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
 
-            assessment = new TechnologyGapAssessment(detected, missing);
-            return true;
-        }
-        catch
-        {
-            assessment = TechnologyGapAssessment.Empty;
-            return false;
-        }
+        return detected.Length == 0 && missing.Length == 0
+            ? null
+            : new TechnologyGapAssessment(detected, missing);
     }
 
     private static string[] ReadArray(JsonElement root, string propertyName)
@@ -160,24 +155,5 @@ Rules:
             .Where(static item => !string.IsNullOrWhiteSpace(item))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray()!;
-    }
-
-    private static string ExtractJsonObject(string content)
-    {
-        var trimmed = content.Trim();
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            var lines = trimmed.Split('\n');
-            trimmed = string.Join('\n', lines.Skip(1).Take(lines.Length - 2));
-        }
-
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-        if (start >= 0 && end > start)
-        {
-            return trimmed[start..(end + 1)];
-        }
-
-        return trimmed;
     }
 }

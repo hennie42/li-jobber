@@ -18,6 +18,8 @@ public sealed class LlmFitEnhancementService(
     ILlmClient llmClient,
     OllamaOptions ollamaOptions)
 {
+    private readonly LlmJsonInvoker jsonInvoker = new(llmClient);
+
     /// <summary>
     /// Enhances a deterministic <see cref="JobFitAssessment"/> by asking the LLM to
     /// re-evaluate Partial and Missing requirements against the full candidate profile.
@@ -46,7 +48,7 @@ public sealed class LlmFitEnhancementService(
 
         try
         {
-            var response = await llmClient.GenerateAsync(
+            var result = await jsonInvoker.InvokeAsync(
                 new LlmRequest(
                     string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel,
                     BuildSystemPrompt(sourceLanguageHint),
@@ -55,7 +57,9 @@ public sealed class LlmFitEnhancementService(
                     Stream: true,
                     Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                     KeepAlive: ollamaOptions.KeepAlive,
-                    Temperature: 0.1),
+                    Temperature: 0.0,
+                    ResponseFormat: LlmResponseFormat.Json),
+                ParseEnhancement,
                 progress is null ? null : update => progress(update with
                 {
                     Message = "Enhancing fit review with LLM",
@@ -65,9 +69,7 @@ public sealed class LlmFitEnhancementService(
                 }),
                 cancellationToken);
 
-            return TryParse(response.Content, out var parseResult)
-                ? Merge(baseline, parseResult)
-                : baseline;
+            return result.Value is { } parsed ? Merge(baseline, parsed) : baseline;
         }
         catch
         {
@@ -266,42 +268,53 @@ public sealed class LlmFitEnhancementService(
         return builder.ToString();
     }
 
+    private static EnhancementParseResult? ParseEnhancement(string content)
+    {
+        var json = LlmJsonInvoker.ExtractJsonObject(content);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        var enhancements = new List<EnhancedRequirement>();
+        if (root.TryGetProperty("enhancedRequirements", out var array) && array.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in array.EnumerateArray())
+            {
+                var requirement = ReadString(element, "requirement");
+                var newMatch = ReadString(element, "newMatch");
+                var rationale = ReadString(element, "rationale");
+                var evidence = ReadStringArray(element, "evidence");
+
+                if (!string.IsNullOrWhiteSpace(requirement) && !string.IsNullOrWhiteSpace(newMatch))
+                {
+                    enhancements.Add(new EnhancedRequirement(requirement, newMatch, evidence, rationale ?? string.Empty));
+                }
+            }
+        }
+
+        var gapFramingStrategies = ReadStringArray(root, "gapFramingStrategies");
+        var positioningAngle = ReadString(root, "positioningAngle");
+
+        if (enhancements.Count == 0 && gapFramingStrategies.Count == 0 && string.IsNullOrWhiteSpace(positioningAngle))
+        {
+            return null;
+        }
+
+        return new EnhancementParseResult(enhancements, gapFramingStrategies, positioningAngle);
+    }
+
     internal static bool TryParse(string content, out EnhancementParseResult result)
     {
         try
         {
-            var json = ExtractJsonObject(content);
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
-
-            var enhancements = new List<EnhancedRequirement>();
-            if (root.TryGetProperty("enhancedRequirements", out var array) && array.ValueKind == JsonValueKind.Array)
+            var parsed = ParseEnhancement(content);
+            if (parsed is null)
             {
-                foreach (var element in array.EnumerateArray())
-                {
-                    var requirement = ReadString(element, "requirement");
-                    var newMatch = ReadString(element, "newMatch");
-                    var rationale = ReadString(element, "rationale");
-                    var evidence = ReadStringArray(element, "evidence");
-
-                    if (!string.IsNullOrWhiteSpace(requirement) && !string.IsNullOrWhiteSpace(newMatch))
-                    {
-                        enhancements.Add(new EnhancedRequirement(requirement, newMatch, evidence, rationale ?? string.Empty));
-                    }
-                }
+                result = EnhancementParseResult.Empty;
+                return false;
             }
 
-            var gapFramingStrategies = ReadStringArray(root, "gapFramingStrategies");
-            var positioningAngle = ReadString(root, "positioningAngle");
-
-            if (enhancements.Count > 0 || gapFramingStrategies.Count > 0 || !string.IsNullOrWhiteSpace(positioningAngle))
-            {
-                result = new EnhancementParseResult(enhancements, gapFramingStrategies, positioningAngle);
-                return true;
-            }
-
-            result = EnhancementParseResult.Empty;
-            return false;
+            result = parsed;
+            return true;
         }
         catch
         {
@@ -332,27 +345,6 @@ public sealed class LlmFitEnhancementService(
             .Select(static item => item.GetString()?.Trim())
             .Where(static item => !string.IsNullOrWhiteSpace(item))
             .ToArray()!;
-    }
-
-    private static string ExtractJsonObject(string content)
-    {
-        var trimmed = content.Trim();
-
-        if (trimmed.StartsWith("```", StringComparison.Ordinal))
-        {
-            var lines = trimmed.Split('\n');
-            trimmed = string.Join('\n', lines.Skip(1).Take(lines.Length - 2));
-        }
-
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-
-        if (start >= 0 && end > start)
-        {
-            return trimmed[start..(end + 1)];
-        }
-
-        return trimmed;
     }
 
     internal sealed record EnhancedRequirement(

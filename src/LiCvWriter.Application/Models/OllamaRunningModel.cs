@@ -4,4 +4,5 @@ public sealed record OllamaRunningModel(
     string Name,
     string Model,
     DateTimeOffset? ExpiresAtUtc,
-    long? SizeVramBytes);
+    long? SizeVramBytes,
+    long? SizeBytes = null);

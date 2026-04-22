@@ -621,6 +621,9 @@ public sealed class LlmOperationBrokerTests
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<OllamaModelInfo?>(null);
+
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {
             progress?.Invoke(new LlmProgressUpdate(
@@ -648,6 +651,9 @@ public sealed class LlmOperationBrokerTests
     {
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<OllamaModelInfo?>(null);
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {

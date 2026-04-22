@@ -9,4 +9,6 @@ public sealed record LlmRequest(
     string? Think = null,
     string? KeepAlive = null,
     double? Temperature = null,
-    int? NumPredict = null);
+    int? NumPredict = null,
+    int? NumCtx = null,
+    LlmResponseFormat? ResponseFormat = null);

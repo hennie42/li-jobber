@@ -25,6 +25,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
     private bool isLlmSessionConfigured;
     private bool hasStartedLlmWork;
+    private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? Changed;
 
@@ -77,6 +78,26 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
 
     public bool CanEditLlmSessionSettings => true;
+
+    public OllamaCapacityVerdict? GetCapacityVerdict(string model) => Read(() =>
+        string.IsNullOrWhiteSpace(model)
+            ? null
+            : capacityVerdicts.TryGetValue(model, out var verdict) ? verdict : null);
+
+    public OllamaCapacityVerdict? CurrentCapacityVerdict => Read(() =>
+        string.IsNullOrWhiteSpace(selectedLlmModel)
+            ? null
+            : capacityVerdicts.TryGetValue(selectedLlmModel, out var verdict) ? verdict : null);
+
+    public void SetCapacityVerdict(OllamaCapacityVerdict verdict)
+    {
+        ArgumentNullException.ThrowIfNull(verdict);
+        lock (gate)
+        {
+            capacityVerdicts[verdict.Model] = verdict;
+        }
+        NotifyChanged();
+    }
 
     public bool IsJobSetFitReviewCurrent(string jobSetId, string fingerprint, bool requiresLlmEnhancement)
     {
