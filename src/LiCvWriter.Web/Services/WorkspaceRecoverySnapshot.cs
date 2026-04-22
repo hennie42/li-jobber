@@ -13,7 +13,8 @@ public sealed record WorkspaceRecoverySnapshot(
     string SelectedLlmModel = "",
     string SelectedThinkingLevel = "",
     LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics = null,
-    LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null);
+    LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null,
+    IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null);
 
 public sealed record JobSetRecoveryState(
     string Id,

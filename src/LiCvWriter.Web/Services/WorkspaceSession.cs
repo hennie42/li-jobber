@@ -25,7 +25,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
     private bool isLlmSessionConfigured;
     private bool hasStartedLlmWork;
-    private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = LoadCapacityVerdicts(recoveryStore);
 
     public event Action? Changed;
 
@@ -718,6 +718,26 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         return NormalizeThinkingLevel(string.IsNullOrWhiteSpace(recoveredThinkingLevel) ? configuredThinkingLevel : recoveredThinkingLevel);
     }
 
+    private static Dictionary<string, OllamaCapacityVerdict> LoadCapacityVerdicts(WorkspaceRecoveryStore? recoveryStore)
+    {
+        var dictionary = new Dictionary<string, OllamaCapacityVerdict>(StringComparer.OrdinalIgnoreCase);
+        var recovered = recoveryStore?.Load()?.CapacityVerdicts;
+        if (recovered is null)
+        {
+            return dictionary;
+        }
+
+        foreach (var (model, verdict) in recovered)
+        {
+            if (!string.IsNullOrWhiteSpace(model) && verdict is not null)
+            {
+                dictionary[model] = verdict;
+            }
+        }
+
+        return dictionary;
+    }
+
     private T Read<T>(Func<T> read)
     {
         lock (gate)
@@ -842,7 +862,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             selectedLlmModel,
             selectedThinkingLevel,
             linkedInImportDiagnostics,
-            linkedInAuthorizationStatus);
+            linkedInAuthorizationStatus,
+            capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase));
 
     private void NotifyChanged()
     {
