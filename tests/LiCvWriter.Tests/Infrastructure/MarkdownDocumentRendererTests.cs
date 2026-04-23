@@ -263,6 +263,168 @@ public sealed class MarkdownDocumentRendererTests
         Assert.Contains("Backward-compatible profile.", result.Markdown);
     }
 
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesEducationSection_WhenProfileHasEducation()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var withEducation = request with
+        {
+            Candidate = request.Candidate with
+            {
+                Education =
+                [
+                    new EducationEntry("Aarhus University", "MSc Computer Science", null, null,
+                        new DateRange(new PartialDate("2008", 2008), new PartialDate("2010", 2010)))
+                ]
+            }
+        };
+
+        var result = await renderer.RenderAsync(withEducation);
+
+        Assert.Contains("## Education", result.Markdown);
+        Assert.Contains("**MSc Computer Science**", result.Markdown);
+        Assert.Contains("Aarhus University", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesEducationSection_WithDanishHeading_ForDanishOutput()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.Danish);
+        var withEducation = request with
+        {
+            Candidate = request.Candidate with
+            {
+                Education =
+                [
+                    new EducationEntry("Aarhus Universitet", "Cand.scient. Datalogi", null, null,
+                        new DateRange(new PartialDate("2008", 2008), new PartialDate("2010", 2010)))
+                ]
+            }
+        };
+
+        var result = await renderer.RenderAsync(withEducation);
+
+        Assert.Contains("## Uddannelse", result.Markdown);
+        Assert.Contains("Aarhus Universitet", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesLanguagesSection_FromManualSignals()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var withLanguages = request with
+        {
+            Candidate = request.Candidate with
+            {
+                ManualSignals = new Dictionary<string, string>
+                {
+                    ["Languages"] = "Danish — Proficiency: Native or bilingual\nEnglish — Proficiency: Professional working"
+                }
+            }
+        };
+
+        var result = await renderer.RenderAsync(withLanguages);
+
+        Assert.Contains("## Languages", result.Markdown);
+        Assert.Contains("Danish", result.Markdown);
+        Assert.Contains("English", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_IncludesLanguagesSection_WithDanishHeading_ForDanishOutput()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.Danish);
+        var withLanguages = request with
+        {
+            Candidate = request.Candidate with
+            {
+                ManualSignals = new Dictionary<string, string>
+                {
+                    ["Languages"] = "Dansk — Modersmål\nEngelsk — Professionel"
+                }
+            }
+        };
+
+        var result = await renderer.RenderAsync(withLanguages);
+
+        Assert.Contains("## Sprog", result.Markdown);
+        Assert.Contains("Dansk", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_OmitsFitSnapshotSection()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var withFit = request with
+        {
+            JobFitAssessment = new JobFitAssessment(
+                OverallScore: 87,
+                Recommendation: JobFitRecommendation.Apply,
+                Requirements: Array.Empty<JobRequirementAssessment>(),
+                Strengths: ["Cloud architecture leadership"],
+                Gaps: ["Kubernetes operator authoring"])
+        };
+
+        var result = await renderer.RenderAsync(withFit);
+
+        // FitSnapshot is internal-only — must never appear in the rendered CV.
+        Assert.DoesNotContain("Fit Snapshot", result.Markdown);
+        Assert.DoesNotContain("Matchvurdering", result.Markdown);
+        Assert.DoesNotContain("Cloud architecture leadership", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_AttachesAtsSnapshotForCv()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(mustHaveThemes: ["Azure", "Kubernetes"]);
+        var withContact = request with
+        {
+            PersonalContact = new PersonalContactInfo(
+                Email: "alex.taylor@example.com",
+                Phone: "+45 00 00 00 00",
+                LinkedInUrl: "https://www.linkedin.com/in/alex-taylor-demo",
+                City: "Aarhus")
+        };
+
+        var result = await renderer.RenderAsync(withContact);
+
+        Assert.NotNull(result.AtsSnapshot);
+        Assert.Equal("Alex Taylor", result.AtsSnapshot!.FullName);
+        Assert.Equal("Lead Cloud Architect", result.AtsSnapshot.TargetRoleTitle);
+        Assert.Equal("Northwind Traders", result.AtsSnapshot.TargetCompanyName);
+        Assert.Contains("Azure", result.AtsSnapshot.MustHaveThemes);
+        Assert.Equal("alex.taylor@example.com", result.AtsSnapshot.Contact?.Email);
+        Assert.Equal("Aarhus", result.AtsSnapshot.Contact?.City);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cv_EmitsContactLineWhenPersonalContactProvided()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest();
+        var withContact = request with
+        {
+            PersonalContact = new PersonalContactInfo(
+                Email: "alex.taylor@example.com",
+                Phone: "+45 00 00 00 00",
+                LinkedInUrl: "https://www.linkedin.com/in/alex-taylor-demo",
+                City: "Aarhus")
+        };
+
+        var result = await renderer.RenderAsync(withContact);
+
+        Assert.Contains("alex.taylor@example.com", result.Markdown);
+        Assert.Contains("+45 00 00 00 00", result.Markdown);
+        Assert.Contains("alex-taylor-demo", result.Markdown);
+        Assert.Contains("Aarhus", result.Markdown);
+    }
+
     private static DocumentRenderRequest BuildCvRequest(
         string? generatedBody = "Experienced cloud architect.",
         OutputLanguage outputLanguage = OutputLanguage.English,
