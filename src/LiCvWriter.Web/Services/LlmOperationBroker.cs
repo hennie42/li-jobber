@@ -296,7 +296,22 @@ public sealed class LlmOperationBroker(
             workspace.SelectedLlmModel,
             workspace.SelectedThinkingLevel,
             documentKinds,
-            request.ExportToFiles);
+            request.ExportToFiles,
+            NormalizeContact(request.PersonalContact));
+    }
+
+    private static PersonalContactInfo? NormalizeContact(PersonalContactInfo? contact)
+    {
+        if (contact is null || !contact.HasAnyValue)
+        {
+            return null;
+        }
+
+        return new PersonalContactInfo(
+            string.IsNullOrWhiteSpace(contact.Email) ? null : contact.Email.Trim(),
+            string.IsNullOrWhiteSpace(contact.Phone) ? null : contact.Phone.Trim(),
+            string.IsNullOrWhiteSpace(contact.LinkedInUrl) ? null : contact.LinkedInUrl.Trim(),
+            string.IsNullOrWhiteSpace(contact.City) ? null : contact.City.Trim());
     }
 
     private JobContextOperationInput CaptureJobContextInput(StartJobContextOperationRequest request)
@@ -564,7 +579,8 @@ public sealed class LlmOperationBroker(
                     input.ApplicantDifferentiatorProfile,
                     generationJobSet.EvidenceSelection,
                     generationJobSet.TechnologyGapAssessment,
-                    generationJobSet.InputLanguage.ToPromptHint()),
+                    generationJobSet.InputLanguage.ToPromptHint(),
+                    input.PersonalContact),
                 update => HandleProgress(state, input.JobSet.Id, update),
                 state.Cancellation.Token);
 
@@ -1516,7 +1532,8 @@ public sealed class LlmOperationBroker(
         string SelectedModel,
         string SelectedThinkingLevel,
         IReadOnlyList<DocumentKind> DocumentKinds,
-        bool ExportToFiles);
+        bool ExportToFiles,
+        PersonalContactInfo? PersonalContact);
 
     private sealed record JobContextOperationInput(
         JobSetSessionState JobSet,
@@ -1555,7 +1572,8 @@ public sealed class LlmOperationBroker(
 public sealed record StartDraftGenerationOperationRequest(
     string JobSetId,
     IReadOnlyList<string> DocumentKinds,
-    bool ExportToFiles = true);
+    bool ExportToFiles = true,
+    PersonalContactInfo? PersonalContact = null);
 
 public sealed record StartJobContextOperationRequest(string JobSetId);
 
