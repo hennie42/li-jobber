@@ -103,7 +103,9 @@ Led the cloud migration program.
             Assert.Contains("Lead Architect", allText);
             Assert.Contains("Experienced architect", allText);
             Assert.Contains("Azure", allText);
-            Assert.Contains("Cloud architecture", allText);
+            // FitSnapshot is intentionally excluded from the visible CV — internal
+            // assessment content must not appear in the document sent to recruiters.
+            Assert.DoesNotContain("Cloud architecture", allText);
             Assert.Contains("cloud migration", allText);
         }
         finally
