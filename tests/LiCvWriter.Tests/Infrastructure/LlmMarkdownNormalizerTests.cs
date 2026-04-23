@@ -205,6 +205,38 @@ public class LlmMarkdownNormalizerTests
         Assert.Contains("### Senior Cloud Architect and Advisor | Novo Nordisk", normalized);
     }
 
+    [Theory]
+    [InlineData("C# 13, .NET 9, ASP.NET Core")]
+    [InlineData("F# and C# interop")]
+    [InlineData("J# legacy maintenance")]
+    [InlineData("X#, Y#, Z# variants")]
+    public void Normalize_PreservesLanguageNamesContainingHash(string input)
+    {
+        // Regression: the InlineHeading regex must not split tokens like "C#"
+        // because they are language names, not glued markdown headings.
+        var normalized = InvokeNormalize(input);
+
+        Assert.Contains(input, normalized);
+        // Must not have promoted the '#' to a heading on a new line.
+        Assert.DoesNotContain("\n# ", normalized);
+    }
+
+    [Fact]
+    public void Normalize_KeySkillsLineWithCSharpRendersAsParagraphNotHeading()
+    {
+        // Regression for visual-preview bug: the KeySkills line containing "C#"
+        // was being split so that "# 13, .NET 9, …" became an H1.
+        const string input = "## Key Technologies & Competencies\n\nC# 13, .NET 9, ASP.NET Core, Azure, Kubernetes";
+
+        var normalized = InvokeNormalize(input);
+        var html = Markdown.ToHtml(normalized, Pipeline);
+
+        Assert.Contains("<h2", html);
+        Assert.Contains("C# 13, .NET 9", html);
+        // Body content must not be an H1.
+        Assert.DoesNotContain("<h1", html);
+    }
+
     private static string InvokeNormalize(string? input)
         => LlmMarkdownNormalizer.Normalize(input);
 }

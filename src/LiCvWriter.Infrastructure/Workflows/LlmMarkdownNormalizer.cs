@@ -36,8 +36,11 @@ internal static class LlmMarkdownNormalizer
         RegexOptions.Compiled);
 
     // Matches a heading marker glued to the end of a sentence (e.g. "text.### Heading").
+    // Requires whitespace OR sentence-ending punctuation between the lead char
+    // and the hashes so we never split language tokens like "C#", "F#" or
+    // "C# 13" that legitimately contain a '#' adjacent to a letter/digit.
     private static readonly Regex InlineHeading = new(
-        @"(?<lead>[^\s\n#])\s*(?<hashes>#{1,6})\s+(?=\S)",
+        @"(?<lead>[.!?:;,)\]""'])\s*(?<hashes>#{1,6})\s+(?=\S)",
         RegexOptions.Compiled);
 
     // A date pattern glued to the preceding word, e.g. "NordiskOct2025" or
