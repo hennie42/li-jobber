@@ -37,6 +37,8 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             builder.AppendLine();
         }
 
+        AppendContactLine(builder, request.PersonalContact, request.Candidate);
+
         builder.AppendLine($"## {Translate(outputLanguage, "Target Role", "Målrolle")}");
         builder.AppendLine();
         builder.AppendLine($"- {Translate(outputLanguage, "Role", "Rolle")}: {request.JobPosting.RoleTitle}");
@@ -81,20 +83,24 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                     .ToArray();
 
                 AppendProfileOverview(builder, generatedBody, request, selectedEvidence, outputLanguage);
-                AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
+                // FitSnapshot is intentionally NOT emitted in the CV path: it is
+                // an internal assessment artifact (strengths/gaps for the user's
+                // own review) and must not appear in the document sent to recruiters.
                 AppendExperienceList(builder, modernExperience, coveredProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ExperienceHighlights));
                 if (standaloneProjects.Length > 0)
                 {
                     AppendProjects(builder, standaloneProjects, outputLanguage, FindSection(request.GeneratedSections, CvSection.ProjectHighlights));
                 }
 
-                AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
+                AppendEducation(builder, request.Candidate.Education, outputLanguage);
                 if (HasSelectedCertifications(selectedEvidence))
                 {
                     AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
                 }
 
+                AppendLanguages(builder, request.Candidate, outputLanguage);
                 AppendTopRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
+                AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
 
                 break;
             case DocumentKind.CoverLetter:
@@ -568,5 +574,157 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
     private static string Translate(OutputLanguage outputLanguage, string english, string danish)
         => outputLanguage == OutputLanguage.Danish ? danish : english;
+
+    /// <summary>
+    /// Emits a single-line contact paragraph (email · phone · LinkedIn · city)
+    /// directly under the headline blockquote when <paramref name="contact"/>
+    /// has any value. Falls back to the candidate's profile fields when the
+    /// per-job contact does not supply them, so the header is never empty for
+    /// candidates whose LinkedIn export already carries an email or location.
+    /// </summary>
+    private static void AppendContactLine(StringBuilder builder, PersonalContactInfo? contact, CandidateProfile candidate)
+    {
+        var email = FirstNonBlank(contact?.Email, candidate.PrimaryEmail);
+        var phone = contact?.Phone;
+        var linkedIn = FirstNonBlank(contact?.LinkedInUrl, candidate.PublicProfileUrl);
+        var city = FirstNonBlank(contact?.City, candidate.Location);
+
+        var parts = new List<string>(4);
+        if (!string.IsNullOrWhiteSpace(email)) parts.Add(email!.Trim());
+        if (!string.IsNullOrWhiteSpace(phone)) parts.Add(phone!.Trim());
+        if (!string.IsNullOrWhiteSpace(linkedIn)) parts.Add(linkedIn!.Trim());
+        if (!string.IsNullOrWhiteSpace(city)) parts.Add(city!.Trim());
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine(string.Join(" · ", parts));
+        builder.AppendLine();
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Renders the Education section from the typed
+    /// <see cref="CandidateProfile.Education"/> list. Each entry is one bullet
+    /// in the form <c>**Degree** | School (period)</c>; missing fields are
+    /// quietly omitted so partial data still renders cleanly.
+    /// </summary>
+    private static void AppendEducation(StringBuilder builder, IReadOnlyList<EducationEntry> education, OutputLanguage outputLanguage)
+    {
+        if (education.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine($"## {CvSectionLabels.Heading(CvSection.Education, outputLanguage)}");
+        builder.AppendLine();
+
+        foreach (var entry in education)
+        {
+            var degreePart = string.IsNullOrWhiteSpace(entry.DegreeName)
+                ? entry.SchoolName
+                : $"**{entry.DegreeName.Trim()}** | {entry.SchoolName}";
+            var periodSuffix = string.IsNullOrWhiteSpace(entry.Period.DisplayValue)
+                ? string.Empty
+                : $" ({entry.Period.DisplayValue})";
+            builder.AppendLine($"- {degreePart}{periodSuffix}");
+        }
+
+        builder.AppendLine();
+    }
+
+    /// <summary>
+    /// Renders the Languages section by parsing
+    /// <c>CandidateProfile.ManualSignals["Languages"]</c>. The LinkedIn
+    /// importer stores one language per line in the form
+    /// <c>Language Name — Proficiency: Level</c>; this method preserves the
+    /// language tokens, simplifies the proficiency hint, and emits a single
+    /// comma-separated paragraph ("Danish — Native, English — Professional")
+    /// suitable for ATS keyword scans.
+    /// </summary>
+    private static void AppendLanguages(StringBuilder builder, CandidateProfile candidate, OutputLanguage outputLanguage)
+    {
+        if (!candidate.ManualSignals.TryGetValue("Languages", out var raw) || string.IsNullOrWhiteSpace(raw))
+        {
+            return;
+        }
+
+        var entries = ParseLanguageSignals(raw);
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine($"## {CvSectionLabels.Heading(CvSection.Languages, outputLanguage)}");
+        builder.AppendLine();
+        builder.AppendLine(string.Join(", ", entries.Select(e =>
+            string.IsNullOrWhiteSpace(e.Level)
+                ? e.Language
+                : $"{e.Language} — {e.Level}")));
+        builder.AppendLine();
+    }
+
+    /// <summary>
+    /// Parses the multi-line <c>ManualSignals["Languages"]</c> blob into
+    /// <see cref="LanguageProficiency"/> records. Each input line contains
+    /// the language followed by an optional <c>Proficiency: ...</c> tail.
+    /// </summary>
+    internal static IReadOnlyList<LanguageProficiency> ParseLanguageSignals(string raw)
+    {
+        var lines = raw.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
+        var result = new List<LanguageProficiency>(lines.Length);
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0) continue;
+
+            string language;
+            string? level = null;
+
+            // Common shapes from the LinkedIn importer:
+            //   "English — Proficiency: Native or bilingual"
+            //   "Danish - Proficiency: Native or bilingual"
+            //   "German — Professional working"
+            //   "French"
+            var separatorIndex = line.IndexOfAny(['—', '-', '–']);
+            if (separatorIndex > 0)
+            {
+                language = line[..separatorIndex].Trim();
+                var tail = line[(separatorIndex + 1)..].Trim();
+                const string proficiencyPrefix = "Proficiency:";
+                if (tail.StartsWith(proficiencyPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    tail = tail[proficiencyPrefix.Length..].Trim();
+                }
+                level = string.IsNullOrWhiteSpace(tail) ? null : tail;
+            }
+            else
+            {
+                language = line;
+            }
+
+            if (!string.IsNullOrWhiteSpace(language))
+            {
+                result.Add(new LanguageProficiency(language, level));
+            }
+        }
+
+        return result;
+    }
 }
 

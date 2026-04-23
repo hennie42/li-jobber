@@ -55,43 +55,47 @@ public sealed class CvRenderingLiveDataVerificationTests
             sectionPositions["Professional Experience"] > sectionPositions["Professional Profile"],
             "Experience must come after Profile");
         Assert.True(
-            sectionPositions["Early Career"] > sectionPositions["Professional Experience"],
-            "Early Career must come after Experience");
-        Assert.True(
-            sectionPositions["Certifications"] > sectionPositions["Early Career"],
-            "Certifications must come after Early Career");
+            sectionPositions["Certifications"] > sectionPositions["Professional Experience"],
+            "Certifications must come after Professional Experience");
         Assert.True(
             sectionPositions["Recommendations"] > sectionPositions["Certifications"],
             "Recommendations must come after Certifications");
+        Assert.True(
+            sectionPositions["Early Career"] > sectionPositions["Recommendations"],
+            "Early Career must come last (after Recommendations)");
 
         // ── Modern experience (post-2008): must appear under Professional Experience ──
-        AssertBetween(markdown, "## Professional Experience", "## Early Career",
+        // Modern experience now ends before Certifications (Education sits in between
+        // when the candidate has it; the test fixture currently doesn't, so we use
+        // Certifications as the always-present upper bound).
+        AssertBetween(markdown, "## Professional Experience", "## Certifications",
             "Senior Automation Architect", "Modern role must be under Professional Experience");
-        AssertBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertBetween(markdown, "## Professional Experience", "## Certifications",
             "Senior Cloud Architect and Advisor", "Modern role must be under Professional Experience");
-        AssertBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertBetween(markdown, "## Professional Experience", "## Certifications",
             "Principal Consultant", "Modern role must be under Professional Experience");
-        AssertBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertBetween(markdown, "## Professional Experience", "## Certifications",
             "Senior IT Consultant", "Freelance role (2008-2020) must be under Professional Experience");
 
         // ── Early career (ended before 2009): must appear under Early Career ──
-        AssertBetween(markdown, "## Early Career", "## Certifications",
+        // Early Career is now the last section so use end-of-document as the upper bound.
+        AssertBetween(markdown, "## Early Career", null,
             "Software Architect", "Bysted role (2005-2008) must be under Early Career");
-        AssertBetween(markdown, "## Early Career", "## Certifications",
+        AssertBetween(markdown, "## Early Career", null,
             "Basset", "Basset role (2000-2005) must be under Early Career");
-        AssertBetween(markdown, "## Early Career", "## Certifications",
+        AssertBetween(markdown, "## Early Career", null,
             "Lead Developer", "Proventum role (1999-2000) must be under Early Career");
-        AssertBetween(markdown, "## Early Career", "## Certifications",
+        AssertBetween(markdown, "## Early Career", null,
             "CyberBusiness", "CyberBusiness role (1998-1999) must be under Early Career");
-        AssertBetween(markdown, "## Early Career", "## Certifications",
+        AssertBetween(markdown, "## Early Career", null,
             "WebStuff", "WebStuff role (1995-1998) must be under Early Career");
 
         // ── Early career must NOT appear under Professional Experience ──
-        AssertNotBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
             "Bysted", "Bysted role should NOT appear in Professional Experience");
-        AssertNotBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
             "Basset", "Basset role should NOT appear in Professional Experience");
-        AssertNotBetween(markdown, "## Professional Experience", "## Early Career",
+        AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
             "Proventum", "Proventum role should NOT appear in Professional Experience");
 
         // ── Projects as bullet items (not ### headings) ──
@@ -99,7 +103,7 @@ public sealed class CvRenderingLiveDataVerificationTests
         Assert.DoesNotContain("### Oticon", markdown);
 
         // ── Umbrella role: Freelance should contain client sub-items ──
-        AssertBetween(markdown, "Senior IT Consultant", "## Early Career",
+        AssertBetween(markdown, "Senior IT Consultant", "## Certifications",
             "**Client:", "Freelance umbrella role must have Client: sub-items");
 
         // ── Recommendations as italic blockquotes ──
@@ -111,7 +115,8 @@ public sealed class CvRenderingLiveDataVerificationTests
         Assert.DoesNotContain("### Lars", markdown);
 
         // ── Early career entries as bullet items (not ### headings) ──
-        var earlyCareerSection = ExtractSection(markdown, "## Early Career", "## Certifications");
+        // Early Career is the last section, so extract from its heading to end of document.
+        var earlyCareerSection = ExtractSection(markdown, "## Early Career", null);
         Assert.DoesNotContain("###", earlyCareerSection);
         Assert.Contains("- **", earlyCareerSection);
     }
