@@ -11,7 +11,8 @@ public sealed record GeneratedDocument(
     long? PromptTokens = null,
     long? CompletionTokens = null,
     string? Model = null,
-    IReadOnlyList<CvSectionMarkdown>? GeneratedSections = null);
+    IReadOnlyList<CvSectionMarkdown>? GeneratedSections = null,
+    AtsCandidateSnapshot? AtsSnapshot = null);
 
 /// <summary>
 /// Per-section CV markdown produced by a dedicated LLM call. Mirrors

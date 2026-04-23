@@ -135,7 +135,92 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
             $"{request.Candidate.Name.FullName} - {request.Kind}",
             builder.ToString().Trim(),
             builder.ToString().Trim(),
-            DateTimeOffset.UtcNow));
+            DateTimeOffset.UtcNow,
+            AtsSnapshot: request.Kind is DocumentKind.Cv ? BuildAtsSnapshot(request, selectedEvidence) : null));
+    }
+
+    /// <summary>
+    /// Builds a public-safe candidate snapshot the export pipeline writes into
+    /// a custom XML part of the produced <c>.docx</c>. Contains structured
+    /// fields ATS / LLM-based parsers can consume directly without re-parsing
+    /// the rendered markdown. Excludes any internal assessment data.
+    /// </summary>
+    private static AtsCandidateSnapshot BuildAtsSnapshot(
+        DocumentRenderRequest request,
+        IReadOnlyList<RankedEvidenceItem> selectedEvidence)
+    {
+        var candidate = request.Candidate;
+        var contact = MergeContact(request.PersonalContact, candidate);
+
+        var skillNames = candidate.Skills.Select(s => s.Name)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var experience = candidate.Experience
+            .Where(static role => !IsBeforeCutoff(role.Period, EarlyCareerCutoffYear))
+            .Select(role => new AtsExperienceEntry(
+                role.Title,
+                role.CompanyName,
+                string.IsNullOrWhiteSpace(role.Period.DisplayValue) ? null : role.Period.DisplayValue))
+            .ToArray();
+
+        var education = candidate.Education
+            .Select(entry => new AtsEducationEntry(
+                string.IsNullOrWhiteSpace(entry.DegreeName) ? null : entry.DegreeName,
+                entry.SchoolName,
+                string.IsNullOrWhiteSpace(entry.Period.DisplayValue) ? null : entry.Period.DisplayValue))
+            .ToArray();
+
+        // Certifications come from the evidence ranker so we list only the
+        // ones that survived selection for this job (mirrors what the
+        // rendered CV body shows).
+        var certifications = selectedEvidence
+            .Where(static item => item.Evidence.Type == CandidateEvidenceType.Certification)
+            .Select(static item => item.Evidence.Title)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var languages = candidate.ManualSignals.TryGetValue("Languages", out var languageBlob)
+            && !string.IsNullOrWhiteSpace(languageBlob)
+            ? ParseLanguageSignals(languageBlob)
+            : Array.Empty<LanguageProficiency>();
+
+        return new AtsCandidateSnapshot(
+            FullName: candidate.Name.FullName,
+            Headline: candidate.Headline,
+            Contact: contact,
+            TargetRoleTitle: request.JobPosting.RoleTitle,
+            TargetCompanyName: request.JobPosting.CompanyName,
+            Skills: skillNames,
+            MustHaveThemes: request.JobPosting.MustHaveThemes,
+            Experience: experience,
+            Education: education,
+            Certifications: certifications,
+            Languages: languages);
+    }
+
+    /// <summary>
+    /// Merges the per-job <see cref="PersonalContactInfo"/> with the candidate's
+    /// profile-level fields so any field the user did not enter falls back to
+    /// the LinkedIn-imported value.
+    /// </summary>
+    private static PersonalContactInfo? MergeContact(PersonalContactInfo? perJob, CandidateProfile candidate)
+    {
+        var email = FirstNonBlank(perJob?.Email, candidate.PrimaryEmail);
+        var phone = perJob?.Phone;
+        var linkedIn = FirstNonBlank(perJob?.LinkedInUrl, candidate.PublicProfileUrl);
+        var city = FirstNonBlank(perJob?.City, candidate.Location);
+
+        if (string.IsNullOrWhiteSpace(email)
+            && string.IsNullOrWhiteSpace(phone)
+            && string.IsNullOrWhiteSpace(linkedIn)
+            && string.IsNullOrWhiteSpace(city))
+        {
+            return null;
+        }
+
+        return new PersonalContactInfo(email, phone, linkedIn, city);
     }
 
     /// <summary>
