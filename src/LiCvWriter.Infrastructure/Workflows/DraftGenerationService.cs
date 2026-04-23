@@ -79,7 +79,8 @@ public sealed class DraftGenerationService(
                 request.ApplicantDifferentiatorProfile,
                 request.EvidenceSelection,
                 request.TechnologyGapAssessment,
-                generatedSections), cancellationToken);
+                generatedSections,
+                request.PersonalContact), cancellationToken);
 
             var document = (string.IsNullOrWhiteSpace(request.ExportFolder)
                 ? renderedDocument
