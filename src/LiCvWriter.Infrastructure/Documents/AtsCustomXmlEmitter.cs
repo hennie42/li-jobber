@@ -54,7 +54,9 @@ internal static class AtsCustomXmlEmitter
         // CustomXmlPart in the package.
         propertiesPart.DataStoreItem = new DataStoreItem
         {
-            ItemId = $"{{{Guid.NewGuid()}}}",
+            // Word's data-store schema requires the itemID to be a brace-wrapped,
+            // upper-case-hex GUID — uppercase via "B" format specifier + ToUpperInvariant.
+            ItemId = Guid.NewGuid().ToString("B").ToUpperInvariant(),
             SchemaReferences = new SchemaReferences(new SchemaReference { Uri = Namespace })
         };
         propertiesPart.DataStoreItem.Save();

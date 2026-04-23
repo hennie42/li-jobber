@@ -1,7 +1,9 @@
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
+using LiCvWriter.Core.Profiles;
 using LiCvWriter.Infrastructure.Documents;
 
 namespace LiCvWriter.Tests.Infrastructure;
@@ -371,6 +373,330 @@ Generic placeholder body.
             {
                 Directory.Delete(root, recursive: true);
             }
+        }
+    }
+
+    private const string FullCvMarkdown = """
+# Alex Taylor
+
+> Senior Architect
+
+alex.taylor@example.com · +45 00 00 00 00 · https://www.linkedin.com/in/alex-taylor-demo · Aarhus
+
+## Target Role
+
+- Role: Lead Architect
+- Company: Contoso
+
+## Professional Profile
+
+Experienced architect with deep cloud delivery experience.
+
+**Key Technologies & Competencies:** Azure, .NET, Kubernetes
+
+## Professional Experience
+
+### Lead Architect | Contoso
+
+2020-2024
+
+Led the cloud migration program.
+
+## Projects
+
+**Cloud Migration Portal**
+
+Built a self-service migration portal.
+
+## Education
+
+- **MSc Computer Science** | Aarhus University (2008-2010)
+
+## Certifications
+
+- Azure Solutions Architect Expert
+
+## Languages
+
+Danish — Native, English — Professional
+
+## Recommendations
+
+**Pat Reviewer**, CTO
+
+> Alex is exceptional.
+
+## Early Career
+
+- Junior Engineer | LegacyCorp (2004-2007)
+""";
+
+    private static AtsCandidateSnapshot BuildSnapshot() =>
+        new(
+            FullName: "Alex Taylor",
+            Headline: "Senior Architect",
+            Contact: new PersonalContactInfo(
+                Email: "alex.taylor@example.com",
+                Phone: "+45 00 00 00 00",
+                LinkedInUrl: "https://www.linkedin.com/in/alex-taylor-demo",
+                City: "Aarhus"),
+            TargetRoleTitle: "Lead Architect",
+            TargetCompanyName: "Contoso",
+            Skills: ["Azure", ".NET", "Kubernetes"],
+            MustHaveThemes: ["Azure", "Kubernetes"],
+            Experience: [new AtsExperienceEntry("Lead Architect", "Contoso", "2020-2024")],
+            Education: [new AtsEducationEntry("MSc Computer Science", "Aarhus University", "2008-2010")],
+            Certifications: ["Azure Solutions Architect Expert"],
+            Languages:
+            [
+                new LanguageProficiency("Danish", "Native"),
+                new LanguageProficiency("English", "Professional")
+            ]);
+
+    [Fact]
+    public async Task ExportAsync_CvKind_PopulatesAllSectionTags()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
+                AtsSnapshot: BuildSnapshot());
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var body = wordDoc.MainDocumentPart!.Document!.Body!;
+            var allText = body.InnerText;
+
+            Assert.Contains("Alex Taylor", allText);            // CandidateHeader
+            Assert.Contains("Experienced architect", allText);  // ProfileSummary
+            Assert.Contains("Azure", allText);                  // KeySkills
+            Assert.Contains("Lead Architect", allText);         // Experience
+            Assert.Contains("Cloud Migration Portal", allText); // Projects
+            Assert.Contains("Aarhus University", allText);      // Education
+            Assert.Contains("Azure Solutions Architect", allText); // Certifications
+            Assert.Contains("Danish", allText);                 // Languages
+            Assert.Contains("Pat Reviewer", allText);           // Recommendations
+            Assert.Contains("LegacyCorp", allText);             // EarlyCareer
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_RemovesFitSnapshotControl()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var body = wordDoc.MainDocumentPart!.Document!.Body!;
+
+            // After unwrap + cleanup no SDT remnants from the FitSnapshot tag
+            // (or any other tag) should remain in the saved document body.
+            Assert.Empty(body.Descendants<SdtBlock>());
+            Assert.Empty(body.Descendants<SdtRun>());
+            // FitSnapshot template placeholder text must not survive.
+            Assert.DoesNotContain("Fit Snapshot", body.InnerText);
+            Assert.DoesNotContain("[Strengths", body.InnerText);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_HeaderContainsContactFields()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var allText = wordDoc.MainDocumentPart!.Document!.Body!.InnerText;
+
+            Assert.Contains("alex.taylor@example.com", allText);
+            Assert.Contains("+45 00 00 00 00", allText);
+            Assert.Contains("alex-taylor-demo", allText);
+            Assert.Contains("Aarhus", allText);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_UsesHeadingStyleForSectionTitles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var body = wordDoc.MainDocumentPart!.Document!.Body!;
+
+            // Each "## Section" heading from the markdown must resolve to a real
+            // Heading style (Heading1/Heading2/...) so ATS parsers detect section
+            // boundaries from style metadata, not from formatting heuristics.
+            var headingParagraphs = body.Descendants<Paragraph>()
+                .Where(p => p.ParagraphProperties?.ParagraphStyleId?.Val?.Value is { } id
+                    && id.StartsWith("Heading", StringComparison.Ordinal))
+                .ToArray();
+
+            Assert.NotEmpty(headingParagraphs);
+            // At least Profile, Experience, Education, Certifications, Languages, Recommendations.
+            Assert.True(headingParagraphs.Length >= 5,
+                $"Expected at least 5 heading-styled paragraphs, found {headingParagraphs.Length}.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_NoTablesInBody()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var body = wordDoc.MainDocumentPart!.Document!.Body!;
+
+            // ATS parsers reliably mishandle tables: requirement is single-column,
+            // paragraph-only output. Any w:tbl in the body breaks that contract.
+            Assert.Empty(body.Descendants<Table>());
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_EmitsCustomXmlCandidateData()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
+                AtsSnapshot: BuildSnapshot());
+
+            var result = await service.ExportAsync(document);
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var customXmlParts = wordDoc.MainDocumentPart!.CustomXmlParts.ToArray();
+            Assert.NotEmpty(customXmlParts);
+
+            string? candidateDataXml = null;
+            foreach (var part in customXmlParts)
+            {
+                using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+                using var reader = new StreamReader(stream);
+                var content = reader.ReadToEnd();
+                if (content.Contains("candidateData", StringComparison.Ordinal))
+                {
+                    candidateDataXml = content;
+                    break;
+                }
+            }
+
+            Assert.NotNull(candidateDataXml);
+            Assert.Contains("urn:licvwriter:cv:v1", candidateDataXml);
+            Assert.Contains("<name", candidateDataXml);
+            Assert.Contains("Alex Taylor", candidateDataXml);
+            Assert.Contains("alex.taylor@example.com", candidateDataXml);
+            Assert.Contains("Aarhus University", candidateDataXml);
+            Assert.Contains("<skills", candidateDataXml);
+            Assert.Contains("Azure", candidateDataXml);
+            Assert.Contains("<languages", candidateDataXml);
+            Assert.Contains("Danish", candidateDataXml);
+
+            // Public-safe: must not leak internal assessment data.
+            Assert.DoesNotContain("overallScore", candidateDataXml);
+            Assert.DoesNotContain("gaps", candidateDataXml);
+            Assert.DoesNotContain("model", candidateDataXml);
+            Assert.DoesNotContain("fit", candidateDataXml, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CvKind_ProducesNonTrivialDocxThatPassesOpenXmlValidation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
+                AtsSnapshot: BuildSnapshot());
+
+            var result = await service.ExportAsync(document);
+
+            var fileInfo = new FileInfo(result.FilePath!);
+            // Lower bound deliberately conservative: a .docx is a zip-compressed
+            // package, so a populated CV typically lands ~5-10 KB. Anything below
+            // 3 KB indicates the template wasn't populated at all.
+            Assert.True(fileInfo.Length > 3_000,
+                $"Expected a non-trivial CV docx (>3 KB), got {fileInfo.Length} bytes.");
+
+            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
+            var validator = new OpenXmlValidator();
+            var validationErrors = validator.Validate(wordDoc).ToArray();
+
+            // The custom XML part we emit must not introduce any new validation
+            // errors. Pre-existing template-level cosmetic errors (Word's pre-2007
+            // pBdr/color attribute schema quirks) are out of scope for this test.
+            var customXmlErrors = validationErrors
+                .Where(e => e.Part is CustomXmlPart or CustomXmlPropertiesPart)
+                .ToArray();
+            Assert.True(customXmlErrors.Length == 0,
+                "Custom XML validation errors:\n" + string.Join("\n", customXmlErrors.Select(e => $"- {e.Description}")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 }

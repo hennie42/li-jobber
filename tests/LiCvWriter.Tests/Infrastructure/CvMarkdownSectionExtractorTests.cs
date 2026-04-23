@@ -104,4 +104,91 @@ Led the cloud migration program.
         Assert.NotNull(fit);
         Assert.Contains("Skyarkitektur", fit);
     }
+
+    [Fact]
+    public void ExtractEducation_ReturnsBodyForEnglishHeading()
+    {
+        const string markdown = """
+## Education
+
+- **MSc Computer Science** | University of Aarhus (2008-2010)
+- **BSc Software Engineering** | DTU (2005-2008)
+
+## Certifications
+
+- Azure Solutions Architect
+""";
+
+        var education = CvMarkdownSectionExtractor.ExtractEducation(markdown);
+
+        Assert.NotNull(education);
+        Assert.Contains("MSc Computer Science", education);
+        Assert.Contains("DTU", education);
+        Assert.DoesNotContain("Azure Solutions Architect", education);
+    }
+
+    [Fact]
+    public void ExtractEducation_ReturnsBodyForDanishHeading()
+    {
+        const string markdown = """
+## Uddannelse
+
+- **Cand.scient. Datalogi** | Aarhus Universitet (2008-2010)
+""";
+
+        var education = CvMarkdownSectionExtractor.ExtractEducation(markdown);
+
+        Assert.NotNull(education);
+        Assert.Contains("Cand.scient. Datalogi", education);
+    }
+
+    [Fact]
+    public void ExtractLanguages_ReturnsBodyForEnglishHeading()
+    {
+        const string markdown = """
+## Languages
+
+Danish — Native, English — Professional
+
+## Recommendations
+
+- Pat
+""";
+
+        var languages = CvMarkdownSectionExtractor.ExtractLanguages(markdown);
+
+        Assert.NotNull(languages);
+        Assert.Contains("Danish — Native", languages);
+        Assert.Contains("English — Professional", languages);
+        Assert.DoesNotContain("Pat", languages);
+    }
+
+    [Fact]
+    public void ExtractLanguages_ReturnsBodyForDanishHeading()
+    {
+        const string markdown = """
+## Sprog
+
+Dansk — Modersmål, Engelsk — Professionel
+""";
+
+        var languages = CvMarkdownSectionExtractor.ExtractLanguages(markdown);
+
+        Assert.NotNull(languages);
+        Assert.Contains("Modersmål", languages);
+        Assert.Contains("Professionel", languages);
+    }
+
+    [Fact]
+    public void ExtractEducation_ReturnsNullWhenMissing()
+    {
+        const string markdown = """
+## Professional Profile
+
+Body.
+""";
+
+        Assert.Null(CvMarkdownSectionExtractor.ExtractEducation(markdown));
+        Assert.Null(CvMarkdownSectionExtractor.ExtractLanguages(markdown));
+    }
 }
