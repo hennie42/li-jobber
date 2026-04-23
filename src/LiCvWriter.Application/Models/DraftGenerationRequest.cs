@@ -19,4 +19,5 @@ public sealed record DraftGenerationRequest(
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     EvidenceSelectionResult? EvidenceSelection = null,
     TechnologyGapAssessment? TechnologyGapAssessment = null,
-    string? SourceLanguageHint = null);
+    string? SourceLanguageHint = null,
+    PersonalContactInfo? PersonalContact = null);

@@ -15,4 +15,5 @@ public sealed record DocumentRenderRequest(
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     EvidenceSelectionResult? EvidenceSelection = null,
     TechnologyGapAssessment? TechnologyGapAssessment = null,
-    IReadOnlyList<CvSectionContent>? GeneratedSections = null);
+    IReadOnlyList<CvSectionContent>? GeneratedSections = null,
+    PersonalContactInfo? PersonalContact = null);
