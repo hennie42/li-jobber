@@ -5,6 +5,7 @@
 @using System.Net.Http.Json
 @using System.Text.Json
 @using LiCvWriter.Application.Models
+@using LiCvWriter.Core.Profiles
 @inject ILlmClient LlmClient
 @inject JobFitWorkspaceRefreshService JobFitWorkspaceRefreshService
 @inject IJobResearchService JobResearchService
@@ -520,6 +521,29 @@ else if (CanRunFitReview)
     <label class="field-label" for="additionalInstructions">Additional instructions</label>
     <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions" @bind:event="oninput" @bind:after="PersistAdditionalInstructions"></textarea>
 
+    <fieldset class="details-card stack-gap">
+        <legend class="field-label">Personal contact (this export only)</legend>
+        <p class="muted-text">Optional. Filled into the CV header for this generation. Not persisted &mdash; enter different details per job if you like.</p>
+        <div class="field-grid">
+            <div>
+                <label class="field-label" for="contactEmail">Email</label>
+                <input id="contactEmail" class="text-input" type="email" autocomplete="off" @bind="contactEmail" />
+            </div>
+            <div>
+                <label class="field-label" for="contactPhone">Phone</label>
+                <input id="contactPhone" class="text-input" type="tel" autocomplete="off" @bind="contactPhone" />
+            </div>
+            <div>
+                <label class="field-label" for="contactLinkedIn">LinkedIn URL</label>
+                <input id="contactLinkedIn" class="text-input" type="url" autocomplete="off" @bind="contactLinkedIn" />
+            </div>
+            <div>
+                <label class="field-label" for="contactCity">City</label>
+                <input id="contactCity" class="text-input" type="text" autocomplete="off" @bind="contactCity" />
+            </div>
+        </div>
+    </fieldset>
+
     <div class="button-row">
         <button class="primary-button" @onclick="GenerateDraftsAsync" disabled="@(isBusy || !Workspace.CanStartDraftGenerationForJobSet(JobSetId!))">@(isGenerating ? $"Running {GetOperationElapsed()}" : "Generate and export drafts")</button>
         <a class="secondary-button" href="/">Open Start / Setup</a>
@@ -645,6 +669,10 @@ else if (CanRunFitReview)
     private JobPostingAnalysis? analysis;
     private CompanyResearchProfile? companyProfile;
     private string additionalInstructions = string.Empty;
+    private string contactEmail = string.Empty;
+    private string contactPhone = string.Empty;
+    private string contactLinkedIn = string.Empty;
+    private string contactCity = string.Empty;
     private bool generateCv = true;
     private bool generateCoverLetter = true;
     private bool generateSummary = true;
@@ -1122,7 +1150,10 @@ else if (CanRunFitReview)
             Workspace.ClearJobSetGeneratedArtifacts(JobSetId!);
             await StartStreamedOperationAsync(
                 "/api/llm/operations/generate-drafts",
-                new StartDraftGenerationOperationRequest(JobSetId!, kinds.Select(static kind => kind.ToString()).ToArray()));
+                new StartDraftGenerationOperationRequest(
+                    JobSetId!,
+                    kinds.Select(static kind => kind.ToString()).ToArray(),
+                    PersonalContact: BuildCurrentPersonalContact()));
         }
         catch (Exception exception)
         {
@@ -1152,6 +1183,12 @@ else if (CanRunFitReview)
 
     private void PersistAdditionalInstructions()
         => Workspace.SetJobSetAdditionalInstructions(JobSetId!, additionalInstructions);
+
+    private PersonalContactInfo? BuildCurrentPersonalContact()
+    {
+        var contact = new PersonalContactInfo(contactEmail, contactPhone, contactLinkedIn, contactCity);
+        return contact.HasAnyValue ? contact : null;
+    }
 
     private void SetAdditionalInstructions(string value)
     {
