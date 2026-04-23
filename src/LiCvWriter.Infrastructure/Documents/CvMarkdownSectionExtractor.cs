@@ -125,6 +125,18 @@ internal static class CvMarkdownSectionExtractor
     }
 
     /// <summary>
+    /// Extracts the Education / Uddannelse section body.
+    /// </summary>
+    public static string? ExtractEducation(string markdown)
+        => ExtractSection(markdown, "Education", "Uddannelse");
+
+    /// <summary>
+    /// Extracts the Languages / Sprog section body.
+    /// </summary>
+    public static string? ExtractLanguages(string markdown)
+        => ExtractSection(markdown, "Languages", "Sprog");
+
+    /// <summary>
     /// Extracts the body of an <c>## {heading}</c> section, returning all lines
     /// between the heading and the next <c>##</c> heading (or end of document).
     /// Returns <see langword="null"/> when no matching heading is found or the

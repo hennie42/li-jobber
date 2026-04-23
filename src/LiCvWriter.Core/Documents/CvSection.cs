@@ -19,5 +19,18 @@ public enum CvSection
     ExperienceHighlights,
 
     /// <summary>Achievement-focused rewrites of project descriptions.</summary>
-    ProjectHighlights
+    ProjectHighlights,
+
+    /// <summary>
+    /// Deterministic education listing built from <c>CandidateProfile.Education</c>.
+    /// Not LLM-generated; included in the enum so the section participates in
+    /// the same tag-mapping pipeline as the other CV sections.
+    /// </summary>
+    Education,
+
+    /// <summary>
+    /// Deterministic spoken/written language listing parsed from
+    /// <c>CandidateProfile.ManualSignals["Languages"]</c>. Not LLM-generated.
+    /// </summary>
+    Languages
 }
