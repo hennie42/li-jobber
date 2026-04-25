@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Xml.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -93,71 +95,75 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
             package.ChangeDocumentType(WordprocessingDocumentType.Document);
         }
 
-        using var wordDoc = WordprocessingDocument.Open(outputPath, isEditable: true);
-        var mainPart = wordDoc.MainDocumentPart
-            ?? throw new InvalidOperationException("CV template is missing its main document part.");
-
-        SetCoreProperties(wordDoc, document);
-
-        var populatedTags = new HashSet<string>(StringComparer.Ordinal);
-
-        // Build a fast lookup of any LLM-generated sections attached to the
-        // document so we can skip the markdown round-trip and feed the raw
-        // section content straight into the matching content control.
-        var generatedSectionLookup = document.GeneratedSections is null
-            ? new Dictionary<CvSection, string>(0)
-            : document.GeneratedSections
-                .Where(s => !string.IsNullOrWhiteSpace(s.Markdown))
-                .ToDictionary(s => s.Section, s => s.Markdown);
-
-        foreach (var mapping in CvSectionMappings)
+        using (var wordDoc = WordprocessingDocument.Open(outputPath, isEditable: true))
         {
-            string? sectionMarkdown = null;
-            var usedRawSection = false;
-            if (mapping.GeneratedSection is { } gs && generatedSectionLookup.TryGetValue(gs, out var generated))
+            var mainPart = wordDoc.MainDocumentPart
+                ?? throw new InvalidOperationException("CV template is missing its main document part.");
+
+            SetCoreProperties(wordDoc, document);
+
+            var populatedTags = new HashSet<string>(StringComparer.Ordinal);
+
+            // Build a fast lookup of any LLM-generated sections attached to the
+            // document so we can skip the markdown round-trip and feed the raw
+            // section content straight into the matching content control.
+            var generatedSectionLookup = document.GeneratedSections is null
+                ? new Dictionary<CvSection, string>(0)
+                : document.GeneratedSections
+                    .Where(s => !string.IsNullOrWhiteSpace(s.Markdown))
+                    .ToDictionary(s => s.Section, s => s.Markdown);
+
+            foreach (var mapping in CvSectionMappings)
             {
-                sectionMarkdown = generated;
-                usedRawSection = true;
+                string? sectionMarkdown = null;
+                var usedRawSection = false;
+                if (mapping.GeneratedSection is { } gs && generatedSectionLookup.TryGetValue(gs, out var generated))
+                {
+                    sectionMarkdown = generated;
+                    usedRawSection = true;
+                }
+
+                sectionMarkdown ??= mapping.Extract(document.Markdown);
+
+                // When the raw LLM section is used directly (not extracted from the
+                // assembled markdown), it lacks the "## Section Title" heading the
+                // renderer normally prepends. Add it so the exported document has a
+                // visible section heading inside each content control.
+                if ((usedRawSection || mapping.Tag == "KeySkills")
+                    && mapping.EnglishSectionHeading is not null
+                    && !string.IsNullOrWhiteSpace(sectionMarkdown))
+                {
+                    sectionMarkdown = EnsureSectionHeading(
+                        sectionMarkdown,
+                        SelectLocalizedHeading(document.Markdown, mapping.EnglishSectionHeading, mapping.DanishSectionHeading));
+                }
+
+                if (TemplateContentPopulator.PopulateContentControl(mainPart, mapping.Tag, sectionMarkdown))
+                {
+                    populatedTags.Add(mapping.Tag);
+                }
             }
 
-            sectionMarkdown ??= mapping.Extract(document.Markdown);
+            var body = mainPart.Document?.Body
+                ?? throw new InvalidOperationException("CV template body missing.");
 
-            // When the raw LLM section is used directly (not extracted from the
-            // assembled markdown), it lacks the "## Section Title" heading the
-            // renderer normally prepends. Add it so the exported document has a
-            // visible section heading inside each content control.
-            if ((usedRawSection || mapping.Tag == "KeySkills")
-                && mapping.EnglishSectionHeading is not null
-                && !string.IsNullOrWhiteSpace(sectionMarkdown))
-            {
-                sectionMarkdown = EnsureSectionHeading(
-                    sectionMarkdown,
-                    SelectLocalizedHeading(document.Markdown, mapping.EnglishSectionHeading, mapping.DanishSectionHeading));
-            }
+            TemplateContentPopulator.RemoveEmptyControls(body, populatedTags);
 
-            if (TemplateContentPopulator.PopulateContentControl(mainPart, mapping.Tag, sectionMarkdown))
-            {
-                populatedTags.Add(mapping.Tag);
-            }
+            // Unwrap remaining structured-document-tag (SdtBlock) wrappers so the
+            // saved document contains plain paragraphs/lists/headings. Many ATS
+            // parsers (Workday, Taleo, Greenhouse) and most LLM-based CV parsers
+            // treat SDT-wrapped content as opaque or skip it entirely.
+            TemplateContentPopulator.UnwrapAllSdtBlocks(body);
+
+            // Inject the public-safe candidate snapshot as a custom XML part so
+            // ATS systems and LLM-based CV parsers can read structured data from
+            // the document without re-parsing the rendered text.
+            AtsCustomXmlEmitter.Attach(wordDoc, document.AtsSnapshot);
+
+            mainPart.Document!.Save();
         }
 
-        var body = mainPart.Document?.Body
-            ?? throw new InvalidOperationException("CV template body missing.");
-
-        TemplateContentPopulator.RemoveEmptyControls(body, populatedTags);
-
-        // Unwrap remaining structured-document-tag (SdtBlock) wrappers so the
-        // saved document contains plain paragraphs/lists/headings. Many ATS
-        // parsers (Workday, Taleo, Greenhouse) and most LLM-based CV parsers
-        // treat SDT-wrapped content as opaque or skip it entirely.
-        TemplateContentPopulator.UnwrapAllSdtBlocks(body);
-
-        // Inject the public-safe candidate snapshot as a custom XML part so
-        // ATS systems and LLM-based CV parsers can read structured data from
-        // the document without re-parsing the rendered text.
-        AtsCustomXmlEmitter.Attach(wordDoc, document.AtsSnapshot);
-
-        mainPart.Document!.Save();
+        NormalizeDocumentPackageContentTypes(outputPath);
     }
 
     /// <summary>
@@ -332,6 +338,44 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         }
 
         return $"## {heading}\n\n{trimmed}";
+    }
+
+    private static void NormalizeDocumentPackageContentTypes(string outputPath)
+    {
+        using var archive = ZipFile.Open(outputPath, ZipArchiveMode.Update);
+        var contentTypesEntry = archive.GetEntry("[Content_Types].xml")
+            ?? throw new InvalidOperationException("Generated Word package is missing [Content_Types].xml.");
+
+        XDocument contentTypes;
+        using (var stream = contentTypesEntry.Open())
+        {
+            contentTypes = XDocument.Load(stream);
+        }
+
+        XNamespace packageNamespace = "http://schemas.openxmlformats.org/package/2006/content-types";
+        var staleTemplateDefaults = contentTypes.Root?
+            .Elements(packageNamespace + "Default")
+            .Where(element =>
+                string.Equals((string?)element.Attribute("Extension"), "xml", StringComparison.OrdinalIgnoreCase)
+                && string.Equals((string?)element.Attribute("ContentType"),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+                    StringComparison.Ordinal))
+            .ToArray() ?? [];
+
+        if (staleTemplateDefaults.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var element in staleTemplateDefaults)
+        {
+            element.Remove();
+        }
+
+        contentTypesEntry.Delete();
+        var replacementEntry = archive.CreateEntry("[Content_Types].xml", CompressionLevel.Optimal);
+        using var replacementStream = replacementEntry.Open();
+        contentTypes.Save(replacementStream, SaveOptions.DisableFormatting);
     }
 
     private sealed record CvSectionMapping(

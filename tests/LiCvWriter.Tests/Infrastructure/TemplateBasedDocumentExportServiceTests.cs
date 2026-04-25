@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -683,6 +684,15 @@ Danish — Native, English — Professional
             // 3 KB indicates the template wasn't populated at all.
             Assert.True(fileInfo.Length > 3_000,
                 $"Expected a non-trivial CV docx (>3 KB), got {fileInfo.Length} bytes.");
+
+            using (var archive = ZipFile.OpenRead(result.FilePath!))
+            using (var contentTypesStream = archive.GetEntry("[Content_Types].xml")!.Open())
+            using (var reader = new StreamReader(contentTypesStream))
+            {
+                var contentTypesXml = reader.ReadToEnd();
+                Assert.DoesNotContain("wordprocessingml.template.main+xml", contentTypesXml);
+                Assert.Contains("wordprocessingml.document.main+xml", contentTypesXml);
+            }
 
             using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
             var validator = new OpenXmlValidator();
