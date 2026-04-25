@@ -205,6 +205,25 @@ public class LlmMarkdownNormalizerTests
         Assert.Contains("### Senior Cloud Architect and Advisor | Northwind Health", normalized);
     }
 
+    [Fact]
+    public void Normalize_PromotesLowercaseHyphenatedInlineProjectHeaderToHeading()
+    {
+        const string input =
+            "### Software Architect | Legacy Design Studio | Mar2005 - Feb2008\n\n" +
+            "Architected and developed software solutions for various clients, focusing on system design and technical implementation. " +
+            "e-Civic A/S | e-Civic A/S | Apr2014 - Sep2014\n" +
+            "Developed security software, conducting thorough security reviews and building robust authentication and authorization systems.";
+
+        var normalized = InvokeNormalize(input);
+        var html = Markdown.ToHtml(normalized, Pipeline);
+
+        Assert.Contains("technical implementation.\n\n### e-Civic A/S | e-Civic A/S | Apr2014 - Sep2014", normalized);
+        Assert.DoesNotContain("implementation. e-Civic", normalized);
+        Assert.Contains("<h3", html);
+        Assert.Contains("e-Civic A/S | e-Civic A/S | Apr2014 - Sep2014", ExtractLastHeading(html));
+        Assert.Contains("<p>Developed security software", html);
+    }
+
     [Theory]
     [InlineData("C# 13, .NET 9, ASP.NET Core")]
     [InlineData("F# and C# interop")]
@@ -297,6 +316,14 @@ public class LlmMarkdownNormalizerTests
     private static string ExtractFirstHeading(string html)
     {
         var start = html.IndexOf("<h3", StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var end = html.IndexOf("</h3>", start, StringComparison.Ordinal);
+        return end < 0 ? html[start..] : html[start..(end + 5)];
+    }
+
+    private static string ExtractLastHeading(string html)
+    {
+        var start = html.LastIndexOf("<h3", StringComparison.Ordinal);
         if (start < 0) return string.Empty;
         var end = html.IndexOf("</h3>", start, StringComparison.Ordinal);
         return end < 0 ? html[start..] : html[start..(end + 5)];

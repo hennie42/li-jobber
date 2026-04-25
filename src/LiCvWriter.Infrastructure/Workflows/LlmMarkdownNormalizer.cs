@@ -62,13 +62,13 @@ internal static class LlmMarkdownNormalizer
         @"(?<lead>[a-z])(?<date>(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{4})",
         RegexOptions.Compiled);
 
-    // Detects a "Title | Company" role header appearing inline after
+    // Detects a "Title | Company" role/project header appearing inline after
     // sentence-ending punctuation. Common when local models merge consecutive
-    // role entries into a single paragraph without ### markers. Requires at
-    // least 4 characters on each side of the pipe and uppercase after the pipe
-    // to avoid false positives.
+    // entries into a single paragraph without ### markers. Allows either a
+    // normal uppercase start or a lowercase hyphenated brand token such as
+    // "e-Civic" while still requiring pipe-separated header structure.
     private static readonly Regex InlineRoleHeader = new(
-        @"(?<lead>[.!?)\]""'])\s+(?<heading>[A-Z][^|\n]{3,}\|\s*[A-Z][^\n.!?]{3,})",
+        @"(?<lead>[.!?)\]""'])\s+(?<heading>(?:[A-Z0-9]|[a-z]+-)[^|\n]{3,}\|\s*(?:[A-Z0-9]|[a-z]+-)[^\n.!?]{3,})",
         RegexOptions.Compiled);
 
     // Trailing period on a heading line.
