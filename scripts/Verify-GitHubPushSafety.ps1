@@ -75,8 +75,41 @@ function Should-IgnoreAuditScriptPatternDefinition {
         -or $Finding.Line -match "^\s*'[^']+'\s*=\s*'.+'$"
 }
 
+function Should-IgnoreAllowedPersonalDataFinding {
+    param(
+        [psobject]$Finding
+    )
+
+    if ($null -eq $Finding) {
+        return $false
+    }
+
+    return $Finding.Path -eq 'LICENSE' -and $Finding.Line -match '^Copyright \(c\) 2026 Alex Taylor\. All rights reserved\.$'
+}
+
 $generatedPathPattern = '(^|/)(bin|obj|artifacts|TestResults|\.vs|outputs|\.local|LI-export)/'
 $machinePathPattern = '(?i)C:\\Users\\[^\\\r\n]+|AppData\\Roaming\\NuGet|\.nuget\\packages'
+$personalDataPatterns = [ordered]@{
+    'Personal name: Alex' = '\bAlex\b'
+    'Personal name: Taylor' = '\bTaylor\b'
+    'GitHub handle' = '\blicvwriter-demo\b'
+    'Former employer/project: Legacy Design Studio' = '\bLegacy Design Studio\b'
+    'Former employer/project: Alpine Systems' = '\bAlpine Systems\b'
+    'Former employer/project: Proseware' = '\bProseware\b'
+    'Former employer/project: Tailspin Interactive' = '\bTailspin Interactive\b'
+    'Former employer/project: Wide World Web' = '\bWide World Web\b'
+    'Former employer/project: Graphic Grove' = '\bGraphic Grove\b'
+    'Former employer/project: A. Datum Capital' = '\bA. Datum Capital\b'
+    'Former employer/project: Northwind Health' = '\bNorthwind Health\b'
+    'Former employer/project: Fabrikam Advisory' = '\bFabrikam Advisory\b'
+    'Former employer/project: Fabrikam Foods' = '\bFoss\.dk\b|\bFabrikam Foods\b'
+    'Former employer/project: CivicMail' = '\be-[Bb]oks\b'
+    'Former employer/project: Municipal Software' = '\bMunicipal Software\b'
+    'Former employer/project: Roadside Services' = '\bRoadside Services\b'
+    'Former employer/project: RetailCo' = '\bRetailCo\b'
+    'Former employer/project: Delivery Works' = '\bDelivery Works\b'
+    'Former employer/project: Northwind Software' = '\bNorthwind Software\b'
+}
 $secretPatterns = [ordered]@{
     'Private key' = '(?m)^-----BEGIN [A-Z ]*PRIVATE KEY-----'
     'GitHub token' = '\b(?:ghp|github_pat|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b'
@@ -113,6 +146,7 @@ try {
 
     $generatedPathFindings = @($candidateFiles | Where-Object { $_ -match $generatedPathPattern })
     $machinePathFindings = @()
+    $personalDataFindings = @()
     $secretFindings = @()
 
     foreach ($relativePath in $contentScanFiles) {
@@ -123,12 +157,17 @@ try {
 
         $machinePathFindings += Find-PatternMatches -FullPath $fullPath -RelativePath $relativePath -Pattern $machinePathPattern -FindingType 'Machine-specific path'
 
+        foreach ($pair in $personalDataPatterns.GetEnumerator()) {
+            $personalDataFindings += Find-PatternMatches -FullPath $fullPath -RelativePath $relativePath -Pattern $pair.Value -FindingType $pair.Key
+        }
+
         foreach ($pair in $secretPatterns.GetEnumerator()) {
             $secretFindings += Find-PatternMatches -FullPath $fullPath -RelativePath $relativePath -Pattern $pair.Value -FindingType $pair.Key
         }
     }
 
     $machinePathFindings = @($machinePathFindings | Where-Object { -not (Should-IgnoreAuditScriptPatternDefinition $_) })
+    $personalDataFindings = @($personalDataFindings | Where-Object { -not (Should-IgnoreAllowedPersonalDataFinding $_) })
     $secretFindings = @($secretFindings | Where-Object { -not (Should-IgnoreAuditScriptPatternDefinition $_) })
 
     $hasFailures = $false
@@ -145,6 +184,15 @@ try {
         Write-Host ''
         Write-Host 'Machine-specific path findings:' -ForegroundColor Red
         $machinePathFindings | Select-Object -First 20 | ForEach-Object {
+            Write-Host ("  {0}:{1} [{2}] {3}" -f $_.Path, $_.LineNumber, $_.Type, $_.Line)
+        }
+    }
+
+    if ($personalDataFindings.Count -gt 0) {
+        $hasFailures = $true
+        Write-Host ''
+        Write-Host 'Personal-data scrub-list findings:' -ForegroundColor Red
+        $personalDataFindings | Select-Object -First 40 | ForEach-Object {
             Write-Host ("  {0}:{1} [{2}] {3}" -f $_.Path, $_.LineNumber, $_.Type, $_.Line)
         }
     }

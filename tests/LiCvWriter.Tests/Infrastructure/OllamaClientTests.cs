@@ -129,7 +129,7 @@ public sealed class OllamaClientTests
             {
                 Content = new StringContent(
                     """
-                    {"model":"session-model","message":{"content":"Novo","thinking":"Thinking about Novo"},"done":false}
+                    {"model":"session-model","message":{"content":"Northwind","thinking":"Thinking about Northwind"},"done":false}
                     {"model":"session-model","message":{"content":"Northwind Health","thinking":"Thinking about Northwind Health"},"done":false}
                     {"model":"session-model","message":{"content":"Northwind Health Northwind Health","thinking":"Thinking about Northwind Health Northwind Health"},"done":false}
                     {"model":"session-model","message":{"content":""},"done":true,"prompt_eval_count":11,"eval_count":22,"total_duration":1000000000}

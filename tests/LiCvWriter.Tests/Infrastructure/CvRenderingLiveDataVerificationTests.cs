@@ -315,10 +315,10 @@ public sealed class CvRenderingLiveDataVerificationTests
             [
                 new RecommendationEntry(
                     new PersonName("John", "Smith"), "Fabrikam Foods", "Head of Enterprise Architecture",
-                    "I know Alex to be a very competent and trust worthy cloud architect and advisor. He combines deep technical skills with business understanding.",
+                    "I know Alex to be a very competent and trustworthy cloud architect and advisor. He combines deep technical skills with business understanding.",
                     "VISIBLE"),
                 new RecommendationEntry(
-                    new PersonName("Lars", "Nielsen"), "RetailCo i Danmark", "Agile Release & Change Manager",
+                    new PersonName("Lars", "Nielsen"), "RetailCo Denmark", "Agile Release & Change Manager",
                     "Alex er kvik og behagelig at arbejde sammen med. Der sker noget, og opgaverne bliver løst med et smil.",
                     "VISIBLE"),
                 new RecommendationEntry(

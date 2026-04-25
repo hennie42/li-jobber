@@ -86,7 +86,7 @@ public class LlmMarkdownNormalizerTests
         var normalized = InvokeNormalize(input);
 
         Assert.Contains("### Senior Architect | Northwind Health", normalized);
-        Assert.DoesNotContain("Nordisk.", normalized);
+        Assert.DoesNotContain("Health.", normalized);
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public class LlmMarkdownNormalizerTests
 
         Assert.Contains("Northwind Health", normalized);
         Assert.Contains("Oct2025", normalized);
-        Assert.DoesNotContain("NordiskOct", normalized);
+        Assert.DoesNotContain("HealthOct", normalized);
     }
 
     [Fact]
@@ -162,8 +162,8 @@ public class LlmMarkdownNormalizerTests
         Assert.Contains("### Senior Cloud Architect | Northwind Health", normalized);
 
         // Dates should be separated from company names.
-        Assert.DoesNotContain("NordiskOct", normalized);
-        Assert.DoesNotContain("NordiskApr", normalized);
+        Assert.DoesNotContain("HealthOct", normalized);
+        Assert.DoesNotContain("HealthApr", normalized);
 
         // Bullets should be proper list items.
         Assert.Contains("- Architected automation pipelines", normalized);

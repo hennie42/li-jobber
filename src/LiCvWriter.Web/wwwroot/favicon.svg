@@ -86,8 +86,8 @@
     <line x1="42" y1="46" x2="42" y2="50"/>
   </g>
 
-  <!-- Text: Alex -->
-  <text x="32" y="30" text-anchor="middle" font-family="'IBM Plex Mono','Consolas',monospace" font-size="9" font-weight="700" fill="#3dff8a" letter-spacing="0.5">Alex</text>
+  <!-- Text: LI CV -->
+  <text x="32" y="30" text-anchor="middle" font-family="'IBM Plex Mono','Consolas',monospace" font-size="9" font-weight="700" fill="#3dff8a" letter-spacing="0.5">LI CV</text>
 
   <!-- Text: 101010 -->
   <text x="32" y="42" text-anchor="middle" font-family="'IBM Plex Mono','Consolas',monospace" font-size="9" font-weight="400" fill="#2ecc71" letter-spacing="1.5" opacity="0.85">101010</text>
