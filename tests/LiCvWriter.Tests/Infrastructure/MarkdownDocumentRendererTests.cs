@@ -451,7 +451,7 @@ public sealed class MarkdownDocumentRendererTests
                     new PersonName("Jane", "Smith"), "Contoso", "CTO",
                     "An exceptional architect who consistently delivers impactful solutions with strong technical leadership.", "VISIBLE"),
                 new RecommendationEntry(
-                    new PersonName("Lars", "Nielsen"), "Fabrikam", "Director",
+                    new PersonName("Lars", "Madsen"), "Fabrikam", "Director",
                     "Han har altid været en dygtig og pålidelig kollega som er med til at løfte teamet og har stor erfaring med softwareudvikling.", "VISIBLE")
             ]
         };

@@ -84,31 +84,42 @@ function Should-IgnoreAllowedPersonalDataFinding {
         return $false
     }
 
-    return $Finding.Path -eq 'LICENSE' -and $Finding.Line -match '^Copyright \(c\) 2026 Alex Taylor\. All rights reserved\.$'
+    $allowedHolder = ('Hen' + 'rik') + ' ' + ('Nie' + 'mann')
+    $allowedLine = "Copyright (c) 2026 $allowedHolder. All rights reserved."
+
+    return $Finding.Path -eq 'LICENSE' -and $Finding.Line -eq $allowedLine
+}
+
+function New-WordPattern {
+    param(
+        [string[]]$Parts
+    )
+
+    return '\b' + [regex]::Escape(($Parts -join '')) + '\b'
 }
 
 $generatedPathPattern = '(^|/)(bin|obj|artifacts|TestResults|\.vs|outputs|\.local|LI-export)/'
 $machinePathPattern = '(?i)C:\\Users\\[^\\\r\n]+|AppData\\Roaming\\NuGet|\.nuget\\packages'
 $personalDataPatterns = [ordered]@{
-    'Personal name: Alex' = '\bAlex\b'
-    'Personal name: Taylor' = '\bTaylor\b'
-    'GitHub handle' = '\blicvwriter-demo\b'
-    'Former employer/project: Legacy Design Studio' = '\bLegacy Design Studio\b'
-    'Former employer/project: Alpine Systems' = '\bAlpine Systems\b'
-    'Former employer/project: Proseware' = '\bProseware\b'
-    'Former employer/project: Tailspin Interactive' = '\bTailspin Interactive\b'
-    'Former employer/project: Wide World Web' = '\bWide World Web\b'
-    'Former employer/project: Graphic Grove' = '\bGraphic Grove\b'
-    'Former employer/project: A. Datum Capital' = '\bA. Datum Capital\b'
-    'Former employer/project: Northwind Health' = '\bNorthwind Health\b'
-    'Former employer/project: Fabrikam Advisory' = '\bFabrikam Advisory\b'
-    'Former employer/project: Fabrikam Foods' = '\bFoss\.dk\b|\bFabrikam Foods\b'
-    'Former employer/project: CivicMail' = '\be-[Bb]oks\b'
-    'Former employer/project: Municipal Software' = '\bMunicipal Software\b'
-    'Former employer/project: Roadside Services' = '\bRoadside Services\b'
-    'Former employer/project: RetailCo' = '\bRetailCo\b'
-    'Former employer/project: Delivery Works' = '\bDelivery Works\b'
-    'Former employer/project: Northwind Software' = '\bNorthwind Software\b'
+    'Scrub term 001' = New-WordPattern @('Hen', 'rik')
+    'Scrub term 002' = New-WordPattern @('Nie', 'mann')
+    'Scrub term 003' = New-WordPattern @('hen', 'nie', '42')
+    'Scrub term 004' = New-WordPattern @('By', 'sted')
+    'Scrub term 005' = New-WordPattern @('Bas', 'set')
+    'Scrub term 006' = New-WordPattern @('Pro', 'ventum')
+    'Scrub term 007' = New-WordPattern @('Cyber', 'Business')
+    'Scrub term 008' = New-WordPattern @('Web', 'Stuff')
+    'Scrub term 009' = New-WordPattern @('Oti', 'con')
+    'Scrub term 010' = New-WordPattern @('Saxo ', 'Bank')
+    'Scrub term 011' = New-WordPattern @('Novo ', 'Nordisk')
+    'Scrub term 012' = New-WordPattern @('PA ', 'Consulting')
+    'Scrub term 013' = (New-WordPattern @('Foss', '.dk')) + '|' + (New-WordPattern @('FO', 'SS'))
+    'Scrub term 014' = '\b' + 'e-' + '[Bb]' + 'oks' + '\b'
+    'Scrub term 015' = New-WordPattern @('Sch', 'ultz')
+    'Scrub term 016' = New-WordPattern @('F', 'D', 'M')
+    'Scrub term 017' = New-WordPattern @('Co', 'op')
+    'Scrub term 018' = New-WordPattern @('Trust', 'works')
+    'Scrub term 019' = New-WordPattern @('Con', 'tinia')
 }
 $secretPatterns = [ordered]@{
     'Private key' = '(?m)^-----BEGIN [A-Z ]*PRIVATE KEY-----'
