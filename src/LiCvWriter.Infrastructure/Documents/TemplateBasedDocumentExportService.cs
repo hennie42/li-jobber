@@ -31,19 +31,19 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
     /// </summary>
     private static readonly IReadOnlyList<CvSectionMapping> CvSectionMappings =
     [
-        new("CandidateHeader", null, null, CvMarkdownSectionExtractor.ExtractCandidateHeader),
-        new("ProfileSummary", CvSection.ProfileSummary, "Professional Profile", CvMarkdownSectionExtractor.ExtractProfileSummary),
-        new("KeySkills", CvSection.KeySkills, "Key Technologies & Competencies", CvMarkdownSectionExtractor.ExtractKeySkills),
-        new("Experience", CvSection.ExperienceHighlights, "Professional Experience", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
-        new("Projects", CvSection.ProjectHighlights, "Projects", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
+        new("CandidateHeader", null, null, null, CvMarkdownSectionExtractor.ExtractCandidateHeader),
+        new("ProfileSummary", CvSection.ProfileSummary, "Professional Profile", "Professionel profil", CvMarkdownSectionExtractor.ExtractProfileSummary),
+        new("KeySkills", CvSection.KeySkills, "Key Technologies & Competencies", "Nøgleteknologier og kompetencer", CvMarkdownSectionExtractor.ExtractKeySkills),
+        new("Experience", CvSection.ExperienceHighlights, "Professional Experience", "Erhvervserfaring", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Professional Experience", "Erhvervserfaring")),
+        new("Projects", CvSection.ProjectHighlights, "Projects", "Projekter", markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Projects", "Projekter")),
         // Education and Languages are deterministic (no LLM round-trip) and
         // therefore have GeneratedSection = null; their content is recovered
         // from the rendered markdown via the section extractor.
-        new("Education", null, null, CvMarkdownSectionExtractor.ExtractEducation),
-        new("Certifications", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
-        new("Languages", null, null, CvMarkdownSectionExtractor.ExtractLanguages),
-        new("Recommendations", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
-        new("EarlyCareer", null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early Career", "Tidlig karriere")),
+        new("Education", null, null, null, CvMarkdownSectionExtractor.ExtractEducation),
+        new("Certifications", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
+        new("Languages", null, null, null, CvMarkdownSectionExtractor.ExtractLanguages),
+        new("Recommendations", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
+        new("EarlyCareer", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early Career", "Tidlig karriere")),
         // FitSnapshot intentionally omitted: it is internal assessment data
         // (strengths/gaps for the user) and must not appear in the document
         // sent to recruiters. Any FitSnapshot SDT left in older templates is
@@ -126,9 +126,13 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
             // assembled markdown), it lacks the "## Section Title" heading the
             // renderer normally prepends. Add it so the exported document has a
             // visible section heading inside each content control.
-            if (usedRawSection && mapping.SectionHeading is not null && !string.IsNullOrWhiteSpace(sectionMarkdown))
+            if ((usedRawSection || mapping.Tag == "KeySkills")
+                && mapping.EnglishSectionHeading is not null
+                && !string.IsNullOrWhiteSpace(sectionMarkdown))
             {
-                sectionMarkdown = $"## {mapping.SectionHeading}\n\n{sectionMarkdown}";
+                sectionMarkdown = EnsureSectionHeading(
+                    sectionMarkdown,
+                    SelectLocalizedHeading(document.Markdown, mapping.EnglishSectionHeading, mapping.DanishSectionHeading));
             }
 
             if (TemplateContentPopulator.PopulateContentControl(mainPart, mapping.Tag, sectionMarkdown))
@@ -304,5 +308,32 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         return string.Concat(value.Select(character => invalid.Contains(character) ? '-' : character));
     }
 
-    private sealed record CvSectionMapping(string Tag, CvSection? GeneratedSection, string? SectionHeading, Func<string, string?> Extract);
+    private static string SelectLocalizedHeading(string documentMarkdown, string englishHeading, string? danishHeading)
+    {
+        if (!string.IsNullOrWhiteSpace(danishHeading)
+            && documentMarkdown.Contains($"## {danishHeading}", StringComparison.OrdinalIgnoreCase))
+        {
+            return danishHeading;
+        }
+
+        return englishHeading;
+    }
+
+    private static string EnsureSectionHeading(string markdown, string heading)
+    {
+        var trimmed = markdown.Trim();
+        if (trimmed.StartsWith($"## {heading}", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        return $"## {heading}\n\n{trimmed}";
+    }
+
+    private sealed record CvSectionMapping(
+        string Tag,
+        CvSection? GeneratedSection,
+        string? EnglishSectionHeading,
+        string? DanishSectionHeading,
+        Func<string, string?> Extract);
 }

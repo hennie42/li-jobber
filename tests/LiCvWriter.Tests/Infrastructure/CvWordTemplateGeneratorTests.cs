@@ -80,4 +80,51 @@ public sealed class CvWordTemplateGeneratorTests
             }
         }
     }
+
+    [Fact]
+    public void Generate_UsesStableContentControlIds()
+    {
+        var firstPath = Path.Combine(
+            Path.GetTempPath(),
+            $"licvwriter-template-{Guid.NewGuid():N}.dotx");
+        var secondPath = Path.Combine(
+            Path.GetTempPath(),
+            $"licvwriter-template-{Guid.NewGuid():N}.dotx");
+
+        try
+        {
+            CvWordTemplateGenerator.Generate(firstPath);
+            CvWordTemplateGenerator.Generate(secondPath);
+
+            using var firstDocument = WordprocessingDocument.Open(firstPath, isEditable: false);
+            using var secondDocument = WordprocessingDocument.Open(secondPath, isEditable: false);
+
+            var firstIds = ReadContentControlIds(firstDocument);
+            var secondIds = ReadContentControlIds(secondDocument);
+
+            Assert.Equal(firstIds, secondIds);
+        }
+        finally
+        {
+            if (File.Exists(firstPath))
+            {
+                File.Delete(firstPath);
+            }
+
+            if (File.Exists(secondPath))
+            {
+                File.Delete(secondPath);
+            }
+        }
+    }
+
+    private static IReadOnlyDictionary<string, int> ReadContentControlIds(WordprocessingDocument document)
+        => document.MainDocumentPart!.Document!.Body!.Descendants<SdtBlock>()
+            .Select(static sdt => new
+            {
+                Tag = sdt.SdtProperties?.GetFirstChild<Tag>()?.Val?.Value,
+                Id = sdt.SdtProperties?.GetFirstChild<SdtId>()?.Val?.Value
+            })
+            .Where(static item => item.Tag is not null && item.Id is not null)
+            .ToDictionary(static item => item.Tag!, static item => item.Id!.Value, StringComparer.Ordinal);
 }

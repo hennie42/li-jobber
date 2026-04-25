@@ -20,7 +20,7 @@ public class LlmMarkdownNormalizerTests
     [Fact]
     public void Normalize_SplitsBulletsGluedAfterPunctuation()
     {
-        const string input = "Senior Architect | Novo Nordisk.*Architected automation pipelines.*Drove API-first adoption.";
+        const string input = "Senior Architect | Northwind Health.*Architected automation pipelines.*Drove API-first adoption.";
 
         var normalized = InvokeNormalize(input);
 
@@ -33,7 +33,7 @@ public class LlmMarkdownNormalizerTests
     public void Normalize_SplitsBulletsGluedAfterWord()
     {
         // LLM omits period before bullet: "Present*Architected"
-        const string input = "### Senior Architect | Novo Nordisk\nOct2025 - Present*Architected pipelines*Drove adoption.";
+        const string input = "### Senior Architect | Northwind Health\nOct2025 - Present*Architected pipelines*Drove adoption.";
 
         var normalized = InvokeNormalize(input);
 
@@ -44,7 +44,7 @@ public class LlmMarkdownNormalizerTests
     [Fact]
     public void Normalize_RendersAsBulletListThroughMarkdig()
     {
-        const string input = "### Senior Architect | Novo Nordisk\n2018-2024.*Architected pipelines.*Drove adoption.";
+        const string input = "### Senior Architect | Northwind Health\n2018-2024.*Architected pipelines.*Drove adoption.";
 
         var html = Markdown.ToHtml(InvokeNormalize(input), Pipeline);
 
@@ -81,12 +81,12 @@ public class LlmMarkdownNormalizerTests
     [Fact]
     public void Normalize_StripsTrailingPeriodOnHeading()
     {
-        const string input = "### Senior Architect | Novo Nordisk.";
+        const string input = "### Senior Architect | Northwind Health.";
 
         var normalized = InvokeNormalize(input);
 
-        Assert.Contains("### Senior Architect | Novo Nordisk", normalized);
-        Assert.DoesNotContain("Nordisk.", normalized);
+        Assert.Contains("### Senior Architect | Northwind Health", normalized);
+        Assert.DoesNotContain("Health.", normalized);
     }
 
     [Fact]
@@ -138,13 +138,13 @@ public class LlmMarkdownNormalizerTests
     [Fact]
     public void Normalize_SeparatesDateGluedToCompanyName()
     {
-        const string input = "### Senior Architect | Novo NordiskOct2025 - Present";
+        const string input = "### Senior Architect | Northwind HealthOct2025 - Present";
 
         var normalized = InvokeNormalize(input);
 
-        Assert.Contains("Novo Nordisk", normalized);
+        Assert.Contains("Northwind Health", normalized);
         Assert.Contains("Oct2025", normalized);
-        Assert.DoesNotContain("NordiskOct", normalized);
+        Assert.DoesNotContain("HealthOct", normalized);
     }
 
     [Fact]
@@ -152,18 +152,18 @@ public class LlmMarkdownNormalizerTests
     {
         // Realistic LLM output: everything glued together, no line breaks.
         const string input =
-            "### Senior Automation Architect | Novo NordiskOct2025 - Present*Architected automation pipelines.*Drove API-first adoption across 12 teams. " +
-            "### Senior Cloud Architect | Novo NordiskApr2022 - Oct2025*Provided strategic architectural guidance.*Spearheaded containerization using Docker and Kubernetes.";
+            "### Senior Automation Architect | Northwind HealthOct2025 - Present*Architected automation pipelines.*Drove API-first adoption across 12 teams. " +
+            "### Senior Cloud Architect | Northwind HealthApr2022 - Oct2025*Provided strategic architectural guidance.*Spearheaded containerization using Docker and Kubernetes.";
 
         var normalized = InvokeNormalize(input);
 
         // Headings should be on their own lines.
-        Assert.Contains("### Senior Automation Architect | Novo Nordisk", normalized);
-        Assert.Contains("### Senior Cloud Architect | Novo Nordisk", normalized);
+        Assert.Contains("### Senior Automation Architect | Northwind Health", normalized);
+        Assert.Contains("### Senior Cloud Architect | Northwind Health", normalized);
 
         // Dates should be separated from company names.
-        Assert.DoesNotContain("NordiskOct", normalized);
-        Assert.DoesNotContain("NordiskApr", normalized);
+        Assert.DoesNotContain("HealthOct", normalized);
+        Assert.DoesNotContain("HealthApr", normalized);
 
         // Bullets should be proper list items.
         Assert.Contains("- Architected automation pipelines", normalized);
@@ -196,13 +196,13 @@ public class LlmMarkdownNormalizerTests
         // without ### markers — only a "Title | Company" pattern signals
         // a new role.
         const string input =
-            "### Senior Automation Architect | Novo Nordisk\nOct 2025 - Present\n\n" +
-            "- Coaching cross-functional teams on AI use. Senior Cloud Architect and Advisor | Novo Nordisk Apr 2022 - Oct 2025. Providing strategic architectural guidance.";
+            "### Senior Automation Architect | Northwind Health\nOct 2025 - Present\n\n" +
+            "- Coaching cross-functional teams on AI use. Senior Cloud Architect and Advisor | Northwind Health Apr 2022 - Oct 2025. Providing strategic architectural guidance.";
 
         var normalized = InvokeNormalize(input);
 
-        Assert.Contains("### Senior Automation Architect | Novo Nordisk", normalized);
-        Assert.Contains("### Senior Cloud Architect and Advisor | Novo Nordisk", normalized);
+        Assert.Contains("### Senior Automation Architect | Northwind Health", normalized);
+        Assert.Contains("### Senior Cloud Architect and Advisor | Northwind Health", normalized);
     }
 
     [Theory]
@@ -246,14 +246,14 @@ public class LlmMarkdownNormalizerTests
         // The description must drop into a paragraph BELOW the heading, not
         // become a bullet, and not bleed into the heading style.
         const string input =
-            "### Senior Automation Architect | Novo Nordisk | Oct2025 - Present- Advance automation and integration projects by leveraging Agentic AI.\n\n" +
+            "### Senior Automation Architect | Northwind Health | Oct2025 - Present- Advance automation and integration projects by leveraging Agentic AI.\n\n" +
             "- Design and implement robust, API-first solutions.";
 
         var normalized = InvokeNormalize(input);
         var html = Markdown.ToHtml(normalized, Pipeline);
 
         // The heading line must end at "Present" and not contain the lead sentence.
-        Assert.Contains("### Senior Automation Architect | Novo Nordisk | Oct2025 - Present", normalized);
+        Assert.Contains("### Senior Automation Architect | Northwind Health | Oct2025 - Present", normalized);
         Assert.DoesNotContain("Present- Advance", normalized);
         // The lead sentence must render as a paragraph (not a list item, not part of <h3>).
         Assert.Contains("<h3", html);
@@ -269,12 +269,12 @@ public class LlmMarkdownNormalizerTests
         // Variant of the above where the period ends with a year, not "Present":
         //   "### Title | Company | Aug2020 - Apr2022- Delivered ...".
         const string input =
-            "### Principal Consultant | PA Consulting | Aug2020 - Apr2022- Delivered comprehensive IT consulting services across the Nordic countries.";
+            "### Principal Consultant | Fabrikam Advisory | Aug2020 - Apr2022- Delivered comprehensive IT consulting services across the Nordic countries.";
 
         var normalized = InvokeNormalize(input);
         var html = Markdown.ToHtml(normalized, Pipeline);
 
-        Assert.Contains("### Principal Consultant | PA Consulting | Aug2020 - Apr2022", normalized);
+        Assert.Contains("### Principal Consultant | Fabrikam Advisory | Aug2020 - Apr2022", normalized);
         Assert.DoesNotContain("Apr2022- Delivered", normalized);
         Assert.DoesNotContain("Delivered comprehensive IT", ExtractFirstHeading(html));
         Assert.Contains("<p>Delivered comprehensive IT", html);

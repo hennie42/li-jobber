@@ -85,8 +85,8 @@ public sealed class OperationStatusServiceTests
             "session-model",
             TimeSpan.FromSeconds(5),
             Completed: true,
-            ThinkingPreview: "Novo Nordisk",
-            ThinkingContent: "Novo Nordisk Novo Nordisk",
+            ThinkingPreview: "Northwind Health",
+            ThinkingContent: "Northwind Health Northwind Health",
             Sequence: 3));
 
         Assert.NotNull(service.LastCompletedLlmTelemetry);

@@ -129,9 +129,9 @@ public sealed class OllamaClientTests
             {
                 Content = new StringContent(
                     """
-                    {"model":"session-model","message":{"content":"Novo","thinking":"Thinking about Novo"},"done":false}
-                    {"model":"session-model","message":{"content":"Novo Nordisk","thinking":"Thinking about Novo Nordisk"},"done":false}
-                    {"model":"session-model","message":{"content":"Novo Nordisk Novo Nordisk","thinking":"Thinking about Novo Nordisk Novo Nordisk"},"done":false}
+                    {"model":"session-model","message":{"content":"Northwind","thinking":"Thinking about Northwind"},"done":false}
+                    {"model":"session-model","message":{"content":"Northwind Health","thinking":"Thinking about Northwind Health"},"done":false}
+                    {"model":"session-model","message":{"content":"Northwind Health Northwind Health","thinking":"Thinking about Northwind Health Northwind Health"},"done":false}
                     {"model":"session-model","message":{"content":""},"done":true,"prompt_eval_count":11,"eval_count":22,"total_duration":1000000000}
                     """,
                     Encoding.UTF8,
@@ -152,10 +152,10 @@ public sealed class OllamaClientTests
                 Stream: true),
             progress.Add);
 
-        Assert.Equal("Novo Nordisk Novo Nordisk", result.Content);
-        Assert.Equal("Thinking about Novo Nordisk Novo Nordisk", result.Thinking);
-        Assert.Contains(progress, update => update.ResponseContent == "Novo Nordisk Novo Nordisk");
-        Assert.Contains(progress, update => update.ThinkingContent == "Thinking about Novo Nordisk Novo Nordisk");
+        Assert.Equal("Northwind Health Northwind Health", result.Content);
+        Assert.Equal("Thinking about Northwind Health Northwind Health", result.Thinking);
+        Assert.Contains(progress, update => update.ResponseContent == "Northwind Health Northwind Health");
+        Assert.Contains(progress, update => update.ThinkingContent == "Thinking about Northwind Health Northwind Health");
     }
 
     [Fact]

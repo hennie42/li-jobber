@@ -490,8 +490,8 @@ public sealed class LlmOperationBrokerTests
             "configured-model",
             TimeSpan.FromSeconds(2),
             Completed: true,
-            ThinkingPreview: "Novo Nordisk",
-            ThinkingContent: "Novo Nordisk Novo Nordisk",
+            ThinkingPreview: "Northwind Health",
+            ThinkingContent: "Northwind Health Northwind Health",
             Sequence: 7));
 
         Assert.NotNull(operations.LastCompletedLlmTelemetry);

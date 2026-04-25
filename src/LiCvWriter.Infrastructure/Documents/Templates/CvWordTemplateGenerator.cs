@@ -101,7 +101,7 @@ public static class CvWordTemplateGenerator
             new SdtProperties(
                 new SdtAlias { Val = section.Title },
                 new Tag { Val = section.Tag },
-                new SdtId { Val = (int)(uint)section.Tag.GetHashCode() },
+                new SdtId { Val = CreateStableSdtId(section.Tag) },
                 new ShowingPlaceholder()),
             new SdtContentBlock(
                 new Paragraph(
@@ -112,6 +112,21 @@ public static class CvWordTemplateGenerator
                             new Italic(),
                             new Color { Val = "808080" }),
                         new Text(section.Placeholder) { Space = SpaceProcessingModeValues.Preserve }))));
+    }
+
+    private static int CreateStableSdtId(string value)
+    {
+        unchecked
+        {
+            uint hash = 2166136261;
+            foreach (var character in value)
+            {
+                hash ^= character;
+                hash *= 16777619;
+            }
+
+            return (int)(hash & 0x7FFFFFFF);
+        }
     }
 
     private static SectionProperties BuildSectionProperties()

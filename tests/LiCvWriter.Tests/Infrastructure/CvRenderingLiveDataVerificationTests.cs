@@ -80,27 +80,27 @@ public sealed class CvRenderingLiveDataVerificationTests
         // ── Early career (ended before 2009): must appear under Early Career ──
         // Early Career is now the last section so use end-of-document as the upper bound.
         AssertBetween(markdown, "## Early Career", null,
-            "Software Architect", "Bysted role (2005-2008) must be under Early Career");
+            "Software Architect", "Legacy Design Studio role (2005-2008) must be under Early Career");
         AssertBetween(markdown, "## Early Career", null,
-            "Basset", "Basset role (2000-2005) must be under Early Career");
+            "Alpine Systems", "Alpine Systems role (2000-2005) must be under Early Career");
         AssertBetween(markdown, "## Early Career", null,
-            "Lead Developer", "Proventum role (1999-2000) must be under Early Career");
+            "Lead Developer", "Proseware role (1999-2000) must be under Early Career");
         AssertBetween(markdown, "## Early Career", null,
-            "CyberBusiness", "CyberBusiness role (1998-1999) must be under Early Career");
+            "Tailspin Interactive", "Tailspin Interactive role (1998-1999) must be under Early Career");
         AssertBetween(markdown, "## Early Career", null,
-            "WebStuff", "WebStuff role (1995-1998) must be under Early Career");
+            "Wide World Web", "Wide World Web role (1995-1998) must be under Early Career");
 
         // ── Early career must NOT appear under Professional Experience ──
         AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
-            "Bysted", "Bysted role should NOT appear in Professional Experience");
+            "Legacy Design Studio", "Legacy Design Studio role should NOT appear in Professional Experience");
         AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
-            "Basset", "Basset role should NOT appear in Professional Experience");
+            "Alpine Systems", "Alpine Systems role should NOT appear in Professional Experience");
         AssertNotBetween(markdown, "## Professional Experience", "## Certifications",
-            "Proventum", "Proventum role should NOT appear in Professional Experience");
+            "Proseware", "Proseware role should NOT appear in Professional Experience");
 
         // ── Projects as bullet items (not ### headings) ──
         Assert.DoesNotContain("### Cloud Migration Portal", markdown);
-        Assert.DoesNotContain("### Oticon", markdown);
+        Assert.DoesNotContain("### Graphic Grove", markdown);
 
         // ── Umbrella role: Freelance should contain client sub-items ──
         AssertBetween(markdown, "Senior IT Consultant", "## Certifications",
@@ -161,14 +161,14 @@ public sealed class CvRenderingLiveDataVerificationTests
             Assert.Contains("Senior IT Consultant", allText);
 
             // Client sub-items from the freelance umbrella
-            Assert.Contains("Saxo Bank", allText);
-            Assert.Contains("Oticon", allText);
+            Assert.Contains("A. Datum Capital", allText);
+            Assert.Contains("Graphic Grove", allText);
 
             // Early career must be present
             Assert.Contains("Early Career", allText);
-            Assert.Contains("Bysted", allText);
-            Assert.Contains("Basset", allText);
-            Assert.Contains("Proventum", allText);
+            Assert.Contains("Legacy Design Studio", allText);
+            Assert.Contains("Alpine Systems", allText);
+            Assert.Contains("Proseware", allText);
 
             // Certifications
             Assert.Contains("Certifications", allText);
@@ -176,7 +176,7 @@ public sealed class CvRenderingLiveDataVerificationTests
 
             // Recommendations
             Assert.Contains("Recommendations", allText);
-            Assert.Contains("Henrik", allText);
+            Assert.Contains("Alex", allText);
         }
         finally
         {
@@ -230,20 +230,20 @@ public sealed class CvRenderingLiveDataVerificationTests
     {
         var candidate = new CandidateProfile
         {
-            Name = new PersonName("Henrik", "Niemann"),
+            Name = new PersonName("Alex", "Taylor"),
             Headline = "Senior Automation Architect | Cloud & Security | .NET, Azure, DevOps",
             Summary = "Experienced architect with 25+ years in software development.",
             Experience =
             [
-                new ExperienceEntry("Novo Nordisk", "Senior Automation Architect",
+                new ExperienceEntry("Northwind Health", "Senior Automation Architect",
                     "Leading automation initiatives across the enterprise.",
-                    "Bagsværd", new DateRange(new PartialDate("Oct 2025", 2025, 10), null)),
+                    "Aarhus", new DateRange(new PartialDate("Oct 2025", 2025, 10), null)),
 
-                new ExperienceEntry("Novo Nordisk", "Senior Cloud Architect and Advisor",
+                new ExperienceEntry("Northwind Health", "Senior Cloud Architect and Advisor",
                     "Designed and implemented cloud-native solutions on Azure.",
-                    "Bagsværd", new DateRange(new PartialDate("Apr 2022", 2022, 4), new PartialDate("Oct 2025", 2025, 10))),
+                    "Aarhus", new DateRange(new PartialDate("Apr 2022", 2022, 4), new PartialDate("Oct 2025", 2025, 10))),
 
-                new ExperienceEntry("PA Consulting", "Principal Consultant",
+                new ExperienceEntry("Fabrikam Advisory", "Principal Consultant",
                     "Delivered digital transformation projects for enterprise clients.",
                     "Copenhagen", new DateRange(new PartialDate("Aug 2020", 2020, 8), new PartialDate("Apr 2022", 2022, 4))),
 
@@ -251,55 +251,55 @@ public sealed class CvRenderingLiveDataVerificationTests
                     "Independent consulting spanning security, integration, and cloud architecture.",
                     "Copenhagen", new DateRange(new PartialDate("May 2008", 2008, 5), new PartialDate("Aug 2020", 2020, 8))),
 
-                new ExperienceEntry("Bysted", "Software Architect",
+                new ExperienceEntry("Legacy Design Studio", "Software Architect",
                     null, "Copenhagen",
                     new DateRange(new PartialDate("Mar 2005", 2005, 3), new PartialDate("Feb 2008", 2008, 2))),
 
-                new ExperienceEntry("Basset A/S", "Senior Consultant",
+                new ExperienceEntry("Alpine Systems A/S", "Senior Consultant",
                     null, "Copenhagen",
                     new DateRange(new PartialDate("Feb 2000", 2000, 2), new PartialDate("Feb 2005", 2005, 2))),
 
-                new ExperienceEntry("Proventum A/S", "Lead Developer",
+                new ExperienceEntry("Proseware A/S", "Lead Developer",
                     null, "Kolding",
                     new DateRange(new PartialDate("1999", 1999), new PartialDate("2000", 2000))),
 
-                new ExperienceEntry("CyberBusiness", "Developer",
+                new ExperienceEntry("Tailspin Interactive", "Developer",
                     null, "Copenhagen",
                     new DateRange(new PartialDate("1998", 1998), new PartialDate("1999", 1999))),
 
-                new ExperienceEntry("WebStuff", "Consultant",
+                new ExperienceEntry("Wide World Web", "Consultant",
                     null, "Kolding",
                     new DateRange(new PartialDate("1995", 1995), new PartialDate("1998", 1998)))
             ],
             Projects =
             [
-                new ProjectEntry("Saxo Bank - SharePoint 2007 - SharePoint 2010", "Migration and upgrade.", null,
+                new ProjectEntry("A. Datum Capital - SharePoint 2007 - SharePoint 2010", "Migration and upgrade.", null,
                     new DateRange(new PartialDate("2009", 2009), new PartialDate("2010", 2010))),
-                new ProjectEntry("Saxo Bank - Single Sign-on, SAML v2.0", "SSO implementation.", null,
+                new ProjectEntry("A. Datum Capital - Single Sign-on, SAML v2.0", "SSO implementation.", null,
                     new DateRange(new PartialDate("2010", 2010), new PartialDate("2012", 2012))),
                 new ProjectEntry("Various mobile applications with social media integration", "Mobile app development.", null,
                     new DateRange(new PartialDate("2012", 2012), new PartialDate("2012", 2012))),
-                new ProjectEntry("Foss.dk - Analysis and specification of software", "Software analysis.", null,
+                new ProjectEntry("Fabrikam Foods - Analysis and specification of software", "Software analysis.", null,
                     new DateRange(new PartialDate("2012", 2012), new PartialDate("2012", 2012))),
-                new ProjectEntry("LBi Denmark - Extranet with SAP integration", "SAP integration project.", null,
+                new ProjectEntry("Litware Denmark - Extranet with SAP integration", "SAP integration project.", null,
                     new DateRange(new PartialDate("2013", 2013), new PartialDate("2013", 2013))),
-                new ProjectEntry("Saxo Bank - Authorization with OAuth2", "OAuth2 authorization.", null,
+                new ProjectEntry("A. Datum Capital - Authorization with OAuth2", "OAuth2 authorization.", null,
                     new DateRange(new PartialDate("2013", 2013), new PartialDate("2014", 2014))),
-                new ProjectEntry("e-Boks A/S", "Digital mailbox platform.", null,
+                new ProjectEntry("CivicMail A/S", "Digital mailbox platform.", null,
                     new DateRange(new PartialDate("2014", 2014), new PartialDate("2014", 2014))),
-                new ProjectEntry("Oticon - eCommerce", "E-commerce platform.", null,
+                new ProjectEntry("Graphic Grove - eCommerce", "E-commerce platform.", null,
                     new DateRange(new PartialDate("2014", 2014), new PartialDate("2017", 2017))),
-                new ProjectEntry("Oticon - eCommerce Biztalk integration", "BizTalk integration.", null,
+                new ProjectEntry("Graphic Grove - eCommerce Biztalk integration", "BizTalk integration.", null,
                     new DateRange(new PartialDate("2016", 2016), new PartialDate("2017", 2017))),
                 new ProjectEntry("Danish/global jewellery brand - BizTalk, EDI with AX2012", "BizTalk and EDI.", null,
                     new DateRange(new PartialDate("2017", 2017), new PartialDate("2018", 2018))),
                 new ProjectEntry("Danish/global jewellery brand - Azure API, AD, CosmosDb, Functions and global scale", "Azure platform.", null,
                     new DateRange(new PartialDate("2018", 2018), new PartialDate("2018", 2018))),
-                new ProjectEntry("Schultz A/S - OIOIDWS", "Danish standard web services.", null,
+                new ProjectEntry("Municipal Software A/S - OIOIDWS", "Danish standard web services.", null,
                     new DateRange(new PartialDate("2018", 2018), new PartialDate("2018", 2018))),
-                new ProjectEntry("Saxo Bank - CIAM, SSO, OAuth, SAML and Azure ARM templates", "Identity platform.", null,
+                new ProjectEntry("A. Datum Capital - CIAM, SSO, OAuth, SAML and Azure ARM templates", "Identity platform.", null,
                     new DateRange(new PartialDate("2018", 2018), new PartialDate("2019", 2019))),
-                new ProjectEntry("FDM A/S - Azure architect, integration consultant and developer", "Azure architecture.", null,
+                new ProjectEntry("Roadside Services A/S - Azure architect, integration consultant and developer", "Azure architecture.", null,
                     new DateRange(new PartialDate("2019", 2019), new PartialDate("2019", 2019)))
             ],
             Certifications =
@@ -314,20 +314,20 @@ public sealed class CvRenderingLiveDataVerificationTests
             Recommendations =
             [
                 new RecommendationEntry(
-                    new PersonName("John", "Smith"), "FOSS", "Head of Enterprise Architecture",
-                    "I know Henrik to be a very competent and trust worthy cloud architect and advisor. He combines deep technical skills with business understanding.",
+                    new PersonName("John", "Smith"), "Fabrikam Foods", "Head of Enterprise Architecture",
+                    "I know Alex to be a very competent and trustworthy cloud architect and advisor. He combines deep technical skills with business understanding.",
                     "VISIBLE"),
                 new RecommendationEntry(
-                    new PersonName("Lars", "Nielsen"), "Coop i Danmark", "Agile Release & Change Manager",
-                    "Henrik er kvik og behagelig at arbejde sammen med. Der sker noget, og opgaverne bliver løst med et smil.",
+                    new PersonName("Lars", "Nielsen"), "RetailCo Denmark", "Agile Release & Change Manager",
+                    "Alex er kvik og behagelig at arbejde sammen med. Der sker noget, og opgaverne bliver løst med et smil.",
                     "VISIBLE"),
                 new RecommendationEntry(
-                    new PersonName("Jane", "Morgan"), "Novo Nordisk", "Head of Cloud Center of Excellence",
-                    "I have had the pleasure of working with Henrik both as coworker and in my role as his manager. Truly exceptional.",
+                    new PersonName("Jane", "Morgan"), "Northwind Health", "Head of Cloud Center of Excellence",
+                    "I have had the pleasure of working with Alex both as coworker and in my role as his manager. Truly exceptional.",
                     "VISIBLE"),
                 new RecommendationEntry(
                     new PersonName("Peter", "Hansen"), "Trustworks", "Managing Director, Technology",
-                    "I have worked with Henrik on several occasions and can give him my best recommendation.",
+                    "I have worked with Alex on several occasions and can give him my best recommendation.",
                     "VISIBLE")
             ],
             Skills =

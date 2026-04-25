@@ -413,7 +413,7 @@ public sealed class HttpJobResearchServiceTests
             """
             {
               "roleTitle": "Senior IT Integration Architect",
-              "companyName": "Novo Nordisk",
+              "companyName": "Northwind Health",
               "summary": "Lead enterprise integration architecture across global teams.",
               "requirements": [
                 {
@@ -434,12 +434,12 @@ public sealed class HttpJobResearchServiceTests
             new OllamaOptions());
 
         var result = await service.AnalyzeTextAsync(
-            "Senior IT Integration Architect at Novo Nordisk. Lead the organization's technical and architectural direction for enterprise integration.",
+            "Senior IT Integration Architect at Northwind Health. Lead the organization's technical and architectural direction for enterprise integration.",
             "model",
             "high");
 
         Assert.Equal("Senior IT Integration Architect", result.RoleTitle);
-        Assert.Equal("Novo Nordisk", result.CompanyName);
+        Assert.Equal("Northwind Health", result.CompanyName);
         Assert.Contains("Enterprise integration", result.MustHaveThemes);
       }
 
@@ -450,7 +450,7 @@ public sealed class HttpJobResearchServiceTests
             """
             {
               "roleTitle": "Senior IT Integration Architect",
-              "companyName": "Novo Nordisk",
+              "companyName": "Northwind Health",
               "summary": "Drive enterprise integration architecture across global teams.",
               "requirements": [
                 {
@@ -471,12 +471,12 @@ public sealed class HttpJobResearchServiceTests
             new OllamaOptions());
 
         var result = await service.AnalyzeTextAsync(
-            "Senior IT Integration Architect at Novo Nordisk. Lead enterprise integration architecture across global teams and standardize reuse across integration platforms.",
+            "Senior IT Integration Architect at Northwind Health. Lead enterprise integration architecture across global teams and standardize reuse across integration platforms.",
             "model",
             "high");
 
         Assert.Equal("Senior IT Integration Architect", result.RoleTitle);
-        Assert.Equal("Novo Nordisk", result.CompanyName);
+        Assert.Equal("Northwind Health", result.CompanyName);
         Assert.Equal("Drive enterprise integration architecture across global teams.", result.Summary);
         Assert.NotEmpty(result.MustHaveThemes);
         Assert.NotEmpty(result.Signals);

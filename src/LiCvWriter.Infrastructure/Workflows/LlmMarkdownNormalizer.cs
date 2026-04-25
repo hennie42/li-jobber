@@ -55,7 +55,7 @@ internal static class LlmMarkdownNormalizer
         @"(?<lead>[.!?:;,)\]""'])\s*(?<hashes>#{1,6})\s+(?=\S)",
         RegexOptions.Compiled);
 
-    // A date pattern glued to the preceding word, e.g. "NordiskOct2025" or
+    // A date pattern glued to the preceding word, e.g. "HealthOct2025" or
     // "ConsultingAug2020". We insert a newline to separate the date from the
     // company/title heading.
     private static readonly Regex GluedDate = new(
@@ -95,7 +95,7 @@ internal static class LlmMarkdownNormalizer
 
         var text = markdown.Replace("\r\n", "\n").Replace('\r', '\n');
 
-        // 1. Separate dates glued to company names (e.g. "NordiskOct2025").
+        // 1. Separate dates glued to company names (e.g. "HealthOct2025").
         text = GluedDate.Replace(text, "${lead}\n${date}");
 
         // 2. Split inline-glued bullets into their own lines.

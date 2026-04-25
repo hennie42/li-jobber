@@ -473,6 +473,7 @@ Danish — Native, English — Professional
 
             Assert.Contains("Alex Taylor", allText);            // CandidateHeader
             Assert.Contains("Experienced architect", allText);  // ProfileSummary
+            Assert.Contains("Key Technologies & Competencies", allText); // KeySkills heading
             Assert.Contains("Azure", allText);                  // KeySkills
             Assert.Contains("Lead Architect", allText);         // Experience
             Assert.Contains("Cloud Migration Portal", allText); // Projects
@@ -570,9 +571,11 @@ Danish — Native, English — Professional
                 .ToArray();
 
             Assert.NotEmpty(headingParagraphs);
-            // At least Profile, Experience, Education, Certifications, Languages, Recommendations.
-            Assert.True(headingParagraphs.Length >= 5,
-                $"Expected at least 5 heading-styled paragraphs, found {headingParagraphs.Length}.");
+            Assert.Contains(headingParagraphs, p =>
+                p.InnerText.Contains("Key Technologies & Competencies", StringComparison.Ordinal));
+            // At least Profile, KeySkills, Experience, Education, Certifications, Languages, Recommendations.
+            Assert.True(headingParagraphs.Length >= 6,
+                $"Expected at least 6 heading-styled paragraphs, found {headingParagraphs.Length}.");
         }
         finally
         {
