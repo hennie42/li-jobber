@@ -35,6 +35,18 @@ internal static class LlmMarkdownNormalizer
         @"(?<lead>[.!?)\]""'])[ \t]*-[ \t]+(?=[A-Z])",
         RegexOptions.Compiled);
 
+    // Heading-line "Title | Company | YYYY - Present- Description" / "...YYYY- Description"
+    // pattern emitted by local LLMs. We split at the year-or-Present boundary
+    // and turn the trailing description into a paragraph (not a bullet) so the
+    // role's lead sentence appears under its heading. The required whitespace
+    // after the dash prevents firing on date ranges like "2020-2024" because
+    // those have no whitespace after the dash. The "[A-Z][a-z]" lookahead
+    // requires a sentence-style word (not an abbreviation/acronym) so we don't
+    // split things like "2024- AI Agents" mid-acronym.
+    private static readonly Regex InlineDashAfterPeriod = new(
+        @"(?<lead>(?:Present|\d{4}))-[ \t]+(?=[A-Z][a-z])",
+        RegexOptions.Compiled);
+
     // Matches a heading marker glued to the end of a sentence (e.g. "text.### Heading").
     // Requires whitespace OR sentence-ending punctuation between the lead char
     // and the hashes so we never split language tokens like "C#", "F#" or
@@ -92,6 +104,12 @@ internal static class LlmMarkdownNormalizer
             $"{m.Groups["lead"].Value}\n- ");
         text = InlineBulletAfterWord.Replace(text, m =>
             $"{m.Groups["lead"].Value}\n- ");
+        // 2a. Split heading-line role periods from glued lead sentences:
+        //     "...YYYY - Present- Advance ..." → "...YYYY - Present\n\nAdvance ..."
+        //     Run before InlineDashBullet so the lead sentence becomes a
+        //     paragraph (under the heading) rather than a bullet.
+        text = InlineDashAfterPeriod.Replace(text, m =>
+            $"{m.Groups["lead"].Value}\n\n");
         text = InlineDashBullet.Replace(text, m =>
             $"{m.Groups["lead"].Value}\n- ");
 
