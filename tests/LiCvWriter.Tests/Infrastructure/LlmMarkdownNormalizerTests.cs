@@ -237,6 +237,71 @@ public class LlmMarkdownNormalizerTests
         Assert.DoesNotContain("<h1", html);
     }
 
+    [Fact]
+    public void Normalize_SplitsHeadingFromGluedDescriptionAfterPresent()
+    {
+        // Regression for a real export defect: the LLM produced the heading
+        // and lead paragraph on a single line as
+        //   "### Title | Company | Oct2025 - Present- Description sentence...".
+        // The description must drop into a paragraph BELOW the heading, not
+        // become a bullet, and not bleed into the heading style.
+        const string input =
+            "### Senior Automation Architect | Northwind Health | Oct2025 - Present- Advance automation and integration projects by leveraging Agentic AI.\n\n" +
+            "- Design and implement robust, API-first solutions.";
+
+        var normalized = InvokeNormalize(input);
+        var html = Markdown.ToHtml(normalized, Pipeline);
+
+        // The heading line must end at "Present" and not contain the lead sentence.
+        Assert.Contains("### Senior Automation Architect | Northwind Health | Oct2025 - Present", normalized);
+        Assert.DoesNotContain("Present- Advance", normalized);
+        // The lead sentence must render as a paragraph (not a list item, not part of <h3>).
+        Assert.Contains("<h3", html);
+        Assert.DoesNotContain("Advance automation and integration projects", ExtractFirstHeading(html));
+        Assert.Contains("<p>Advance automation and integration projects", html);
+        // The trailing "Design and implement..." must still be a list item.
+        Assert.Contains("<li>Design and implement", html);
+    }
+
+    [Fact]
+    public void Normalize_SplitsHeadingFromGluedDescriptionAfterYear()
+    {
+        // Variant of the above where the period ends with a year, not "Present":
+        //   "### Title | Company | Aug2020 - Apr2022- Delivered ...".
+        const string input =
+            "### Principal Consultant | Fabrikam Advisory | Aug2020 - Apr2022- Delivered comprehensive IT consulting services across the Nordic countries.";
+
+        var normalized = InvokeNormalize(input);
+        var html = Markdown.ToHtml(normalized, Pipeline);
+
+        Assert.Contains("### Principal Consultant | Fabrikam Advisory | Aug2020 - Apr2022", normalized);
+        Assert.DoesNotContain("Apr2022- Delivered", normalized);
+        Assert.DoesNotContain("Delivered comprehensive IT", ExtractFirstHeading(html));
+        Assert.Contains("<p>Delivered comprehensive IT", html);
+    }
+
+    [Fact]
+    public void Normalize_PreservesYearRangesLikeTwentyTwentyDashTwentyTwentyFour()
+    {
+        // Date ranges "2020-2024" must NOT be split: there is no whitespace
+        // after the dash, so the new paragraph rule must skip them.
+        const string input = "### Senior Architect | Contoso | 2020-2024";
+
+        var normalized = InvokeNormalize(input);
+
+        Assert.Contains("2020-2024", normalized);
+        Assert.DoesNotContain("2020\n", normalized);
+        Assert.DoesNotContain("2024\n\n", normalized);
+    }
+
+    private static string ExtractFirstHeading(string html)
+    {
+        var start = html.IndexOf("<h3", StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+        var end = html.IndexOf("</h3>", start, StringComparison.Ordinal);
+        return end < 0 ? html[start..] : html[start..(end + 5)];
+    }
+
     private static string InvokeNormalize(string? input)
         => LlmMarkdownNormalizer.Normalize(input);
 }
