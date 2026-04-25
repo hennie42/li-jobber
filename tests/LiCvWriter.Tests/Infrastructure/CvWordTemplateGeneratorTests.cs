@@ -1,5 +1,6 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using LiCvWriter.Infrastructure.Documents.Templates;
 
@@ -71,6 +72,11 @@ public sealed class CvWordTemplateGeneratorTests
             Assert.Contains("Heading1", styleIds);
             Assert.Contains("Heading2", styleIds);
             Assert.Contains("Heading3", styleIds);
+
+            var validationErrors = new OpenXmlValidator().Validate(document).ToArray();
+            Assert.True(validationErrors.Length == 0,
+                "Template OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
+                    $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
         }
         finally
         {

@@ -179,6 +179,7 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
 
         var converter = new HtmlConverter(mainPart);
         converter.ParseBody(html);
+        TemplateContentPopulator.NormalizeStyleDefinitions(mainPart);
 
         AppendDefaultSection(mainPart.Document.Body!);
         mainPart.Document.Save();
@@ -247,8 +248,11 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
     private static Style CreateBodyStyle()
         => new(
             new StyleName { Val = "Normal" },
+            new StyleParagraphProperties(
+                new SpacingBetweenLines { After = "120", Line = "276", LineRule = LineSpacingRuleValues.Auto }),
             new StyleRunProperties(
                 new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", ComplexScript = "Calibri" },
+                new Color { Val = "1F1F1F" },
                 new FontSize { Val = "22" }))
         {
             Type = StyleValues.Paragraph,
@@ -261,13 +265,13 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
             new StyleName { Val = styleName },
             new BasedOn { Val = "Normal" },
             new NextParagraphStyle { Val = "Normal" },
+            new StyleParagraphProperties(
+                new SpacingBetweenLines { Before = "240", After = "120" }),
             new StyleRunProperties(
                 new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", ComplexScript = "Calibri" },
                 new Bold { Val = OnOffValue.FromBoolean(true) },
-                new FontSize { Val = fontSize },
-                new Color { Val = "1F1F1F" }),
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "240", After = "120" }))
+                new Color { Val = "1F1F1F" },
+                new FontSize { Val = fontSize }))
         {
             Type = StyleValues.Paragraph,
             StyleId = styleId

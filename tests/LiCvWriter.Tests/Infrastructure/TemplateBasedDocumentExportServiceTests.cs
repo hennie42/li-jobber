@@ -688,14 +688,9 @@ Danish — Native, English — Professional
             var validator = new OpenXmlValidator();
             var validationErrors = validator.Validate(wordDoc).ToArray();
 
-            // The custom XML part we emit must not introduce any new validation
-            // errors. Pre-existing template-level cosmetic errors (Word's pre-2007
-            // pBdr/color attribute schema quirks) are out of scope for this test.
-            var customXmlErrors = validationErrors
-                .Where(e => e.Part is CustomXmlPart or CustomXmlPropertiesPart)
-                .ToArray();
-            Assert.True(customXmlErrors.Length == 0,
-                "Custom XML validation errors:\n" + string.Join("\n", customXmlErrors.Select(e => $"- {e.Description}")));
+            Assert.True(validationErrors.Length == 0,
+                "CV OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
+                    $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
         }
         finally
         {

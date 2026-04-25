@@ -218,17 +218,17 @@ public static class CvWordTemplateGenerator
     {
         return new Style(
             new StyleName { Val = "Normal" },
-            new StyleRunProperties(
-                BuildRunFonts(),
-                new FontSize { Val = "22" },
-                new Color { Val = "1F1F1F" }),
             new StyleParagraphProperties(
                 new SpacingBetweenLines
                 {
                     After = "80",
                     Line = "276",
                     LineRule = LineSpacingRuleValues.Auto
-                }))
+                }),
+            new StyleRunProperties(
+                BuildRunFonts(),
+                new Color { Val = "1F1F1F" },
+                new FontSize { Val = "22" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = "Normal",
@@ -246,14 +246,7 @@ public static class CvWordTemplateGenerator
             new StyleName { Val = "heading 1" },
             new BasedOn { Val = "Normal" },
             new NextParagraphStyle { Val = "Normal" },
-            new StyleRunProperties(
-                BuildRunFonts(),
-                new Bold { Val = OnOffValue.FromBoolean(true) },
-                // 32 half-points = 16 pt.
-                new FontSize { Val = "32" },
-                new Color { Val = AccentColorHex }),
             new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "280", After = "120" },
                 new ParagraphBorders(
                     new BottomBorder
                     {
@@ -261,7 +254,14 @@ public static class CvWordTemplateGenerator
                         Size = 6,
                         Space = 2,
                         Color = AccentColorHex
-                    })))
+                    }),
+                new SpacingBetweenLines { Before = "280", After = "120" }),
+            new StyleRunProperties(
+                BuildRunFonts(),
+                new Bold { Val = OnOffValue.FromBoolean(true) },
+                new Color { Val = AccentColorHex },
+                // 32 half-points = 16 pt.
+                new FontSize { Val = "32" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = "Heading1"
@@ -278,14 +278,14 @@ public static class CvWordTemplateGenerator
             new StyleName { Val = "heading 2" },
             new BasedOn { Val = "Normal" },
             new NextParagraphStyle { Val = "Normal" },
+            new StyleParagraphProperties(
+                new SpacingBetweenLines { Before = "200", After = "60" }),
             new StyleRunProperties(
                 BuildRunFonts(),
                 new Bold { Val = OnOffValue.FromBoolean(true) },
+                new Color { Val = "1F1F1F" },
                 // 28 half-points = 14 pt.
-                new FontSize { Val = "28" },
-                new Color { Val = "1F1F1F" }),
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "200", After = "60" }))
+                new FontSize { Val = "28" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = "Heading2"
@@ -301,14 +301,14 @@ public static class CvWordTemplateGenerator
             new StyleName { Val = "heading 3" },
             new BasedOn { Val = "Normal" },
             new NextParagraphStyle { Val = "Normal" },
+            new StyleParagraphProperties(
+                new SpacingBetweenLines { Before = "120", After = "40" }),
             new StyleRunProperties(
                 BuildRunFonts(),
                 new Bold { Val = OnOffValue.FromBoolean(true) },
+                new Color { Val = "2A2A2A" },
                 // 24 half-points = 12 pt.
-                new FontSize { Val = "24" },
-                new Color { Val = "2A2A2A" }),
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "120", After = "40" }))
+                new FontSize { Val = "24" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = "Heading3"
@@ -326,13 +326,13 @@ public static class CvWordTemplateGenerator
             new StyleName { Val = "Contact Line" },
             new BasedOn { Val = "Normal" },
             new NextParagraphStyle { Val = "Normal" },
+            new StyleParagraphProperties(
+                new SpacingBetweenLines { Before = "0", After = "240" }),
             new StyleRunProperties(
                 BuildRunFonts(),
+                new Color { Val = "4A4A4A" },
                 // 20 half-points = 10 pt.
-                new FontSize { Val = "20" },
-                new Color { Val = "4A4A4A" }),
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "0", After = "240" }))
+                new FontSize { Val = "20" }))
         {
             Type = StyleValues.Paragraph,
             StyleId = "ContactLine"

@@ -164,6 +164,39 @@ public static class TemplateContentPopulator
     }
 
     /// <summary>
+    /// Normalizes style definitions emitted by HTML conversion so generated
+    /// documents remain compatible with Word's strict OpenXML repair checks.
+    /// </summary>
+    public static void NormalizeStyleDefinitions(MainDocumentPart mainPart)
+    {
+        ArgumentNullException.ThrowIfNull(mainPart);
+
+        var styles = mainPart.StyleDefinitionsPart?.Styles;
+        if (styles is null)
+        {
+            return;
+        }
+
+        foreach (var indentation in styles.Descendants<Indentation>())
+        {
+            if (indentation.Start is not null && indentation.Left is null)
+            {
+                indentation.Left = indentation.Start.Value;
+            }
+
+            if (indentation.End is not null && indentation.Right is null)
+            {
+                indentation.Right = indentation.End.Value;
+            }
+
+            indentation.Start = null;
+            indentation.End = null;
+        }
+
+        styles.Save();
+    }
+
+    /// <summary>
     /// Returns the <see cref="SdtBlock"/> whose <see cref="Tag.Val"/> matches
     /// <paramref name="tag"/>, or <see langword="null"/> when no such control exists.
     /// </summary>
@@ -239,6 +272,7 @@ public static class TemplateContentPopulator
 
         var converter = new HtmlConverter(mainPart);
         converter.ParseBody(html);
+        NormalizeStyleDefinitions(mainPart);
 
         var newChildren = body.ChildElements
             .Where(child => !existingChildren.Contains(child))
