@@ -44,7 +44,7 @@
             <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
             <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
             <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Summary</label>
-            <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview notes</label>
+            <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview questions</label>
         </div>
         <div class="button-row">
             <button class="primary-button" @onclick="RunAllRefreshThenDraftsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Start all")</button>
@@ -612,7 +612,7 @@ else if (CanRunFitReview)
         <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
         <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
         <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Profile summary</label>
-        <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview notes</label>
+        <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview questions</label>
     </div>
 
     <label class="field-label" for="additionalInstructions">Additional instructions</label>
@@ -729,9 +729,9 @@ else if (CanRunFitReview)
             {
                 <li>
                     <strong>@export.Kind</strong>:
-                    <a href="@BuildOpenFileUrl(export.FilePath, revealFolder: false)" target="_blank" rel="noopener">@Path.GetFileName(export.FilePath)</a>
+                    <a href="@LocalFileLinkBuilder.BuildFileUri(export.FilePath)" target="_blank" rel="noopener">@Path.GetFileName(export.FilePath)</a>
                     <span class="muted-text">
-                        (<a href="@BuildOpenFileUrl(export.FilePath, revealFolder: true)" target="_blank" rel="noopener">open folder</a>)
+                        (<a href="@LocalFileLinkBuilder.BuildFolderUri(export.FilePath)" target="_blank" rel="noopener">open folder</a>)
                     </span>
                     <br />
                     <span class="muted-text">@export.FilePath</span>
@@ -1644,13 +1644,8 @@ else if (CanRunFitReview)
             return;
         }
 
-        var readyJobSets = Workspace.JobSets
-            .OrderBy(jobSet => jobSet.SortOrder)
-            .Where(CanRunBatchDraftGeneration)
-            .ToArray();
-        var skippedJobSets = Workspace.JobSets
-            .OrderBy(jobSet => jobSet.SortOrder)
-            .Where(jobSet => !CanRunBatchDraftGeneration(jobSet))
+        var readyJobSets = JobSetBatchPlanner.SelectReadyJobSets(Workspace.JobSets, CanRunBatchDraftGeneration).ToArray();
+        var skippedJobSets = JobSetBatchPlanner.SelectSkippedJobSets(Workspace.JobSets, CanRunBatchDraftGeneration)
             .Select(jobSet => $"Skipped {jobSet.Title}: {GetBatchReadinessMessage(jobSet)}")
             .ToArray();
 
@@ -2189,21 +2184,6 @@ else if (CanRunFitReview)
 
     private static string FormatTokenCount(long? tokens)
         => tokens?.ToString("N0") ?? "Pending";
-
-    /// <summary>
-    /// Builds a query-string URL for the file-open endpoint that opens the
-    /// exported file (or its containing folder when <paramref name="revealFolder"/>
-    /// is true) using the OS shell.
-    /// </summary>
-    private static string BuildOpenFileUrl(string? filePath, bool revealFolder)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return "#";
-        }
-
-        return $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder={(revealFolder ? "true" : "false")}";
-    }
 
     private LlmOperationSnapshot? GetActiveDraftStreamSnapshot()
         => activeStreamSnapshot is { Kind: "generate-drafts" } snapshot

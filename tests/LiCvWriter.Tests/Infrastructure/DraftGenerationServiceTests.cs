@@ -230,6 +230,36 @@ public sealed class DraftGenerationServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_NonCvKinds_IncludeFocusedOnePagePromptGuidance()
+    {
+        var llmClient = new CapturingLlmClient();
+        var service = CreateService(llmClient, new RecordingAuditStore(), new OllamaOptions
+        {
+            Model = "configured-model",
+            Think = "medium",
+            UseChatEndpoint = true,
+            KeepAlive = "5m",
+            Temperature = 0.1
+        });
+
+        var baseRequest = CreateRequest();
+        var request = baseRequest with
+        {
+            DocumentKinds = [DocumentKind.CoverLetter, DocumentKind.ProfileSummary, DocumentKind.InterviewNotes]
+        };
+
+        await service.GenerateAsync(request);
+
+        var combinedSystemPrompts = string.Join("\n", llmClient.AllRequests.Select(static request => request.SystemPrompt));
+        var combinedUserPrompts = string.Join("\n", llmClient.AllRequests.Select(static request => request.Messages[0].Content));
+
+        Assert.Contains("no more than one page", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("very focused", combinedUserPrompts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Generate interview questions", combinedUserPrompts);
+        Assert.DoesNotContain("STAR Examples", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GenerateAsync_Cv_PassesGeneratedSectionsToRenderer()
     {
         var llmClient = new CapturingLlmClient();

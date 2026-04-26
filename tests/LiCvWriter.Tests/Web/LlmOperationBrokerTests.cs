@@ -201,6 +201,178 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartJobContextAnalysis_UrlMode_UsesUrlResearchMethods()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var jobResearchService = new CapturingJobResearchService();
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddSingleton<IJobResearchService>(jobResearchService);
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal(1, jobResearchService.AnalyzeUrlCalls);
+        Assert.Equal(1, jobResearchService.CompanyUrlCalls);
+        Assert.Equal(0, jobResearchService.AnalyzeTextCalls);
+        Assert.Equal(0, jobResearchService.CompanyTextCalls);
+        Assert.Equal(new Uri("https://example.test/job"), jobResearchService.LastJobUrl);
+        Assert.Equal(new Uri("https://example.test/company"), Assert.Single(jobResearchService.LastCompanyUrls));
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_PasteTextMode_UsesTextResearchMethods()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var jobResearchService = new CapturingJobResearchService();
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddSingleton<IJobResearchService>(jobResearchService);
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.AddJobSet(JobSetInputMode.PasteText);
+        workspace.UpdateJobSetInputs("job-set-02",
+            string.Empty,
+            string.Empty,
+            "Pasted job posting text",
+            "Pasted company context");
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-02"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal(0, jobResearchService.AnalyzeUrlCalls);
+        Assert.Equal(0, jobResearchService.CompanyUrlCalls);
+        Assert.Equal(1, jobResearchService.AnalyzeTextCalls);
+        Assert.Equal(1, jobResearchService.CompanyTextCalls);
+        Assert.Equal("Pasted job posting text", jobResearchService.LastJobText);
+        Assert.Equal("Pasted company context", jobResearchService.LastCompanyText);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_SameJobSetAlreadyRunning_RejectsSecondOperation()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 0 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, SlowJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId)));
+
+        Assert.Contains("already running", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(broker.Cancel(startResult.OperationId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        Assert.Equal("cancelled", finalSnapshot.Status);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_DifferentJobSets_AllowsIndependentOperations()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 0 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, SlowJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job-1",
+            "https://example.test/company-1",
+            string.Empty,
+            string.Empty);
+        workspace.AddJobSet();
+        workspace.UpdateJobSetInputs("job-set-02",
+            "https://example.test/job-2",
+            "https://example.test/company-2",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var firstStart = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+        var secondStart = broker.StartJobContextAnalysis(new StartJobContextOperationRequest("job-set-02"));
+
+        Assert.NotEqual(firstStart.OperationId, secondStart.OperationId);
+
+        Assert.True(broker.Cancel(firstStart.OperationId));
+        Assert.True(broker.Cancel(secondStart.OperationId));
+
+        var firstSnapshot = await WaitForTerminalSnapshotAsync(broker, firstStart.OperationId);
+        var secondSnapshot = await WaitForTerminalSnapshotAsync(broker, secondStart.OperationId);
+
+        Assert.Equal("cancelled", firstSnapshot.Status);
+        Assert.Equal("cancelled", secondSnapshot.Status);
+    }
+
+    [Fact]
     public async Task StartTechnologyGapAnalysis_CompletesAndStoresAssessment()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
@@ -770,6 +942,63 @@ public sealed class LlmOperationBrokerTests
 
         public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => BuildCompanyProfileAsync(Array.Empty<Uri>(), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
+    }
+
+    private sealed class CapturingJobResearchService : IJobResearchService
+    {
+        public int AnalyzeUrlCalls { get; private set; }
+        public int CompanyUrlCalls { get; private set; }
+        public int AnalyzeTextCalls { get; private set; }
+        public int CompanyTextCalls { get; private set; }
+        public Uri? LastJobUrl { get; private set; }
+        public IReadOnlyList<Uri> LastCompanyUrls { get; private set; } = Array.Empty<Uri>();
+        public string? LastJobText { get; private set; }
+        public string? LastCompanyText { get; private set; }
+
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            AnalyzeUrlCalls++;
+            LastJobUrl = jobPostingUrl;
+            return Task.FromResult(BuildJobPosting(jobPostingUrl));
+        }
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            CompanyUrlCalls++;
+            LastCompanyUrls = sourceUrls.ToArray();
+            return Task.FromResult(new CompanyResearchProfile
+            {
+                Summary = "URL company summary",
+                SourceUrls = LastCompanyUrls
+            });
+        }
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            AnalyzeTextCalls++;
+            LastJobText = jobPostingText;
+            return Task.FromResult(BuildJobPosting(null));
+        }
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            CompanyTextCalls++;
+            LastCompanyText = companyContextText;
+            return Task.FromResult(new CompanyResearchProfile
+            {
+                Summary = "Text company summary"
+            });
+        }
+
+        private static JobPostingAnalysis BuildJobPosting(Uri? sourceUrl)
+            => new()
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                MustHaveThemes = ["Azure"],
+                SourceUrl = sourceUrl
+            };
     }
 
     private sealed class FakeTechnologyGapLlmClient : ILlmClient

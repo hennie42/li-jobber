@@ -95,6 +95,8 @@ public sealed class DraftGenerationService(
                     : generatedSections.Select(s => new CvSectionMarkdown(s.Section, s.Markdown)).ToList()
             };
 
+            document = ApplicationMaterialLengthPolicy.Enforce(document);
+
             var cvQualityResult = cvQualityValidator.ValidateAndAutoFix(document, request);
             document = cvQualityResult.Document;
 
@@ -210,33 +212,21 @@ public sealed class DraftGenerationService(
                 $"""
                 Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule}
 
-                Structure the letter in exactly five parts:
-                1. Opening hook: reference something specific about the company (from company context or differentiators) that genuinely resonates with the candidate's background.
-                2. Value proposition: map the top 2-3 pieces of evidence directly to the role's must-have requirements. Use concrete outcomes and numbers where available.
-                3. Cultural alignment: connect the candidate's work style or values to the company's culture signals with a brief, specific example.
-                4. Bridge any partial-fit areas by reframing adjacent experience as transferable strengths — do not mention gaps directly.
-                5. Confident close: express genuine interest without desperation, and mention a specific next step.
-
-                Keep the tone credible, practical, and specific to the target employer and role. Aim for 300-400 words total.
+                Keep it very focused and no more than one page. Aim for 250-350 words total.
+                Structure the letter in 3-4 compact paragraphs: opening fit, strongest evidence for the role, company/culture alignment, and a confident close.
+                Use concrete outcomes where available, but do not include appendices, headings, fit scores, gap lists, or evidence tables.
+                Keep the tone credible, practical, and specific to the target employer and role.
                 """,
             DocumentKind.ProfileSummary =>
-                $"Write a short {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it crisp, concrete, and senior without hype.",
+                $"Write a very focused {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it to one page or less, ideally 120-180 words. Make it crisp, concrete, senior, and free of hype. Do not include fit scores, evidence tables, or appendices.",
             DocumentKind.InterviewNotes =>
                 $"""
-                Prepare {lang} interview notes for a {role} position at {company}, grounded in supplied evidence.{nameRule}
+                Prepare focused {lang} interview questions for a {role} position at {company}, grounded in supplied evidence.{nameRule}
 
-                Structure:
-                1. **Likely Interview Themes** — 3-5 key themes interviewers will probe, based on the job posting and fit review.
-                2. **STAR Examples** — For each theme, prepare a ready-to-use Situation → Task → Action → Result example drawn from the candidate's actual experience, projects, or certifications. Include 3-5 examples total.
-                3. **Gap-Bridging Talking Points** — For each identified gap in the fit review, prepare a concise talking point that reframes the gap positively using transferable skills or adjacent experience. Reference the gap framing strategies if available.
-                4. **Questions to Ask the Interviewer** — 3-5 insightful questions the candidate should ask, tailored to the company context and role specifics.
-                5. **Key Proof Points** — Bullet list of the strongest evidence items (metrics, achievements, recommendations) to weave into answers naturally.
-
-                Rules:
-                - Every STAR example must reference real experience from the supplied evidence — never fabricate.
-                - Keep each STAR example concise (4-6 sentences covering all four STAR elements).
-                - Questions to ask should demonstrate domain knowledge and genuine interest.
-                - Frame gaps as growth areas or transferable skill opportunities, never as weaknesses.
+                Keep it no more than one page. Produce 6-8 questions total, grouped under compact headings if useful.
+                Include short answer angles or proof points only when they are directly grounded in supplied evidence.
+                Favor questions the candidate is likely to be asked plus a few strong questions the candidate can ask the interviewer.
+                Do not write long STAR stories, broad preparation notes, fit scores, gap lists, evidence tables, or appendices.
                 """,
             _ =>
                 $"Write high-quality {lang} application material for a {role} position at {company}, using only supplied evidence.{nameRule}"
@@ -270,16 +260,16 @@ public sealed class DraftGenerationService(
             : $"Job and company text source language: {request.SourceLanguageHint}. Output language: {languageLabel}.{Environment.NewLine}{Environment.NewLine}";
 
         return $"""
-{languageContextLine}Generate a {kind} in {languageLabel}.
+{languageContextLine}{BuildGenerationInstruction(kind, languageLabel)}.
 
 Rules:
-    - {PromptConstraints.EvidenceGrounding}
+- {PromptConstraints.EvidenceGrounding}
 - Do not invent employers, dates, certifications, tools, metrics, or outcomes.
-    - {PromptConstraints.NoNegativeTraits}
+- {PromptConstraints.NoNegativeTraits}
 - Do not expose fit scores, gap lists, or internal assessment data.
 - Keep technology names, company names, and quoted job phrases in their original form.
 - Use job themes and fit review only to guide emphasis — never surface them directly.
-    - {PromptConstraints.CvQualityGuidance}
+- {BuildApplicationMaterialGuidance(kind)}
 
 Target role: {request.JobPosting.RoleTitle} at {request.JobPosting.CompanyName}
 Summary: {request.JobPosting.Summary}
@@ -350,6 +340,30 @@ Additional instructions:
 
     private static string FormatThemes(IReadOnlyList<string> themes)
         => themes.Count > 0 ? string.Join(", ", themes) : "none identified";
+
+    private static string GetDocumentDisplayName(DocumentKind kind) => kind switch
+    {
+        DocumentKind.Cv => "CV",
+        DocumentKind.CoverLetter => "cover letter",
+        DocumentKind.ProfileSummary => "profile summary",
+        DocumentKind.InterviewNotes => "interview questions",
+        _ => kind.ToString()
+    };
+
+    private static string BuildGenerationInstruction(DocumentKind kind, string languageLabel) => kind switch
+    {
+        DocumentKind.InterviewNotes => $"Generate interview questions in {languageLabel}",
+        _ => $"Generate a {GetDocumentDisplayName(kind)} in {languageLabel}"
+    };
+
+    private static string BuildApplicationMaterialGuidance(DocumentKind kind) => kind switch
+    {
+        DocumentKind.Cv => PromptConstraints.CvQualityGuidance,
+        DocumentKind.CoverLetter => "Keep the cover letter very focused and no more than one page; target 250-350 words in 3-4 compact paragraphs.",
+        DocumentKind.ProfileSummary => "Keep the profile summary very focused and no more than one page; target 120-180 words.",
+        DocumentKind.InterviewNotes => "Keep the interview questions very focused and no more than one page; produce 6-8 grounded questions with brief answer angles.",
+        _ => "Keep the output focused, grounded, and concise."
+    };
 
     private static string BuildTechnologyContext(TechnologyGapAssessment? assessment)
     {

@@ -3,29 +3,22 @@ using System.Xml.Linq;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
-using HtmlToOpenXml;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
 using LiCvWriter.Infrastructure.Documents.Templates;
-using Markdig;
 
 namespace LiCvWriter.Infrastructure.Documents;
 
 /// <summary>
 /// Exports generated documents to disk as Word (<c>.docx</c>) files. CVs are
 /// produced from the embedded <c>cv-template.dotx</c> by populating named
-/// content controls per section. Other document kinds fall back to a direct
-/// Markdown→HTML→OpenXml conversion that mirrors the template's font and
-/// layout choices.
+/// content controls per section. Other document kinds use a focused
+/// application-material template with the same content-control cleanup path.
 /// </summary>
 public sealed class TemplateBasedDocumentExportService(StorageOptions options) : IDocumentExportService
 {
-    private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
     /// <summary>
     /// Maps each tagged content control in <c>cv-template.dotx</c> to a markdown
     /// extractor that produces the section's content from the rendered CV
@@ -68,11 +61,12 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         }
         else
         {
-            await Task.Run(() => GenerateInline(document, wordPath), cancellationToken);
+            await Task.Run(() => GenerateApplicationMaterialFromTemplate(document, wordPath), cancellationToken);
         }
 
         return new DocumentExportResult(document.Kind, wordPath);
     }
+
     /// <summary>
     /// Clones the embedded CV template, splits the rendered CV markdown into
     /// sections, populates each tagged content control, and removes any
@@ -166,30 +160,114 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         NormalizeDocumentPackageContentTypes(outputPath);
     }
 
-    /// <summary>
-    /// Generates a minimal Word document for non-CV kinds by converting the full
-    /// rendered markdown to HTML and emitting it directly. Mirrors the template's
-    /// Calibri styling so output is visually consistent across document kinds.
-    /// </summary>
-    private static void GenerateInline(GeneratedDocument document, string outputPath)
+    private static void GenerateApplicationMaterialFromTemplate(GeneratedDocument document, string outputPath)
     {
-        var html = Markdown.ToHtml(document.Markdown, MarkdownPipeline);
+        using (var templateStream = EmbeddedTemplateProvider.OpenTemplate(EmbeddedTemplateProvider.ApplicationMaterialTemplateResourceName))
+        using (var destinationStream = File.Create(outputPath))
+        {
+            templateStream.CopyTo(destinationStream);
+        }
 
-        using var wordDoc = WordprocessingDocument.Create(outputPath, WordprocessingDocumentType.Document);
-        SetCoreProperties(wordDoc, document);
+        using (var package = WordprocessingDocument.Open(outputPath, isEditable: true))
+        {
+            package.ChangeDocumentType(WordprocessingDocumentType.Document);
+        }
 
-        var mainPart = wordDoc.AddMainDocumentPart();
-        mainPart.Document = new Document(new Body());
+        using (var wordDoc = WordprocessingDocument.Open(outputPath, isEditable: true))
+        {
+            var mainPart = wordDoc.MainDocumentPart
+                ?? throw new InvalidOperationException("Application material template is missing its main document part.");
 
-        AddCalibriStyles(mainPart);
+            SetCoreProperties(wordDoc, document);
 
-        var converter = new HtmlConverter(mainPart);
-        converter.ParseBody(html);
-        TemplateContentPopulator.NormalizeStyleDefinitions(mainPart);
+            var populatedTags = new HashSet<string>(StringComparer.Ordinal);
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "CandidateHeader", ExtractApplicationCandidateHeader(document.Markdown));
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "TargetRole", CvMarkdownSectionExtractor.ExtractSection(document.Markdown, "Target Role", "Målrolle"));
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "DocumentBody", ExtractApplicationDocumentBody(document.Markdown));
 
-        AppendDefaultSection(mainPart.Document.Body!);
-        mainPart.Document.Save();
+            var body = mainPart.Document?.Body
+                ?? throw new InvalidOperationException("Application material template body missing.");
+
+            TemplateContentPopulator.RemoveEmptyControls(body, populatedTags);
+            TemplateContentPopulator.UnwrapAllSdtBlocks(body);
+
+            mainPart.Document!.Save();
+        }
+
+        NormalizeDocumentPackageContentTypes(outputPath);
     }
+
+    private static void PopulateApplicationMaterialTag(
+        MainDocumentPart mainPart,
+        HashSet<string> populatedTags,
+        string tag,
+        string? markdown)
+    {
+        if (TemplateContentPopulator.PopulateContentControl(mainPart, tag, markdown))
+        {
+            populatedTags.Add(tag);
+        }
+    }
+
+    private static string? ExtractApplicationCandidateHeader(string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return null;
+        }
+
+        var lines = SplitMarkdownLines(markdown);
+        var headerLines = lines.TakeWhile(static line => !line.StartsWith("## ", StringComparison.Ordinal)).ToArray();
+        var result = string.Join(Environment.NewLine, headerLines).Trim();
+
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    private static string? ExtractApplicationDocumentBody(string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return null;
+        }
+
+        var lines = SplitMarkdownLines(markdown);
+        var startIndex = -1;
+        var passedTargetRole = false;
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (!line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var heading = line[3..].Trim();
+            if (heading.Equals("Target Role", StringComparison.OrdinalIgnoreCase)
+                || heading.Equals("Målrolle", StringComparison.OrdinalIgnoreCase))
+            {
+                passedTargetRole = true;
+                continue;
+            }
+
+            if (passedTargetRole)
+            {
+                startIndex = index;
+                break;
+            }
+        }
+
+        if (startIndex < 0)
+        {
+            return null;
+        }
+
+        var result = string.Join(Environment.NewLine, lines[startIndex..]).Trim();
+        return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    private static string[] SplitMarkdownLines(string markdown)
+        => markdown.Split(["\r\n", "\n"], StringSplitOptions.None);
 
     private static void SetCoreProperties(WordprocessingDocument document, GeneratedDocument generated)
     {
@@ -230,70 +308,6 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         writer.WriteElementString("cp", "keywords", "http://schemas.openxmlformats.org/package/2006/metadata/core-properties", keywords);
         writer.WriteEndElement();
         writer.WriteEndDocument();
-    }
-
-    private static void AddCalibriStyles(MainDocumentPart mainPart)
-    {
-        var stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>();
-        stylesPart.Styles = new Styles(
-            new DocDefaults(
-                new RunPropertiesDefault(
-                    new RunPropertiesBaseStyle(
-                        new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", ComplexScript = "Calibri" },
-                        new FontSize { Val = "22" })),
-                new ParagraphPropertiesDefault(
-                    new ParagraphPropertiesBaseStyle(
-                        new SpacingBetweenLines { After = "120", Line = "276", LineRule = LineSpacingRuleValues.Auto }))),
-            CreateBodyStyle(),
-            CreateHeadingStyle("Heading1", "heading 1", "28"),
-            CreateHeadingStyle("Heading2", "heading 2", "24"),
-            CreateHeadingStyle("Heading3", "heading 3", "22"));
-        stylesPart.Styles.Save();
-    }
-
-    private static Style CreateBodyStyle()
-        => new(
-            new StyleName { Val = "Normal" },
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { After = "120", Line = "276", LineRule = LineSpacingRuleValues.Auto }),
-            new StyleRunProperties(
-                new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", ComplexScript = "Calibri" },
-                new Color { Val = "1F1F1F" },
-                new FontSize { Val = "22" }))
-        {
-            Type = StyleValues.Paragraph,
-            StyleId = "Normal",
-            Default = true
-        };
-
-    private static Style CreateHeadingStyle(string styleId, string styleName, string fontSize)
-        => new(
-            new StyleName { Val = styleName },
-            new BasedOn { Val = "Normal" },
-            new NextParagraphStyle { Val = "Normal" },
-            new StyleParagraphProperties(
-                new SpacingBetweenLines { Before = "240", After = "120" }),
-            new StyleRunProperties(
-                new RunFonts { Ascii = "Calibri", HighAnsi = "Calibri", ComplexScript = "Calibri" },
-                new Bold { Val = OnOffValue.FromBoolean(true) },
-                new Color { Val = "1F1F1F" },
-                new FontSize { Val = fontSize }))
-        {
-            Type = StyleValues.Paragraph,
-            StyleId = styleId
-        };
-
-    private static void AppendDefaultSection(Body body)
-    {
-        var sectionProperties = body.GetFirstChild<SectionProperties>() ?? body.AppendChild(new SectionProperties());
-        sectionProperties.RemoveAllChildren<PageMargin>();
-        sectionProperties.Append(new PageMargin
-        {
-            Top = 1440,
-            Right = 1440,
-            Bottom = 1440,
-            Left = 1440
-        });
     }
 
     private static string ExpandPath(string path)

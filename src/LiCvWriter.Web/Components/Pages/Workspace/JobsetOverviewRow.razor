@@ -2,17 +2,26 @@
 @using System.IO
 
 <div class="overview-row">
-    <div class="overview-row-header">
-        <a class="overview-row-title" href="@($"/workspace/job-workbench/{JobSet.Id}")">
-            <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(JobSet.ProgressState)}")" aria-hidden="true"></span>
-            <span>@JobSet.Title</span>
-        </a>
-        <div class="overview-row-meta">
-            <span class="meta-chip">@FormatInputMode(JobSet.InputMode)</span>
-            <span class="meta-chip">@JobSet.OutputFolderName</span>
-            <span class="meta-chip">in: @FormatInputLanguage(JobSet.InputLanguage)</span>
-            <span class="meta-chip">out: @JobSet.OutputLanguage</span>
+    <div class="overview-row-topline">
+        <div class="overview-row-heading">
+            <a class="overview-row-title" href="@($"/workspace/job-workbench/{JobSet.Id}")">
+                <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(JobSet.ProgressState)}")" aria-hidden="true"></span>
+                <span>@JobSet.Title</span>
+            </a>
+            <div class="overview-row-meta">
+                <span class="meta-chip">@FormatInputMode(JobSet.InputMode)</span>
+                <span class="meta-chip">@JobSet.OutputFolderName</span>
+                <span class="meta-chip">in: @FormatInputLanguage(JobSet.InputLanguage)</span>
+                <span class="meta-chip">out: @JobSet.OutputLanguage</span>
+            </div>
         </div>
+        @if (JobSet.JobFitAssessment.HasSignals)
+        {
+            <div class="fit-score-badge" title="Fit score">
+                <span class="fit-score-recommendation">@JobSet.JobFitAssessment.Recommendation</span>
+                <span class="fit-score-value">@JobSet.JobFitAssessment.OverallScore<span>/100</span></span>
+            </div>
+        }
     </div>
 
     <div class="overview-row-status">
@@ -39,32 +48,20 @@
                 <span class="subtask-chip subtask-@GetSubtaskStatusClass(status)" title="@FormatSubtaskLabel(subtask): @status">@FormatSubtaskLabel(subtask)</span>
             }
         </div>
-        @if (JobSet.JobFitAssessment.HasSignals)
-        {
-            <span class="meta-chip">Fit: @JobSet.JobFitAssessment.Recommendation (@JobSet.JobFitAssessment.OverallScore)</span>
-        }
-        @if (JobSet.GeneratedDocuments.Count > 0)
-        {
-            <span class="meta-chip">@JobSet.GeneratedDocuments.Count draft(s)</span>
-        }
         @if (JobSet.Exports.Count > 0)
         {
             @foreach (var export in JobSet.Exports)
             {
                 @if (!string.IsNullOrWhiteSpace(export.FilePath))
                 {
-                    <a class="meta-chip meta-chip-link" href="@BuildOpenFileUrl(export.FilePath)" target="_blank" rel="noopener">@export.Kind: @Path.GetFileName(export.FilePath)</a>
+                    <a class="meta-chip meta-chip-link" href="@LocalFileLinkBuilder.BuildFileUri(export.FilePath)" target="_blank" rel="noopener">@FormatDocumentKind(export.Kind): @Path.GetFileName(export.FilePath)</a>
                 }
                 else
                 {
-                    <span class="meta-chip">@export.Kind</span>
+                    <span class="meta-chip">@FormatDocumentKind(export.Kind)</span>
                 }
             }
         }
-    </div>
-
-    <div class="overview-row-actions">
-        <a class="secondary-button" href="@($"/workspace/job-workbench/{JobSet.Id}")">Open</a>
     </div>
 </div>
 
@@ -109,9 +106,6 @@
         _ => "Auto"
     };
 
-    private static string BuildOpenFileUrl(string filePath)
-        => $"/api/files/open?path={Uri.EscapeDataString(filePath)}&revealFolder=false";
-
     private static string GetSubtaskStatusClass(JobSetSubtaskStatus status) => status switch
     {
         JobSetSubtaskStatus.Done => "done",
@@ -126,5 +120,14 @@
         JobSetSubtask.TechnologyGap => "Gap",
         JobSetSubtask.DraftGeneration => "Drafts",
         _ => subtask.ToString()
+    };
+
+    private static string FormatDocumentKind(DocumentKind kind) => kind switch
+    {
+        DocumentKind.Cv => "CV",
+        DocumentKind.CoverLetter => "Cover letter",
+        DocumentKind.ProfileSummary => "Profile summary",
+        DocumentKind.InterviewNotes => "Interview questions",
+        _ => kind.ToString()
     };
 }

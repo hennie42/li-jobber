@@ -379,6 +379,40 @@ public sealed class MarkdownDocumentRendererTests
     }
 
     [Fact]
+    public async Task RenderAsync_NonCvMaterial_DoesNotAppendInternalFitOrEvidenceSections()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(
+            generatedBody: "Focused application material body.",
+            evidenceTags: ["Azure"]);
+        var nonCvRequest = request with
+        {
+            Kind = DocumentKind.CoverLetter,
+            JobFitAssessment = new JobFitAssessment(
+                OverallScore: 87,
+                Recommendation: JobFitRecommendation.Apply,
+                Requirements: Array.Empty<JobRequirementAssessment>(),
+                Strengths: ["Cloud architecture leadership"],
+                Gaps: ["Kubernetes operator authoring"]),
+            ApplicantDifferentiatorProfile = new ApplicantDifferentiatorProfile
+            {
+                TargetNarrative = "Pragmatic AI architect"
+            }
+        };
+
+        var result = await renderer.RenderAsync(nonCvRequest);
+
+        Assert.Contains("## Cover Letter", result.Markdown);
+        Assert.Contains("Focused application material body.", result.Markdown);
+        Assert.DoesNotContain("Fit Snapshot", result.Markdown);
+        Assert.DoesNotContain("Selected Evidence", result.Markdown);
+        Assert.DoesNotContain("Applicant Angle", result.Markdown);
+        Assert.DoesNotContain("Cloud architecture leadership", result.Markdown);
+        Assert.DoesNotContain("Lead Architect @ Contoso", result.Markdown);
+        Assert.Null(result.AtsSnapshot);
+    }
+
+    [Fact]
     public async Task RenderAsync_Cv_AttachesAtsSnapshotForCv()
     {
         var renderer = new MarkdownDocumentRenderer();

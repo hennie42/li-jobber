@@ -13,6 +13,9 @@ public static class EmbeddedTemplateProvider
     /// <summary>Default embedded resource name for the CV template.</summary>
     public const string CvTemplateResourceName = "LiCvWriter.Infrastructure.Documents.Templates.cv-template.dotx";
 
+    /// <summary>Default embedded resource name for focused non-CV application materials.</summary>
+    public const string ApplicationMaterialTemplateResourceName = "LiCvWriter.Infrastructure.Documents.Templates.application-material-template.dotx";
+
     /// <summary>
     /// Copies the embedded CV template to a unique temporary <c>.dotx</c> file
     /// and returns its path. The caller is responsible for deleting the file.

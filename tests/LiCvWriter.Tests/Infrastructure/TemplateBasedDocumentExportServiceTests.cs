@@ -164,7 +164,7 @@ Led the cloud migration program.
     }
 
     [Fact]
-    public async Task ExportAsync_NonCvKindGeneratesInlineDocx()
+    public async Task ExportAsync_NonCvKindUsesApplicationMaterialTemplate()
     {
         var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
 
@@ -174,7 +174,22 @@ Led the cloud migration program.
             var document = new GeneratedDocument(
                 DocumentKind.CoverLetter,
                 "Alex Taylor Cover Letter",
-                "# Alex Taylor\n\n## Letter\n\nDear hiring manager, I am applying for the role.",
+                """
+                # Alex Taylor
+
+                > Senior Architect
+
+                alex.taylor@example.com
+
+                ## Target Role
+
+                - Role: Lead Architect
+                - Company: Contoso
+
+                ## Cover Letter
+
+                Dear hiring manager, I am applying for the role.
+                """,
                 "Alex Taylor",
                 DateTimeOffset.UtcNow);
 
@@ -189,7 +204,25 @@ Led the cloud migration program.
             Assert.NotNull(mainPart);
             var body = mainPart.Document?.Body;
             Assert.NotNull(body);
-            Assert.Contains("Dear hiring manager", body.InnerText);
+            var allText = body.InnerText;
+
+            Assert.Contains("Alex Taylor", allText);
+            Assert.Contains("Lead Architect", allText);
+            Assert.Contains("Dear hiring manager", allText);
+            Assert.DoesNotContain("[Focused application material body]", allText);
+            Assert.Empty(body.Descendants<SdtBlock>());
+            Assert.Empty(body.Descendants<Table>());
+
+            var headingParagraphs = body.Descendants<Paragraph>()
+                .Where(p => p.ParagraphProperties?.ParagraphStyleId?.Val?.Value is { } id
+                    && id.StartsWith("Heading", StringComparison.Ordinal))
+                .ToArray();
+            Assert.NotEmpty(headingParagraphs);
+
+            var validationErrors = new OpenXmlValidator().Validate(wordDoc).ToArray();
+            Assert.True(validationErrors.Length == 0,
+                "Application material OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
+                    $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
         }
         finally
         {

@@ -33,7 +33,7 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 - **Template-based Word export** — embedded .dotx template with named content controls, ATS-friendly unwrapping, hyperlink flattening, and underline stripping
 - **Early career separation** — roles ending before 2009 rendered in a compact "Early Career" section; modern roles get full detail with achievement bullets
 - **Umbrella role detection** — consulting roles covering 3+ projects shown with client sub-items inline
-- **Multi-document generation** — CV, cover letter, profile summary, and interview notes per job tab
+- **Multi-document generation** — CV, cover letter, profile summary, and interview questions per job tab
 - **Output language selection** — English or Danish per job tab, with automatic recommendation translation annotation
 - **Applicant differentiator profiling** — manual capture or automated drafting from Insights Discovery PDF
 - **Brokered streaming UI** — SSE-backed operations keep the workbench responsive while reasoning and status stream into dual retro CRT sidebar monitors

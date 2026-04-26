@@ -104,40 +104,33 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
 
                 break;
             case DocumentKind.CoverLetter:
-                AppendSection(builder, Translate(outputLanguage, "Letter", "Ansøgning"), generatedBody);
-                AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
-                AppendApplicantAngle(builder, request.ApplicantDifferentiatorProfile, outputLanguage);
-                AppendSelectedEvidence(builder, selectedEvidence, outputLanguage);
+                AppendSection(builder, Translate(outputLanguage, "Cover Letter", "Ansøgning"), generatedBody);
                 break;
             case DocumentKind.ProfileSummary:
-                AppendSection(builder, Translate(outputLanguage, "Summary", "Profil"), generatedBody);
-                AppendApplicantAngle(builder, request.ApplicantDifferentiatorProfile, outputLanguage);
-                if (HasSelectedCertifications(selectedEvidence))
-                {
-                    AppendSelectedCertifications(builder, selectedEvidence, outputLanguage);
-                }
-
+                AppendSection(builder, Translate(outputLanguage, "Profile Summary", "Profil"), generatedBody);
                 break;
             case DocumentKind.InterviewNotes:
-                AppendSection(builder, Translate(outputLanguage, "Talking Points", "Samtalepunkter"), generatedBody);
-                AppendFitSnapshot(builder, request.JobFitAssessment, outputLanguage);
-                AppendSelectedEvidence(builder, selectedEvidence, outputLanguage);
-                if (!selectedEvidence.Any(static item => item.Evidence.Type == CandidateEvidenceType.Recommendation))
-                {
-                    AppendRecommendations(builder, request, outputLanguage);
-                }
-
+                AppendSection(builder, Translate(outputLanguage, "Interview Questions", "Interviewspørgsmål"), generatedBody);
                 break;
         }
 
         return Task.FromResult(new GeneratedDocument(
             request.Kind,
-            $"{request.Candidate.Name.FullName} - {request.Kind}",
+            $"{request.Candidate.Name.FullName} - {FormatDocumentKindTitle(request.Kind)}",
             builder.ToString().Trim(),
             builder.ToString().Trim(),
             DateTimeOffset.UtcNow,
             AtsSnapshot: request.Kind is DocumentKind.Cv ? BuildAtsSnapshot(request, selectedEvidence) : null));
     }
+
+    private static string FormatDocumentKindTitle(DocumentKind kind) => kind switch
+    {
+        DocumentKind.Cv => "CV",
+        DocumentKind.CoverLetter => "Cover Letter",
+        DocumentKind.ProfileSummary => "Profile Summary",
+        DocumentKind.InterviewNotes => "Interview Questions",
+        _ => kind.ToString()
+    };
 
     /// <summary>
     /// Builds a public-safe candidate snapshot the export pipeline writes into

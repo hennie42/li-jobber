@@ -631,7 +631,7 @@ graph TD
 
 ### Batch Mode
 
-`RunAllRefreshThenDraftsAsync()` orchestrates refresh-all for all job sets, then conditional draft generation. Checkbox flags control which document kinds to generate (CV, Cover Letter, Summary, Interview Notes). Job sets missing profile or evidence are skipped.
+`RunAllRefreshThenDraftsAsync()` orchestrates refresh-all for all job sets, then conditional draft generation. Checkbox flags control which document kinds to generate (CV, Cover Letter, Summary, Interview Questions). Job sets missing profile or evidence are skipped.
 
 ---
 
@@ -778,25 +778,29 @@ Recommendations are annotated with translation context when the recommendation l
 
 ### Other Document Kinds
 
-- **Cover Letter** — letter body + fit snapshot + applicant angle + selected evidence
-- **Profile Summary** — summary body + applicant angle + certifications
-- **Interview Notes** — talking points + fit snapshot + selected evidence + recommendations (if not already in evidence)
+- **Cover Letter** — focused one-page letter body generated from fit/evidence context without internal appendices
+- **Profile Summary** — focused one-page profile summary generated from fit/evidence context without internal appendices
+- **Interview Questions** — focused one-page question set generated from fit/evidence context without internal appendices
 
 ---
 
 ## 15. Template-Based Word Export
 
-CV documents are exported through a template-based pipeline using an embedded `.dotx` template with named content controls. Non-CV documents (cover letter, profile summary, interview notes) use a direct Markdown → HTML → OpenXml conversion without the template.
+CV documents are exported through a template-based pipeline using an embedded `.dotx` template with named content controls. Non-CV documents (cover letter, profile summary, interview questions) use a focused application-material `.dotx` template with the same content-control population and cleanup path.
 
 ### Template Architecture
 
 ```mermaid
 graph TD
     A[cv-template.dotx] -->|EmbeddedResource| B[EmbeddedTemplateProvider]
+    A2[application-material-template.dotx] -->|EmbeddedResource| B
     B --> C[TemplateBasedDocumentExportService]
     D[GeneratedDocument.Markdown] --> E[CvMarkdownSectionExtractor]
-    E --> F["9 section fragments"]
+    E --> F["CV section fragments"]
+    D --> E2[Application material section extraction]
+    E2 --> F2["CandidateHeader + TargetRole + DocumentBody"]
     F --> C
+    F2 --> C
     C --> G[TemplateContentPopulator]
     G --> H["Populate content controls"]
     H --> I["Remove empty controls"]
@@ -804,22 +808,30 @@ graph TD
     J --> K["Flatten hyperlinks"]
     K --> L["Strip underlines"]
     L --> M[".docx file"]
-    D --> N[".md file"]
 ```
 
-### Template Sections (9 Named Content Controls)
+### CV Template Sections (10 Named Content Controls)
 
 | Tag | Content | Source |
 | --- | --- | --- |
 | `CandidateHeader` | Name (H1), headline, target role | Extracted from assembled markdown |
 | `ProfileSummary` | Professional profile overview (excludes key skills) | LLM-generated section or extraction |
 | `KeySkills` | Comma-separated keyword/competency line | LLM-generated section or extraction |
-| `FitSnapshot` | Strengths and overall fit score | Extracted from assembled markdown |
 | `Experience` | Professional experience (modern roles with client sub-items) | LLM-generated section or extraction |
 | `Projects` | Standalone project entries | LLM-generated section or extraction |
-| `EarlyCareer` | Pre-2009 roles in compact format | Extracted from assembled markdown |
+| `Education` | Education entries | Extracted from assembled markdown |
 | `Certifications` | Certification list from evidence | Extracted from assembled markdown |
+| `Languages` | Language entries | Extracted from assembled markdown |
 | `Recommendations` | All recommendations with attribution | Extracted from assembled markdown |
+| `EarlyCareer` | Pre-2009 roles in compact format | Extracted from assembled markdown |
+
+### Application Material Template Sections (3 Named Content Controls)
+
+| Tag | Content | Source |
+| --- | --- | --- |
+| `CandidateHeader` | Name, optional headline, and contact line | Extracted from assembled markdown |
+| `TargetRole` | Target role and company | Extracted from assembled markdown |
+| `DocumentBody` | Cover letter, profile summary, or interview questions body | Extracted from assembled markdown |
 
 ### Section Extraction
 
@@ -860,22 +872,19 @@ For each mapping in `CvSectionMappings`:
 | Hyperlinks flattened to plain text | Ensures linked text is readable by all ATS parsers |
 | SDT blocks unwrapped | ATS parsers may skip content inside structured document tags |
 
-### Non-CV Export (Direct Pipeline)
+### Non-CV Export (Template Pipeline)
 
-Cover letters, profile summaries, and interview notes bypass the template and use a direct conversion:
+Cover letters, profile summaries, and interview questions use the application-material template:
 
 ```mermaid
 graph LR
-    A[GeneratedDocument.Markdown] --> B[Markdig Pipeline]
-    B --> C[HTML]
-    C --> D[HtmlToOpenXml.HtmlConverter]
-    D --> E[OpenXml Body Content]
-    E --> F[WordprocessingDocument]
-    G["Style Definitions (Heading1-3 + Normal)"] --> F
-    H["Document Defaults (Calibri 11pt, 1.15 spacing)"] --> F
-    I["Page Layout (1-inch margins)"] --> F
-    J["Document Properties (title, subject)"] --> F
-    F --> K[".docx file"]
+    A[application-material-template.dotx] --> B[TemplateBasedDocumentExportService]
+    C[GeneratedDocument.Markdown] --> D[CandidateHeader + TargetRole + DocumentBody]
+    D --> E[TemplateContentPopulator]
+    E --> F[Remove empty controls]
+    F --> G[Unwrap SDT blocks]
+    G --> H[Flatten links + strip underlines]
+    H --> I[.docx file]
 ```
 
 ---
@@ -1066,7 +1075,7 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 | Draft generation | `DraftGenerationService.GenerateAsync()` via `LlmOperationBroker` | Yes | Wave-based parallel generation + optional refinement pass |
 | Document rendering | `MarkdownDocumentRenderer.RenderAsync()` | No | Deterministic Markdown shaping |
 | Word export (CV) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based with content controls |
-| Word export (other) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Direct Markdown → HTML → DOCX |
+| Word export (other) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based DOCX with content controls |
 | Diagnostics | `MainLayout.razor`, `SessionDiagnostics.razor`, and formatters | No | Shared sidebar for live summary, diagnostics page for deep inspection |
 
 ---
@@ -1085,7 +1094,7 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 - Session model and thinking settings remain editable after LLM-backed work starts; changes apply to future operations until the user reruns affected analyses or drafts.
 - Brokered SSE endpoints exist for job-context, fit-review, technology-gap, refresh-all, and draft-generation operations.
 - CV generation uses a wave-based approach (two parallel waves + optional refinement pass for must-have theme coverage).
-- CV documents use a template-based export with named content controls; non-CV documents use direct Markdown → OpenXml conversion.
+- CV and non-CV documents use template-based export with named content controls; non-CV documents use the focused application-material template.
 - All ATS-unfriendly artifacts (SDT blocks, hyperlinks, underlines) are post-processed away before final .docx output.
 - Repetition loop detection automatically aborts degenerate LLM streaming (configurable, default 500-char threshold).
 - Early career roles (end date before 2009) are rendered in compact format; ongoing roles are always modern.
