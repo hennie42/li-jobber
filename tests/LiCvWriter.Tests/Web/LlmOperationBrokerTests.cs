@@ -383,6 +383,94 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartRefreshAllAnalysis_UpdatesOnlyRequestedJobSet()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, FakeJobResearchService>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+        workspace.AddJobSet();
+        workspace.SetJobSetJobPosting("job-set-02", new JobPostingAnalysis
+        {
+            RoleTitle = "Principal Consultant",
+            CompanyName = "Fabrikam",
+            Summary = "Lead advisory delivery.",
+            SourceUrl = new Uri("https://example.test/fabrikam-job")
+        });
+        workspace.SetJobSetGeneratedDocuments("job-set-02",
+            [new GeneratedDocument(DocumentKind.Cv, "Existing CV", "# Existing", "Existing", DateTimeOffset.UtcNow)],
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/fabrikam-cv.docx")]);
+        var untouchedJobSet = workspace.GetJobSet("job-set-02");
+        var untouchedTitle = untouchedJobSet.Title;
+        var untouchedOutputFolder = untouchedJobSet.OutputFolderName;
+        var untouchedProgressDetail = untouchedJobSet.ProgressDetail;
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartRefreshAllAnalysis(new StartRefreshAllOperationRequest("job-set-01"));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Lead Architect", workspace.GetJobSet(jobSetId).JobPosting!.RoleTitle);
+        Assert.True(workspace.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
+
+        var otherJobSet = workspace.GetJobSet("job-set-02");
+        Assert.Equal(untouchedTitle, otherJobSet.Title);
+        Assert.Equal(untouchedOutputFolder, otherJobSet.OutputFolderName);
+        Assert.Equal(JobSetProgressState.Done, otherJobSet.ProgressState);
+        Assert.Equal(untouchedProgressDetail, otherJobSet.ProgressDetail);
+        Assert.Single(otherJobSet.GeneratedDocuments);
+        Assert.Equal("Existing CV", otherJobSet.GeneratedDocuments[0].Title);
+        Assert.False(otherJobSet.JobFitAssessment.HasSignals);
+        Assert.False(otherJobSet.TechnologyGapAssessment.HasSignals);
+    }
+
+    [Fact]
     public async Task StartJobContextAnalysis_WhenOperationExceedsTimeout_FailsWithTimedOutSnapshot()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 1 };

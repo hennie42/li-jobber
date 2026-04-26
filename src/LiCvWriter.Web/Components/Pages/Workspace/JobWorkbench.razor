@@ -146,13 +146,6 @@ else
     }
 </section>
 
-<section class="card-panel stack-gap">
-    <div class="field-label">Jobset actions</div>
-    <div class="button-row">
-        <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
-    </div>
-</section>
-
 @if (!string.IsNullOrWhiteSpace(errorMessage))
 {
     <section class="card-panel">
@@ -311,6 +304,10 @@ else
             }
         </p>
 
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
+        </div>
+
         <dl class="key-value-grid compact-grid">
             <dt>Recommendation</dt>
             <dd>@FormatRecommendation(CurrentJobSet.JobFitAssessment.Recommendation)</dd>
@@ -377,6 +374,10 @@ else if (CanRunFitReview)
 {
     <details class="card-panel stack-gap" open>
         <summary><h3>Fit review</h3></summary>
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="RefreshFitReviewAsync" disabled="@(!CanRunFitReview || isBusy || isBatchRunning)">@(isRefreshingFitReview ? $"Running {GetOperationElapsed()}" : "Refresh fit review")</button>
+        </div>
 
         <p class="muted-text">No structured fit review is available for this tab yet. Run fit review or generate drafts when you want the app to score the current job context.</p>
     </details>
@@ -1491,14 +1492,17 @@ else if (CanRunFitReview)
             {
                 batchCurrentJobSetTitle = jobSet.Title;
 
-                currentOperation = BusyOperation.RefreshAll;
-                var refreshSnapshot = await StartStreamedOperationAndWaitAsync(
-                    "/api/llm/operations/refresh-all",
-                    new StartRefreshAllOperationRequest(jobSet.Id));
-
-                if (refreshSnapshot.Status != "completed")
+                if (CanRefreshAllForBatch(jobSet))
                 {
-                    throw new InvalidOperationException(refreshSnapshot.Error ?? refreshSnapshot.Detail ?? $"Refresh-all failed for {jobSet.Title}.");
+                    currentOperation = BusyOperation.RefreshAll;
+                    var refreshSnapshot = await StartStreamedOperationAndWaitAsync(
+                        "/api/llm/operations/refresh-all",
+                        new StartRefreshAllOperationRequest(jobSet.Id));
+
+                    if (refreshSnapshot.Status != "completed")
+                    {
+                        throw new InvalidOperationException(refreshSnapshot.Error ?? refreshSnapshot.Detail ?? $"Refresh-all failed for {jobSet.Title}.");
+                    }
                 }
 
                 currentOperation = BusyOperation.GenerateDrafts;
@@ -1519,8 +1523,8 @@ else if (CanRunFitReview)
             Operations.Success(
                 "Start all completed.",
                 skippedJobSets.Length == 0
-                    ? $"Refreshed and generated drafts for {readyJobSets.Length} jobset(s)."
-                    : $"Refreshed and generated drafts for {readyJobSets.Length} jobset(s). Skipped {skippedJobSets.Length} jobset(s).",
+                    ? $"Completed analysis and generated drafts for {readyJobSets.Length} jobset(s)."
+                    : $"Completed analysis and generated drafts for {readyJobSets.Length} jobset(s). Skipped {skippedJobSets.Length} jobset(s).",
                 null);
         }
         catch (Exception exception)
@@ -1827,6 +1831,7 @@ else if (CanRunFitReview)
     private bool CanRunAnyBatchDraftGeneration()
         => Workspace.IsLlmReady
             && Workspace.CandidateProfile is not null
+            && GetSelectedDocumentKinds().Count > 0
             && Workspace.JobSets.Any(CanRunBatchDraftGeneration);
 
     private bool CanRunBatchDraftGeneration(JobSetSessionState jobSet)
@@ -1844,12 +1849,35 @@ else if (CanRunFitReview)
             return "no LinkedIn profile is loaded";
         }
 
-        if (jobSet.JobPosting is null)
+        var sourceReadinessMessage = GetBatchSourceReadinessMessage(jobSet);
+        return string.IsNullOrWhiteSpace(sourceReadinessMessage) || jobSet.JobPosting is not null
+            ? string.Empty
+            : sourceReadinessMessage;
+    }
+
+    private static bool CanRefreshAllForBatch(JobSetSessionState jobSet)
+        => string.IsNullOrWhiteSpace(GetBatchSourceReadinessMessage(jobSet));
+
+    private static string GetBatchSourceReadinessMessage(JobSetSessionState jobSet)
+    {
+        if (jobSet.InputMode == JobSetInputMode.PasteText)
         {
-            return "job context has not been analyzed";
+            return string.IsNullOrWhiteSpace(jobSet.JobPostingText)
+                ? "job posting text has not been pasted"
+                : string.Empty;
         }
 
-        return string.Empty;
+        if (!Uri.TryCreate(jobSet.JobUrl, UriKind.Absolute, out _))
+        {
+            return "job URL is missing or invalid";
+        }
+
+        var companyContextUrls = jobSet.CompanyUrlsText
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return companyContextUrls.Any(static value => !Uri.TryCreate(value, UriKind.Absolute, out _))
+            ? "one or more company context URLs are invalid"
+            : string.Empty;
     }
 
     private string GetBatchActionLabel()
@@ -1872,7 +1900,7 @@ else if (CanRunFitReview)
             return $"Running: {snapshot.Message}";
         }
 
-        if (Operations.IsBusy)
+        if (currentOperation != BusyOperation.None && Operations.IsBusy)
         {
             return $"Running: {Operations.CurrentMessage}";
         }
@@ -1895,7 +1923,7 @@ else if (CanRunFitReview)
             return snapshot.Detail;
         }
 
-        return Operations.IsBusy ? Operations.CurrentDetail : null;
+        return currentOperation != BusyOperation.None && Operations.IsBusy ? Operations.CurrentDetail : null;
     }
 
     private string GetCurrentTaskStatusClass()
@@ -1982,6 +2010,11 @@ else if (CanRunFitReview)
 
     private bool IsWorkbenchTelemetryActive()
     {
+        if (currentOperation == BusyOperation.None && !isBatchRunning)
+        {
+            return false;
+        }
+
         var telemetryMessage = Operations.ActiveLlmTelemetry?.Message;
         if (string.IsNullOrWhiteSpace(telemetryMessage))
         {
@@ -1999,13 +2032,17 @@ else if (CanRunFitReview)
             || telemetryMessage.StartsWith(GenerateDraftTelemetryPrefix, StringComparison.Ordinal);
 
     private bool IsCurrentWorkbenchOperation(string message)
-        => Operations.IsBusy && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
+        => currentOperation != BusyOperation.None
+            && Operations.IsBusy
+            && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
 
     private bool IsActiveTelemetryMessage(string message)
-        => string.Equals(Operations.ActiveLlmTelemetry?.Message, message, StringComparison.Ordinal);
+        => (currentOperation != BusyOperation.None || isBatchRunning)
+            && string.Equals(Operations.ActiveLlmTelemetry?.Message, message, StringComparison.Ordinal);
 
     private bool HasActiveTelemetryPrefix(string prefix)
-        => Operations.ActiveLlmTelemetry?.Message.StartsWith(prefix, StringComparison.Ordinal) == true;
+        => (currentOperation != BusyOperation.None || isBatchRunning)
+            && Operations.ActiveLlmTelemetry?.Message.StartsWith(prefix, StringComparison.Ordinal) == true;
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
 
