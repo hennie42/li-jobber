@@ -23,6 +23,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private OllamaModelAvailability? ollamaAvailability;
     private string selectedLlmModel = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
     private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
+    private DraftGenerationPreferences draftGenerationPreferences = LoadDraftGenerationPreferences(recoveryStore);
     private bool isLlmSessionConfigured;
     private bool hasStartedLlmWork;
     private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = LoadCapacityVerdicts(recoveryStore);
@@ -69,6 +70,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     public string SelectedLlmModel => Read(() => selectedLlmModel);
 
     public string SelectedThinkingLevel => Read(() => selectedThinkingLevel);
+
+    public DraftGenerationPreferences DraftGenerationPreferences => Read(() => draftGenerationPreferences);
 
     public bool IsLlmSessionConfigured => Read(() => isLlmSessionConfigured);
 
@@ -480,6 +483,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
+    public void SetDraftGenerationPreferences(DraftGenerationPreferences preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+
+        lock (gate)
+        {
+            draftGenerationPreferences = NormalizeDraftGenerationPreferences(preferences);
+        }
+
+        NotifyChanged();
+    }
+
     public void MarkLlmWorkStarted()
     {
         var shouldNotify = false;
@@ -734,6 +749,22 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private static ModelBenchmarkSession? LoadLastBenchmarkSession(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.LastBenchmarkSession;
 
+    private static DraftGenerationPreferences LoadDraftGenerationPreferences(WorkspaceRecoveryStore? recoveryStore)
+        => NormalizeDraftGenerationPreferences(recoveryStore?.Load()?.DraftGenerationPreferences);
+
+    private static DraftGenerationPreferences NormalizeDraftGenerationPreferences(DraftGenerationPreferences? preferences)
+        => new()
+        {
+            GenerateCv = preferences?.GenerateCv ?? true,
+            GenerateCoverLetter = preferences?.GenerateCoverLetter ?? true,
+            GenerateSummary = preferences?.GenerateSummary ?? true,
+            GenerateInterviewNotes = preferences?.GenerateInterviewNotes ?? true,
+            ContactEmail = preferences?.ContactEmail?.Trim() ?? string.Empty,
+            ContactPhone = preferences?.ContactPhone?.Trim() ?? string.Empty,
+            ContactLinkedIn = preferences?.ContactLinkedIn?.Trim() ?? string.Empty,
+            ContactCity = preferences?.ContactCity?.Trim() ?? string.Empty
+        };
+
     private static Dictionary<string, OllamaCapacityVerdict> LoadCapacityVerdicts(WorkspaceRecoveryStore? recoveryStore)
     {
         var dictionary = new Dictionary<string, OllamaCapacityVerdict>(StringComparer.OrdinalIgnoreCase);
@@ -877,6 +908,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             candidateProfile,
             selectedLlmModel,
             selectedThinkingLevel,
+            draftGenerationPreferences,
             linkedInImportDiagnostics,
             linkedInAuthorizationStatus,
             capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase),

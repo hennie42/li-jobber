@@ -12,10 +12,30 @@ public sealed record WorkspaceRecoverySnapshot(
     CandidateProfile? CandidateProfile = null,
     string SelectedLlmModel = "",
     string SelectedThinkingLevel = "",
+    DraftGenerationPreferences? DraftGenerationPreferences = null,
     LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics = null,
     LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null,
     IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null,
     ModelBenchmarkSession? LastBenchmarkSession = null);
+
+public sealed record DraftGenerationPreferences
+{
+    public bool GenerateCv { get; init; } = true;
+
+    public bool GenerateCoverLetter { get; init; } = true;
+
+    public bool GenerateSummary { get; init; } = true;
+
+    public bool GenerateInterviewNotes { get; init; } = true;
+
+    public string ContactEmail { get; init; } = string.Empty;
+
+    public string ContactPhone { get; init; } = string.Empty;
+
+    public string ContactLinkedIn { get; init; } = string.Empty;
+
+    public string ContactCity { get; init; } = string.Empty;
+}
 
 public sealed record JobSetRecoveryState(
     string Id,

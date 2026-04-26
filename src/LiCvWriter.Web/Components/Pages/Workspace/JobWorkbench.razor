@@ -41,10 +41,10 @@
     <section class="card-panel stack-gap">
         <div class="field-label">Batch action</div>
         <div class="checkbox-row">
-            <label><input type="checkbox" @bind="generateCv" /> CV</label>
-            <label><input type="checkbox" @bind="generateCoverLetter" /> Cover letter</label>
-            <label><input type="checkbox" @bind="generateSummary" /> Summary</label>
-            <label><input type="checkbox" @bind="generateInterviewNotes" /> Interview notes</label>
+            <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
+            <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
+            <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Summary</label>
+            <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview notes</label>
         </div>
         <div class="button-row">
             <button class="primary-button" @onclick="RunAllRefreshThenDraftsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Start all")</button>
@@ -513,34 +513,34 @@ else if (CanRunFitReview)
     <p class="muted-text">Danish output keeps technology names, company names, quoted job phrases, and file names in English or original form.</p>
 
     <div class="check-grid">
-        <label><input type="checkbox" @bind="generateCv" /> CV</label>
-        <label><input type="checkbox" @bind="generateCoverLetter" /> Cover letter</label>
-        <label><input type="checkbox" @bind="generateSummary" /> Profile summary</label>
-        <label><input type="checkbox" @bind="generateInterviewNotes" /> Interview notes</label>
+        <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
+        <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
+        <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Profile summary</label>
+        <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview notes</label>
     </div>
 
     <label class="field-label" for="additionalInstructions">Additional instructions</label>
     <textarea id="additionalInstructions" class="prompt-box" @bind="additionalInstructions" @bind:event="oninput" @bind:after="PersistAdditionalInstructions"></textarea>
 
     <fieldset class="details-card stack-gap">
-        <legend class="field-label">Personal contact (this export only)</legend>
-        <p class="muted-text">Optional. Filled into the CV header for this generation. Not persisted &mdash; enter different details per job if you like.</p>
+        <legend class="field-label">Personal contact</legend>
+        <p class="muted-text">Optional. Stored locally for this workspace and reused across jobsets until you change it.</p>
         <div class="field-grid">
             <div>
                 <label class="field-label" for="contactEmail">Email</label>
-                <input id="contactEmail" class="text-input" type="email" autocomplete="off" @bind="contactEmail" />
+                <input id="contactEmail" class="text-input" type="email" autocomplete="off" @bind="contactEmail" @bind:after="PersistDraftGenerationPreferences" />
             </div>
             <div>
                 <label class="field-label" for="contactPhone">Phone</label>
-                <input id="contactPhone" class="text-input" type="tel" autocomplete="off" @bind="contactPhone" />
+                <input id="contactPhone" class="text-input" type="tel" autocomplete="off" @bind="contactPhone" @bind:after="PersistDraftGenerationPreferences" />
             </div>
             <div>
                 <label class="field-label" for="contactLinkedIn">LinkedIn URL</label>
-                <input id="contactLinkedIn" class="text-input" type="url" autocomplete="off" @bind="contactLinkedIn" />
+                <input id="contactLinkedIn" class="text-input" type="url" autocomplete="off" @bind="contactLinkedIn" @bind:after="PersistDraftGenerationPreferences" />
             </div>
             <div>
                 <label class="field-label" for="contactCity">City</label>
-                <input id="contactCity" class="text-input" type="text" autocomplete="off" @bind="contactCity" />
+                <input id="contactCity" class="text-input" type="text" autocomplete="off" @bind="contactCity" @bind:after="PersistDraftGenerationPreferences" />
             </div>
         </div>
     </fieldset>
@@ -1197,10 +1197,36 @@ else if (CanRunFitReview)
     private void PersistAdditionalInstructions()
         => Workspace.SetJobSetAdditionalInstructions(JobSetId!, additionalInstructions);
 
+    private void PersistDraftGenerationPreferences()
+        => Workspace.SetDraftGenerationPreferences(new DraftGenerationPreferences
+        {
+            GenerateCv = generateCv,
+            GenerateCoverLetter = generateCoverLetter,
+            GenerateSummary = generateSummary,
+            GenerateInterviewNotes = generateInterviewNotes,
+            ContactEmail = contactEmail,
+            ContactPhone = contactPhone,
+            ContactLinkedIn = contactLinkedIn,
+            ContactCity = contactCity
+        });
+
     private PersonalContactInfo? BuildCurrentPersonalContact()
     {
         var contact = new PersonalContactInfo(contactEmail, contactPhone, contactLinkedIn, contactCity);
         return contact.HasAnyValue ? contact : null;
+    }
+
+    private void SyncDraftGenerationPreferences()
+    {
+        var preferences = Workspace.DraftGenerationPreferences;
+        generateCv = preferences.GenerateCv;
+        generateCoverLetter = preferences.GenerateCoverLetter;
+        generateSummary = preferences.GenerateSummary;
+        generateInterviewNotes = preferences.GenerateInterviewNotes;
+        contactEmail = preferences.ContactEmail;
+        contactPhone = preferences.ContactPhone;
+        contactLinkedIn = preferences.ContactLinkedIn;
+        contactCity = preferences.ContactCity;
     }
 
     private void SetAdditionalInstructions(string value)
@@ -1249,6 +1275,8 @@ else if (CanRunFitReview)
 
     private void SyncFromWorkspace()
     {
+        SyncDraftGenerationPreferences();
+
         if (string.IsNullOrWhiteSpace(JobSetId))
         {
             return;

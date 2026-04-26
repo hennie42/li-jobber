@@ -55,6 +55,49 @@ public sealed class WorkspaceRecoveryTests
     }
 
     [Fact]
+    public void WorkspaceSession_RestoresSharedDraftGenerationPreferences()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+
+            session.SetDraftGenerationPreferences(new DraftGenerationPreferences
+            {
+                GenerateCv = true,
+                GenerateCoverLetter = false,
+                GenerateSummary = false,
+                GenerateInterviewNotes = true,
+                ContactEmail = "alex@example.com",
+                ContactPhone = "12345",
+                ContactLinkedIn = "https://linkedin.com/in/alex",
+                ContactCity = "Copenhagen"
+            });
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+            var preferences = restoredSession.DraftGenerationPreferences;
+
+            Assert.True(preferences.GenerateCv);
+            Assert.False(preferences.GenerateCoverLetter);
+            Assert.False(preferences.GenerateSummary);
+            Assert.True(preferences.GenerateInterviewNotes);
+            Assert.Equal("alex@example.com", preferences.ContactEmail);
+            Assert.Equal("12345", preferences.ContactPhone);
+            Assert.Equal("https://linkedin.com/in/alex", preferences.ContactLinkedIn);
+            Assert.Equal("Copenhagen", preferences.ContactCity);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void WorkspaceSession_UsesConfiguredLlmDefaultsWhenRecoveryDoesNotContainLlmSettings()
     {
         var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");

@@ -449,6 +449,37 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void SetDraftGenerationPreferences_SharesValuesAcrossJobSets()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetDraftGenerationPreferences(new DraftGenerationPreferences
+        {
+            GenerateCv = true,
+            GenerateCoverLetter = false,
+            GenerateSummary = true,
+            GenerateInterviewNotes = false,
+            ContactEmail = "alex@example.com",
+            ContactPhone = "12345",
+            ContactLinkedIn = "https://linkedin.com/in/alex",
+            ContactCity = "Copenhagen"
+        });
+        session.AddJobSet();
+
+        var preferences = session.DraftGenerationPreferences;
+
+        Assert.True(preferences.GenerateCv);
+        Assert.False(preferences.GenerateCoverLetter);
+        Assert.True(preferences.GenerateSummary);
+        Assert.False(preferences.GenerateInterviewNotes);
+        Assert.Equal("alex@example.com", preferences.ContactEmail);
+        Assert.Equal("12345", preferences.ContactPhone);
+        Assert.Equal("https://linkedin.com/in/alex", preferences.ContactLinkedIn);
+        Assert.Equal("Copenhagen", preferences.ContactCity);
+        Assert.Equal("Job set 2", session.GetJobSet("job-set-02").Title);
+    }
+
+    [Fact]
     public void AddJobSet_MixedModes_TabsKeepIndependentInputModes()
     {
         var session = new WorkspaceSession(new OllamaOptions());
