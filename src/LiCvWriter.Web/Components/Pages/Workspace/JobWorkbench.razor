@@ -681,6 +681,7 @@ else if (CanRunFitReview)
     private string? activeStreamOperationId;
     private LlmOperationSnapshot? activeStreamSnapshot;
     private TaskCompletionSource<LlmOperationSnapshot>? activeOperationCompletionSource;
+    private string? activeOperationJobSetId;
     private DotNetObjectReference<JobWorkbench>? streamCallbackReference;
     private bool disposed;
     private bool isBatchRunning;
@@ -689,22 +690,24 @@ else if (CanRunFitReview)
     private string? batchCurrentJobSetTitle;
     private readonly List<string> batchSkippedJobSetMessages = [];
     private bool isBusy => isResearching || isGenerating || isRefreshingFitReview || isRefreshingTechnologyGap || isRefreshingAll;
-    private bool isResearching => currentOperation == BusyOperation.AnalyzeAndBuildContext || isAnalyzing || isBuildingCompanyContext;
-    private bool isAnalyzing => currentOperation == BusyOperation.AnalyzeJob
+    private bool HasCurrentJobSetOperation => !string.IsNullOrWhiteSpace(JobSetId)
+        && string.Equals(activeOperationJobSetId, JobSetId, StringComparison.OrdinalIgnoreCase);
+    private bool isResearching => IsCurrentJobSetBusyOperation(BusyOperation.AnalyzeAndBuildContext) || isAnalyzing || isBuildingCompanyContext;
+    private bool isAnalyzing => IsCurrentJobSetBusyOperation(BusyOperation.AnalyzeJob)
         || IsCurrentWorkbenchOperation(AnalyzeJobMessage)
         || IsActiveTelemetryMessage(ParseJobTelemetryMessage);
-    private bool isBuildingCompanyContext => currentOperation == BusyOperation.BuildCompanyContext
+    private bool isBuildingCompanyContext => IsCurrentJobSetBusyOperation(BusyOperation.BuildCompanyContext)
         || IsCurrentWorkbenchOperation(BuildCompanyContextMessage)
         || IsActiveTelemetryMessage(ParseCompanyTelemetryMessage);
-    private bool isGenerating => currentOperation == BusyOperation.GenerateDrafts
+    private bool isGenerating => IsCurrentJobSetBusyOperation(BusyOperation.GenerateDrafts)
         || IsCurrentWorkbenchOperation(GenerateDraftsMessage)
         || HasActiveTelemetryPrefix(GenerateDraftTelemetryPrefix);
-    private bool isRefreshingFitReview => currentOperation == BusyOperation.RefreshFitReview
+    private bool isRefreshingFitReview => IsCurrentJobSetBusyOperation(BusyOperation.RefreshFitReview)
         || IsCurrentWorkbenchOperation(RefreshFitReviewMessage);
-    private bool isRefreshingTechnologyGap => currentOperation == BusyOperation.RefreshTechnologyGap
+    private bool isRefreshingTechnologyGap => IsCurrentJobSetBusyOperation(BusyOperation.RefreshTechnologyGap)
         || IsCurrentWorkbenchOperation(RefreshTechnologyGapMessage)
         || IsActiveTelemetryMessage(RefreshTechnologyGapMessage);
-    private bool isRefreshingAll => currentOperation == BusyOperation.RefreshAll;
+    private bool isRefreshingAll => IsCurrentJobSetBusyOperation(BusyOperation.RefreshAll);
 
     private bool CanRunFitReview => Workspace.CandidateProfile is not null && CurrentJobSet.JobPosting is not null;
 
@@ -795,6 +798,7 @@ else if (CanRunFitReview)
     {
         errorMessage = null;
         PersistJobSetInputs();
+        activeOperationJobSetId = JobSetId;
         StartOperationTimer();
 
         if (!TryEnsureResearchReadiness())
@@ -831,6 +835,7 @@ else if (CanRunFitReview)
         catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
             errorMessage = exception.Message;
         }
@@ -847,6 +852,7 @@ else if (CanRunFitReview)
 
         try
         {
+            activeOperationJobSetId = JobSetId;
             currentOperation = BusyOperation.AnalyzeAndBuildContext;
             await StartStreamedOperationAsync(
                 "/api/llm/operations/job-context",
@@ -855,6 +861,7 @@ else if (CanRunFitReview)
         catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
             errorMessage = exception.Message;
         }
@@ -1117,6 +1124,7 @@ else if (CanRunFitReview)
     private async Task GenerateDraftsAsync()
     {
         errorMessage = null;
+        activeOperationJobSetId = JobSetId;
         currentOperation = BusyOperation.GenerateDrafts;
         StartOperationTimer();
 
@@ -1126,6 +1134,7 @@ else if (CanRunFitReview)
             {
                 errorMessage = "Complete Start / Setup first: check Ollama, choose a session model, and choose a thinking level.";
                 currentOperation = BusyOperation.None;
+                activeOperationJobSetId = null;
                 StopOperationTimer();
                 return;
             }
@@ -1134,6 +1143,7 @@ else if (CanRunFitReview)
             {
                 errorMessage = "Load a LinkedIn profile and analyze a target job before generating drafts.";
                 currentOperation = BusyOperation.None;
+                activeOperationJobSetId = null;
                 StopOperationTimer();
                 return;
             }
@@ -1144,6 +1154,7 @@ else if (CanRunFitReview)
             {
                 errorMessage = "Select at least one document type.";
                 currentOperation = BusyOperation.None;
+                activeOperationJobSetId = null;
                 StopOperationTimer();
                 return;
             }
@@ -1161,6 +1172,7 @@ else if (CanRunFitReview)
             errorMessage = exception.Message;
             Workspace.MarkJobSetFailed(JobSetId!, "Draft generation failed for this tab.");
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
         }
     }
@@ -1266,6 +1278,7 @@ else if (CanRunFitReview)
             return;
         }
 
+        activeOperationJobSetId = JobSetId;
         currentOperation = BusyOperation.RefreshFitReview;
         StartOperationTimer();
 
@@ -1278,6 +1291,7 @@ else if (CanRunFitReview)
         catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
             errorMessage = exception.Message;
         }
@@ -1292,6 +1306,7 @@ else if (CanRunFitReview)
             return;
         }
 
+        activeOperationJobSetId = JobSetId;
         currentOperation = BusyOperation.RefreshTechnologyGap;
         StartOperationTimer();
 
@@ -1304,6 +1319,7 @@ else if (CanRunFitReview)
         catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
             errorMessage = exception.Message;
         }
@@ -1318,43 +1334,50 @@ else if (CanRunFitReview)
             return;
         }
 
-        activeStreamSnapshot = operationEvent.Snapshot;
+        var snapshot = operationEvent.Snapshot;
+        var matchesCurrentRoute = isBatchRunning
+            || string.Equals(snapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase);
 
-        // While running a batch from the listing page, JobSetId is null but
-        // events carry the per-jobset id. Accept events for the currently
-        // executing batch jobset; otherwise require a route-id match.
-        if (!isBatchRunning
-            && !string.Equals(activeStreamSnapshot.JobSetId, JobSetId!, StringComparison.OrdinalIgnoreCase))
+        if (matchesCurrentRoute)
         {
-            return;
+            activeStreamSnapshot = snapshot;
         }
 
-        if (activeStreamSnapshot.IsTerminal)
+        if (snapshot.IsTerminal)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
-            SyncFromWorkspace();
+            if (matchesCurrentRoute)
+            {
+                SyncFromWorkspace();
+            }
 
-            if (activeStreamSnapshot.Kind is "analyze-job-context" or "refresh-all"
-                && activeStreamSnapshot.Status == "completed"
+            if (snapshot.Kind is "analyze-job-context" or "refresh-all"
+                && snapshot.Status == "completed"
                 && !string.IsNullOrWhiteSpace(JobSetId))
             {
                 SetAdditionalInstructions(BuildResearchInstructions());
             }
 
-            if (activeStreamSnapshot.Status == "completed")
+            if (snapshot.Status == "completed")
             {
                 await RefreshOllamaAvailabilitySilentlyAsync();
             }
 
-            if (activeStreamSnapshot.Status == "failed")
+            if (matchesCurrentRoute && snapshot.Status == "failed")
             {
-                errorMessage = activeStreamSnapshot.Error ?? activeStreamSnapshot.Detail;
+                errorMessage = snapshot.Error ?? snapshot.Detail;
             }
 
-            activeOperationCompletionSource?.TrySetResult(activeStreamSnapshot);
+            activeOperationCompletionSource?.TrySetResult(snapshot);
 
-            await DisposeActiveStreamAsync(clearSnapshot: false);
+            await DisposeActiveStreamAsync(clearSnapshot: !matchesCurrentRoute);
+        }
+
+        if (!matchesCurrentRoute)
+        {
+            return;
         }
 
         await InvokeAsync(StateHasChanged);
@@ -1381,6 +1404,7 @@ else if (CanRunFitReview)
         activeStreamOperationId = startResult.OperationId;
         activeStreamSnapshot = null;
         activeOperationCompletionSource = new TaskCompletionSource<LlmOperationSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+        activeOperationJobSetId = string.IsNullOrWhiteSpace(JobSetId) ? null : JobSetId;
         streamCallbackReference ??= DotNetObjectReference.Create(this);
 
         await JS.InvokeVoidAsync(
@@ -1409,6 +1433,7 @@ else if (CanRunFitReview)
         }
 
         activeStreamOperationId = null;
+        activeOperationJobSetId = null;
 
         if (clearSnapshot)
         {
@@ -1432,6 +1457,7 @@ else if (CanRunFitReview)
         activeStreamOperationId = null;
         activeStreamSnapshot = null;
         activeOperationCompletionSource = null;
+        activeOperationJobSetId = null;
     }
 
     private async Task RunAllRefreshThenDraftsAsync()
@@ -1484,6 +1510,7 @@ else if (CanRunFitReview)
         isBatchRunning = true;
         batchCompletedCount = 0;
         batchTotalCount = readyJobSets.Length;
+        activeOperationJobSetId = null;
         StartOperationTimer();
 
         try
@@ -1551,6 +1578,7 @@ else if (CanRunFitReview)
         }
 
         currentOperation = BusyOperation.RefreshAll;
+        activeOperationJobSetId = JobSetId;
         StartOperationTimer();
 
         try
@@ -1562,6 +1590,7 @@ else if (CanRunFitReview)
         catch (Exception exception)
         {
             currentOperation = BusyOperation.None;
+            activeOperationJobSetId = null;
             StopOperationTimer();
             errorMessage = exception.Message;
         }
@@ -1900,7 +1929,7 @@ else if (CanRunFitReview)
             return $"Running: {snapshot.Message}";
         }
 
-        if (currentOperation != BusyOperation.None && Operations.IsBusy)
+        if (HasCurrentJobSetOperation && Operations.IsBusy)
         {
             return $"Running: {Operations.CurrentMessage}";
         }
@@ -1923,7 +1952,7 @@ else if (CanRunFitReview)
             return snapshot.Detail;
         }
 
-        return currentOperation != BusyOperation.None && Operations.IsBusy ? Operations.CurrentDetail : null;
+        return HasCurrentJobSetOperation && Operations.IsBusy ? Operations.CurrentDetail : null;
     }
 
     private string GetCurrentTaskStatusClass()
@@ -2010,7 +2039,7 @@ else if (CanRunFitReview)
 
     private bool IsWorkbenchTelemetryActive()
     {
-        if (currentOperation == BusyOperation.None && !isBatchRunning)
+        if (!HasCurrentJobSetOperation && !isBatchRunning)
         {
             return false;
         }
@@ -2032,17 +2061,20 @@ else if (CanRunFitReview)
             || telemetryMessage.StartsWith(GenerateDraftTelemetryPrefix, StringComparison.Ordinal);
 
     private bool IsCurrentWorkbenchOperation(string message)
-        => currentOperation != BusyOperation.None
+        => HasCurrentJobSetOperation
             && Operations.IsBusy
             && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
 
     private bool IsActiveTelemetryMessage(string message)
-        => (currentOperation != BusyOperation.None || isBatchRunning)
+        => (HasCurrentJobSetOperation || isBatchRunning)
             && string.Equals(Operations.ActiveLlmTelemetry?.Message, message, StringComparison.Ordinal);
 
     private bool HasActiveTelemetryPrefix(string prefix)
-        => (currentOperation != BusyOperation.None || isBatchRunning)
+        => (HasCurrentJobSetOperation || isBatchRunning)
             && Operations.ActiveLlmTelemetry?.Message.StartsWith(prefix, StringComparison.Ordinal) == true;
+
+    private bool IsCurrentJobSetBusyOperation(BusyOperation operation)
+        => HasCurrentJobSetOperation && currentOperation == operation;
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
 
