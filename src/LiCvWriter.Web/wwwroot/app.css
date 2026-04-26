@@ -948,6 +948,24 @@ details.card-panel summary .status-chip {
   gap: 0.35rem;
 }
 
+.editable-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.editable-list-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.editable-list-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
 .evidence-selection-card {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1454,6 +1472,12 @@ a.meta-chip-link:hover {
 
 .link-button:hover {
   text-decoration: underline;
+}
+
+.link-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 .language-row {

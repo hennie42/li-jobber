@@ -8,6 +8,23 @@ using LiCvWriter.Infrastructure.LinkedIn;
 
 namespace LiCvWriter.Web.Services;
 
+public enum JobPostingEditableField
+{
+    MustHaveThemes,
+    NiceToHaveThemes,
+    CulturalSignals,
+    Signals,
+    InferredRequirements
+}
+
+public enum CompanyProfileEditableField
+{
+    GuidingPrinciples,
+    CulturalSignals,
+    Differentiators,
+    Signals
+}
+
 public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecoveryStore? recoveryStore = null)
 {
     private static readonly string[] SupportedThinkingLevels = ["low", "medium", "high"];
@@ -221,11 +238,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         UpdateJobSet(jobSetId, jobSet => jobSet with { JobFitAssessment = jobFitAssessment });
     }
 
-    public void SetJobSetEvidenceSelection(string jobSetId, EvidenceSelectionResult evidenceSelection)
+    public void SetJobSetEvidenceSelection(string jobSetId, EvidenceSelectionResult evidenceSelection, bool preserveExistingSelections = true)
     {
         UpdateJobSet(jobSetId, jobSet =>
         {
-            var selectedIds = jobSet.SelectedEvidenceIds.Count > 0
+            var selectedIds = preserveExistingSelections && jobSet.SelectedEvidenceIds.Count > 0
                 ? jobSet.SelectedEvidenceIds
                 : evidenceSelection.SelectedEvidence.Select(static item => item.Evidence.Id).ToArray();
 
@@ -409,6 +426,42 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         });
     }
 
+    public void RemoveJobSetJobPostingItem(string jobSetId, JobPostingEditableField field, int index)
+    {
+        UpdateJobSet(jobSetId, jobSet =>
+        {
+            var jobPosting = jobSet.JobPosting
+                ?? throw new InvalidOperationException("No analyzed job context is available for this job set.");
+
+            var updatedJobPosting = field switch
+            {
+                JobPostingEditableField.MustHaveThemes => jobPosting with
+                {
+                    MustHaveThemes = RemoveAt(jobPosting.MustHaveThemes, index, "must-have theme")
+                },
+                JobPostingEditableField.NiceToHaveThemes => jobPosting with
+                {
+                    NiceToHaveThemes = RemoveAt(jobPosting.NiceToHaveThemes, index, "nice-to-have theme")
+                },
+                JobPostingEditableField.CulturalSignals => jobPosting with
+                {
+                    CulturalSignals = RemoveAt(jobPosting.CulturalSignals, index, "cultural signal")
+                },
+                JobPostingEditableField.Signals => jobPosting with
+                {
+                    Signals = RemoveAt(jobPosting.Signals, index, "source-backed job signal")
+                },
+                JobPostingEditableField.InferredRequirements => jobPosting with
+                {
+                    InferredRequirements = RemoveAt(jobPosting.InferredRequirements, index, "inferred requirement")
+                },
+                _ => throw new ArgumentOutOfRangeException(nameof(field), field, null)
+            };
+
+            return BuildEditedJobPostingState(jobSet, updatedJobPosting);
+        });
+    }
+
     public void SetJobSetCompanyProfile(string jobSetId, CompanyResearchProfile companyProfile)
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
@@ -422,6 +475,38 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
             Exports = Array.Empty<DocumentExportResult>(),
             ActiveSubtask = null
+        });
+    }
+
+    public void RemoveJobSetCompanyProfileItem(string jobSetId, CompanyProfileEditableField field, int index)
+    {
+        UpdateJobSet(jobSetId, jobSet =>
+        {
+            var companyProfile = jobSet.CompanyProfile
+                ?? throw new InvalidOperationException("No company context is available for this job set.");
+
+            var updatedCompanyProfile = field switch
+            {
+                CompanyProfileEditableField.GuidingPrinciples => companyProfile with
+                {
+                    GuidingPrinciples = RemoveAt(companyProfile.GuidingPrinciples, index, "guiding principle")
+                },
+                CompanyProfileEditableField.CulturalSignals => companyProfile with
+                {
+                    CulturalSignals = RemoveAt(companyProfile.CulturalSignals, index, "company cultural signal")
+                },
+                CompanyProfileEditableField.Differentiators => companyProfile with
+                {
+                    Differentiators = RemoveAt(companyProfile.Differentiators, index, "company differentiator")
+                },
+                CompanyProfileEditableField.Signals => companyProfile with
+                {
+                    Signals = RemoveAt(companyProfile.Signals, index, "source-backed company signal")
+                },
+                _ => throw new ArgumentOutOfRangeException(nameof(field), field, null)
+            };
+
+            return BuildEditedCompanyProfileState(jobSet, updatedCompanyProfile);
         });
     }
 
@@ -651,6 +736,54 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         var configuredMatch = availableModels.FirstOrDefault(model => model.Equals(configuredModel, StringComparison.OrdinalIgnoreCase));
         return configuredMatch ?? availableModels.FirstOrDefault() ?? string.Empty;
     }
+
+    private static IReadOnlyList<T> RemoveAt<T>(IReadOnlyList<T> values, int index, string label)
+    {
+        if (index < 0 || index >= values.Count)
+        {
+            throw new InvalidOperationException($"The selected {label} could not be found.");
+        }
+
+        return values
+            .Where((_, candidateIndex) => candidateIndex != index)
+            .ToArray();
+    }
+
+    private static JobSetSessionState BuildEditedJobPostingState(JobSetSessionState jobSet, JobPostingAnalysis jobPosting)
+        => jobSet with
+        {
+            JobPosting = jobPosting,
+            JobUrl = jobPosting.SourceUrl?.ToString() ?? jobSet.JobUrl,
+            OutputFolderName = BuildOutputFolderName(jobSet.SortOrder, jobPosting),
+            JobFitAssessment = JobFitAssessment.Empty,
+            TechnologyGapAssessment = TechnologyGapAssessment.Empty,
+            SelectedEvidenceIds = Array.Empty<string>(),
+            EvidenceSelection = EvidenceSelectionResult.Empty,
+            LastFitReviewFingerprint = null,
+            LastFitReviewIncludedLlmEnhancement = false,
+            ProgressState = JobSetProgressState.NotStarted,
+            ProgressDetail = "Job context edited. Re-run fit review or generation for this job set.",
+            GeneratedDocuments = Array.Empty<GeneratedDocument>(),
+            Exports = Array.Empty<DocumentExportResult>(),
+            ActiveSubtask = null
+        };
+
+    private static JobSetSessionState BuildEditedCompanyProfileState(JobSetSessionState jobSet, CompanyResearchProfile companyProfile)
+        => jobSet with
+        {
+            CompanyProfile = companyProfile,
+            JobFitAssessment = JobFitAssessment.Empty,
+            TechnologyGapAssessment = TechnologyGapAssessment.Empty,
+            SelectedEvidenceIds = Array.Empty<string>(),
+            EvidenceSelection = EvidenceSelectionResult.Empty,
+            LastFitReviewFingerprint = null,
+            LastFitReviewIncludedLlmEnhancement = false,
+            ProgressState = JobSetProgressState.NotStarted,
+            ProgressDetail = "Company context edited. Re-run fit review or generation for this job set.",
+            GeneratedDocuments = Array.Empty<GeneratedDocument>(),
+            Exports = Array.Empty<DocumentExportResult>(),
+            ActiveSubtask = null
+        };
 
     private int GetNextSortOrderUnsafe()
         => jobSets.Count == 0 ? 1 : jobSets.Max(jobSet => jobSet.SortOrder) + 1;

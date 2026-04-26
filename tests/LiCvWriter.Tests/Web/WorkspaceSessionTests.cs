@@ -236,6 +236,51 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void RemoveJobSetJobPostingItem_RemovesSignalAndClearsDependentOutputs()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive generative AI platform work.",
+            Signals =
+            [
+                new JobContextSignal("Must have", "Azure", JobRequirementImportance.MustHave, "Job posting", "Azure experience required.", 96),
+                new JobContextSignal("Must have", "Kubernetes", JobRequirementImportance.MustHave, "Job posting", "Kubernetes required.", 92)
+            ]
+        });
+        session.SetJobSetJobFitAssessment(jobSetId, new JobFitAssessment(
+            72,
+            JobFitRecommendation.Stretch,
+            [new JobRequirementAssessment("Must have", "Azure", JobRequirementImportance.MustHave, JobRequirementMatch.Partial, Array.Empty<string>(), "Partial evidence")],
+            Array.Empty<string>(),
+            Array.Empty<string>()));
+        session.SetJobSetEvidenceSelection(jobSetId, new EvidenceSelectionResult(
+        [
+            new RankedEvidenceItem(
+                new CandidateEvidenceItem("skill:azure", CandidateEvidenceType.Skill, "Azure", "Azure", ["Azure"]),
+                20,
+                ["Supports must-have: Azure"],
+                true)
+        ]));
+        session.SetJobSetGeneratedDocuments(jobSetId,
+            [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.docx")]);
+
+        session.RemoveJobSetJobPostingItem(jobSetId, JobPostingEditableField.Signals, 0);
+
+        Assert.Single(session.GetJobSet(jobSetId).JobPosting!.Signals);
+        Assert.Equal("Kubernetes", session.GetJobSet(jobSetId).JobPosting!.Signals[0].Requirement);
+        Assert.Same(JobFitAssessment.Empty, session.GetJobSet(jobSetId).JobFitAssessment);
+        Assert.Same(EvidenceSelectionResult.Empty, session.GetJobSet(jobSetId).EvidenceSelection);
+        Assert.Equal(JobSetProgressState.NotStarted, session.GetJobSet(jobSetId).ProgressState);
+        Assert.Contains("edited", session.GetJobSet(jobSetId).ProgressDetail, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(session.GetJobSet(jobSetId).GeneratedDocuments);
+    }
+
+    [Fact]
     public void SetActiveJobSetTechnologyGapAssessment_UpdatesCurrentTab()
     {
         var session = new WorkspaceSession(new OllamaOptions());
@@ -446,6 +491,41 @@ public sealed class WorkspaceSessionTests
 
         jobSetId = "job-set-02";
         Assert.Equal("Instructions for tab 2", session.GetJobSet(jobSetId).AdditionalInstructions);
+    }
+
+    [Fact]
+    public void RemoveJobSetCompanyProfileItem_RemovesDifferentiatorAndClearsDependentOutputs()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive generative AI platform work."
+        });
+        session.SetJobSetCompanyProfile(jobSetId, new CompanyResearchProfile
+        {
+            Summary = "Contoso builds secure cloud platforms.",
+            Differentiators = ["Mission critical delivery", "Healthcare focus"]
+        });
+        session.SetJobSetJobFitAssessment(jobSetId, new JobFitAssessment(
+            72,
+            JobFitRecommendation.Stretch,
+            [new JobRequirementAssessment("Culture", "Mission critical delivery", JobRequirementImportance.Cultural, JobRequirementMatch.Partial, Array.Empty<string>(), "Partial evidence")],
+            Array.Empty<string>(),
+            Array.Empty<string>()));
+        session.SetJobSetGeneratedDocuments(jobSetId,
+            [new GeneratedDocument(DocumentKind.Cv, "CV", "# CV", "CV", DateTimeOffset.UtcNow)],
+            [new DocumentExportResult(DocumentKind.Cv, "c:/exports/cv.docx")]);
+
+        session.RemoveJobSetCompanyProfileItem(jobSetId, CompanyProfileEditableField.Differentiators, 1);
+
+        Assert.Single(session.GetJobSet(jobSetId).CompanyProfile!.Differentiators);
+        Assert.Equal("Mission critical delivery", session.GetJobSet(jobSetId).CompanyProfile!.Differentiators[0]);
+        Assert.Same(JobFitAssessment.Empty, session.GetJobSet(jobSetId).JobFitAssessment);
+        Assert.Equal(JobSetProgressState.NotStarted, session.GetJobSet(jobSetId).ProgressState);
+        Assert.Empty(session.GetJobSet(jobSetId).GeneratedDocuments);
     }
 
     [Fact]

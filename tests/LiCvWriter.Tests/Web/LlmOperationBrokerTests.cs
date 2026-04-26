@@ -317,6 +317,74 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartFitReviewAnalysis_ResetsEvidenceSelectionsToUpdatedDefaults()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive Azure delivery and transformation leadership.",
+            MustHaveThemes = ["Azure", "Transformation leadership"]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var initialResult = broker.StartFitReviewAnalysis(new StartFitReviewOperationRequest("job-set-01"));
+        await WaitForTerminalSnapshotAsync(broker, initialResult.OperationId);
+
+        var evidenceId = workspace.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence[0].Evidence.Id;
+        workspace.SetJobSetEvidenceSelected(jobSetId, evidenceId, false);
+        Assert.DoesNotContain(workspace.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == evidenceId);
+
+        var refreshResult = broker.StartFitReviewAnalysis(new StartFitReviewOperationRequest("job-set-01"));
+        await WaitForTerminalSnapshotAsync(broker, refreshResult.OperationId);
+
+        Assert.Contains(workspace.GetJobSet(jobSetId).EvidenceSelection.SelectedEvidence, item => item.Evidence.Id == evidenceId);
+    }
+
+    [Fact]
     public async Task StartRefreshAllAnalysis_CompletesAndRefreshesResearchFitAndTechnologyGap()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };

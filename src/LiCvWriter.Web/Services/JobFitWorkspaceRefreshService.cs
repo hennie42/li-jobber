@@ -11,7 +11,7 @@ public sealed class JobFitWorkspaceRefreshService(
     /// Re-runs evidence selection for the specified job set using its current fit assessment.
     /// Call after the LLM enhancement pass has updated the fit assessment in-place.
     /// </summary>
-    public void RefreshJobSetEvidence(string jobSetId)
+    public void RefreshJobSetEvidence(string jobSetId, bool resetSelections = false)
     {
         var candidateProfile = workspace.CandidateProfile;
         var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == jobSetId);
@@ -27,10 +27,10 @@ public sealed class JobFitWorkspaceRefreshService(
             jobSet.JobFitAssessment,
             workspace.ApplicantDifferentiatorProfile);
 
-        workspace.SetJobSetEvidenceSelection(jobSetId, evidenceSelection);
+        workspace.SetJobSetEvidenceSelection(jobSetId, evidenceSelection, preserveExistingSelections: !resetSelections);
     }
 
-    public int RefreshAllJobSets()
+    public int RefreshAllJobSets(bool resetSelections = false)
     {
         var refreshed = 0;
         foreach (var jobSetId in workspace.JobSets
@@ -38,7 +38,7 @@ public sealed class JobFitWorkspaceRefreshService(
                      .OrderBy(static jobSet => jobSet.SortOrder)
                      .Select(static jobSet => jobSet.Id))
         {
-            if (RefreshJobSet(jobSetId))
+            if (RefreshJobSet(jobSetId, resetSelections))
             {
                 refreshed++;
             }
@@ -47,7 +47,7 @@ public sealed class JobFitWorkspaceRefreshService(
         return refreshed;
     }
 
-    public bool RefreshJobSet(string jobSetId)
+    public bool RefreshJobSet(string jobSetId, bool resetSelections = false)
     {
         var candidateProfile = workspace.CandidateProfile;
         var jobSet = workspace.JobSets.FirstOrDefault(job => job.Id == jobSetId);
@@ -71,7 +71,7 @@ public sealed class JobFitWorkspaceRefreshService(
             fitAssessment,
             workspace.ApplicantDifferentiatorProfile);
 
-        workspace.SetJobSetEvidenceSelection(jobSetId, evidenceSelection);
+        workspace.SetJobSetEvidenceSelection(jobSetId, evidenceSelection, preserveExistingSelections: !resetSelections);
         return true;
     }
 }

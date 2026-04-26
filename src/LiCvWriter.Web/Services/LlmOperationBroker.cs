@@ -538,6 +538,7 @@ public sealed class LlmOperationBroker(
                         input.SelectedModel,
                         input.SelectedThinkingLevel,
                         useLlmEnhancement: true,
+                        resetEvidenceSelections: false,
                         fitReviewFingerprint,
                         fitRefreshService,
                         fitEnhancementService,
@@ -919,6 +920,7 @@ public sealed class LlmOperationBroker(
                 input.SelectedModel,
                 input.SelectedThinkingLevel,
                 input.UseLlmEnhancement,
+                resetEvidenceSelections: true,
                 fitReviewFingerprint,
                 fitRefreshService,
                 fitEnhancementService,
@@ -1095,6 +1097,7 @@ public sealed class LlmOperationBroker(
                     input.SelectedModel,
                     input.SelectedThinkingLevel,
                     useLlmEnhancement: true,
+                    resetEvidenceSelections: true,
                     fitReviewFingerprint,
                     fitRefreshService,
                     fitEnhancementService,
@@ -1215,6 +1218,7 @@ public sealed class LlmOperationBroker(
         string selectedModel,
         string selectedThinkingLevel,
         bool useLlmEnhancement,
+        bool resetEvidenceSelections,
         string fitReviewFingerprint,
         JobFitWorkspaceRefreshService fitRefreshService,
         LlmFitEnhancementService fitEnhancementService,
@@ -1227,7 +1231,7 @@ public sealed class LlmOperationBroker(
             $"Refreshing deterministic fit signals for {jobSetTitle}.",
             activeSubtask: JobSetSubtask.FitReview);
 
-        if (!fitRefreshService.RefreshJobSet(jobSetId))
+        if (!fitRefreshService.RefreshJobSet(jobSetId, resetSelections: resetEvidenceSelections))
         {
             throw new InvalidOperationException("Load a profile and analyze a target job before running the fit review.");
         }
@@ -1258,7 +1262,7 @@ public sealed class LlmOperationBroker(
                 cancellationToken);
 
             workspace.SetJobSetJobFitAssessment(jobSetId, enhanced);
-            fitRefreshService.RefreshJobSetEvidence(jobSetId);
+            fitRefreshService.RefreshJobSetEvidence(jobSetId, resetSelections: resetEvidenceSelections);
 
             if (enhanced.IsLlmEnhanced)
             {

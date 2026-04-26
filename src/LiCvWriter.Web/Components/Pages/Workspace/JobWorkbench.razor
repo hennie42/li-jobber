@@ -188,14 +188,39 @@ else
                     </div>
                     <p>@analysis.Summary</p>
 
+                    @if (analysis.Signals.Count > 0)
+                    {
+                        <div>
+                            <div class="field-label">Source-backed fit inputs</div>
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < analysis.Signals.Count; index++)
+                                {
+                                    var signal = analysis.Signals[index];
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <div class="editable-list-body">
+                                            <strong>@signal.Requirement</strong>
+                                            <span class="muted-text">@FormatImportance(signal.Importance) · @signal.Category · @FormatSignalSource(signal)</span>
+                                        </div>
+                                        <button type="button" class="link-button" @onclick="() => RemoveJobPostingItemAsync(JobPostingEditableField.Signals, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
                     @if (analysis.MustHaveThemes.Count > 0)
                     {
                         <div>
                             <div class="field-label">Must have themes</div>
-                            <ul class="feature-list compact-list">
-                                @foreach (var theme in analysis.MustHaveThemes)
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < analysis.MustHaveThemes.Count; index++)
                                 {
-                                    <li>@theme</li>
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@analysis.MustHaveThemes[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveJobPostingItemAsync(JobPostingEditableField.MustHaveThemes, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
                                 }
                             </ul>
                         </div>
@@ -205,10 +230,14 @@ else
                     {
                         <div>
                             <div class="field-label">Nice-to-have themes</div>
-                            <ul class="feature-list compact-list">
-                                @foreach (var theme in analysis.NiceToHaveThemes)
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < analysis.NiceToHaveThemes.Count; index++)
                                 {
-                                    <li>@theme</li>
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@analysis.NiceToHaveThemes[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveJobPostingItemAsync(JobPostingEditableField.NiceToHaveThemes, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
                                 }
                             </ul>
                         </div>
@@ -218,10 +247,31 @@ else
                     {
                         <div>
                             <div class="field-label">Culture signals</div>
-                            <ul class="feature-list compact-list">
-                                @foreach (var signal in analysis.CulturalSignals)
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < analysis.CulturalSignals.Count; index++)
                                 {
-                                    <li>@signal</li>
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@analysis.CulturalSignals[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveJobPostingItemAsync(JobPostingEditableField.CulturalSignals, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    @if (analysis.InferredRequirements.Count > 0)
+                    {
+                        <div>
+                            <div class="field-label">Inferred requirements</div>
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < analysis.InferredRequirements.Count; index++)
+                                {
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@analysis.InferredRequirements[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveJobPostingItemAsync(JobPostingEditableField.InferredRequirements, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
                                 }
                             </ul>
                         </div>
@@ -249,10 +299,52 @@ else
                     {
                         <div>
                             <div class="field-label">Guiding principles</div>
-                            <ul class="feature-list compact-list">
-                                @foreach (var principle in companyProfile.GuidingPrinciples)
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < companyProfile.GuidingPrinciples.Count; index++)
                                 {
-                                    <li>@principle</li>
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@companyProfile.GuidingPrinciples[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveCompanyProfileItemAsync(CompanyProfileEditableField.GuidingPrinciples, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    @if (companyProfile.Signals.Count > 0)
+                    {
+                        <div>
+                            <div class="field-label">Source-backed company fit inputs</div>
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < companyProfile.Signals.Count; index++)
+                                {
+                                    var signal = companyProfile.Signals[index];
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <div class="editable-list-body">
+                                            <strong>@signal.Requirement</strong>
+                                            <span class="muted-text">@FormatImportance(signal.Importance) · @signal.Category · @FormatSignalSource(signal)</span>
+                                        </div>
+                                        <button type="button" class="link-button" @onclick="() => RemoveCompanyProfileItemAsync(CompanyProfileEditableField.Signals, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    @if (companyProfile.CulturalSignals.Count > 0)
+                    {
+                        <div>
+                            <div class="field-label">Company cultural signals</div>
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < companyProfile.CulturalSignals.Count; index++)
+                                {
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@companyProfile.CulturalSignals[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveCompanyProfileItemAsync(CompanyProfileEditableField.CulturalSignals, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
                                 }
                             </ul>
                         </div>
@@ -262,10 +354,14 @@ else
                     {
                         <div>
                             <div class="field-label">Differentiators</div>
-                            <ul class="feature-list compact-list">
-                                @foreach (var differentiator in companyProfile.Differentiators)
+                            <ul class="feature-list compact-list editable-list">
+                                @for (var index = 0; index < companyProfile.Differentiators.Count; index++)
                                 {
-                                    <li>@differentiator</li>
+                                    var currentIndex = index;
+                                    <li class="editable-list-item">
+                                        <span>@companyProfile.Differentiators[index]</span>
+                                        <button type="button" class="link-button" @onclick="() => RemoveCompanyProfileItemAsync(CompanyProfileEditableField.Differentiators, currentIndex)" disabled="@(isBusy || isBatchRunning)">Remove</button>
+                                    </li>
                                 }
                             </ul>
                         </div>
@@ -1210,6 +1306,42 @@ else if (CanRunFitReview)
             ContactCity = contactCity
         });
 
+    private Task RemoveJobPostingItemAsync(JobPostingEditableField field, int index)
+    {
+        errorMessage = null;
+
+        try
+        {
+            Workspace.RemoveJobSetJobPostingItem(JobSetId!, field, index);
+            SyncFromWorkspace();
+            Operations.Info("Fit review inputs updated.", "The next fit review run will use the edited job context.");
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task RemoveCompanyProfileItemAsync(CompanyProfileEditableField field, int index)
+    {
+        errorMessage = null;
+
+        try
+        {
+            Workspace.RemoveJobSetCompanyProfileItem(JobSetId!, field, index);
+            SyncFromWorkspace();
+            Operations.Info("Fit review inputs updated.", "The next fit review run will use the edited company context.");
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
     private PersonalContactInfo? BuildCurrentPersonalContact()
     {
         var contact = new PersonalContactInfo(contactEmail, contactPhone, contactLinkedIn, contactCity);
@@ -1642,7 +1774,7 @@ else if (CanRunFitReview)
             var refreshed = await Operations.RunAsync(
                 RefreshFitReviewMessage,
                 CurrentJobSet.Title,
-                () => Task.FromResult(JobFitWorkspaceRefreshService.RefreshJobSet(JobSetId!)));
+                () => Task.FromResult(JobFitWorkspaceRefreshService.RefreshJobSet(JobSetId!, resetSelections: true)));
 
             if (!refreshed)
             {
@@ -1669,7 +1801,7 @@ else if (CanRunFitReview)
                     default);
 
                 Workspace.SetJobSetJobFitAssessment(JobSetId!, enhanced);
-                JobFitWorkspaceRefreshService.RefreshJobSetEvidence(JobSetId!);
+                JobFitWorkspaceRefreshService.RefreshJobSetEvidence(JobSetId!, resetSelections: true);
 
                 if (enhanced.IsLlmEnhanced)
                 {
@@ -2010,6 +2142,23 @@ else if (CanRunFitReview)
         if (requirement.SourceConfidence is not null)
         {
             segments.Add($"{requirement.SourceConfidence}% confidence");
+        }
+
+        return segments.Count == 0 ? "Source-backed extraction" : string.Join(" · ", segments);
+    }
+
+    private static string FormatSignalSource(JobContextSignal signal)
+    {
+        var segments = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(signal.SourceLabel))
+        {
+            segments.Add(signal.SourceLabel);
+        }
+
+        if (signal.Confidence > 0)
+        {
+            segments.Add($"{signal.Confidence}% confidence");
         }
 
         return segments.Count == 0 ? "Source-backed extraction" : string.Join(" · ", segments);
