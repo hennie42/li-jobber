@@ -77,7 +77,6 @@ public sealed class MarkdownDocumentRendererTests
         Assert.Contains("> *\"", result.Markdown);
         Assert.Contains("Jane Smith", result.Markdown);
         Assert.Contains("Lars Madsen", result.Markdown);
-        Assert.Null(result.AtsSnapshot);
     }
 
     [Fact]
@@ -435,32 +434,6 @@ public sealed class MarkdownDocumentRendererTests
         Assert.DoesNotContain("Applicant Angle", result.Markdown);
         Assert.DoesNotContain("Cloud architecture leadership", result.Markdown);
         Assert.DoesNotContain("Lead Architect @ Contoso", result.Markdown);
-        Assert.Null(result.AtsSnapshot);
-    }
-
-    [Fact]
-    public async Task RenderAsync_Cv_AttachesAtsSnapshotForCv()
-    {
-        var renderer = new MarkdownDocumentRenderer();
-        var request = BuildCvRequest(mustHaveThemes: ["Azure", "Kubernetes"]);
-        var withContact = request with
-        {
-            PersonalContact = new PersonalContactInfo(
-                Email: "alex.taylor@example.com",
-                Phone: "+45 00 00 00 00",
-                LinkedInUrl: "https://www.linkedin.com/in/alex-taylor-demo",
-                City: "Aarhus")
-        };
-
-        var result = await renderer.RenderAsync(withContact);
-
-        Assert.NotNull(result.AtsSnapshot);
-        Assert.Equal("Alex Taylor", result.AtsSnapshot!.FullName);
-        Assert.Equal("Lead Cloud Architect", result.AtsSnapshot.TargetRoleTitle);
-        Assert.Equal("Northwind Traders", result.AtsSnapshot.TargetCompanyName);
-        Assert.Contains("Azure", result.AtsSnapshot.MustHaveThemes);
-        Assert.Equal("alex.taylor@example.com", result.AtsSnapshot.Contact?.Email);
-        Assert.Equal("Aarhus", result.AtsSnapshot.Contact?.City);
     }
 
     [Fact]

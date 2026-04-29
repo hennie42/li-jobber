@@ -4,7 +4,6 @@ using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Core.Documents;
-using LiCvWriter.Core.Profiles;
 using LiCvWriter.Infrastructure.Documents;
 
 namespace LiCvWriter.Tests.Infrastructure;
@@ -61,6 +60,52 @@ External leaders consistently describe Alex as a pragmatic architecture partner.
 > *"Alex consistently turns complex cloud goals into useful delivery plans."*
 > — Jane Smith at Contoso, CTO
 """;
+
+    private static void AssertVisibleContentOnlyPackage(string filePath, params string[] disallowedCorePropertiesText)
+    {
+        using (var archive = ZipFile.OpenRead(filePath))
+        {
+            Assert.DoesNotContain(archive.Entries,
+                static entry => entry.FullName.StartsWith("customXml/", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(archive.Entries, static entry => IsDisallowedHiddenPart(entry.FullName));
+
+            foreach (var relationshipEntry in archive.Entries.Where(static entry => entry.FullName.EndsWith(".rels", StringComparison.OrdinalIgnoreCase)))
+            {
+                var relationshipsXml = ReadEntry(relationshipEntry);
+                Assert.DoesNotContain("TargetMode=\"External\"", relationshipsXml, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("TargetMode='External'", relationshipsXml, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var corePropertiesEntry = archive.GetEntry("docProps/core.xml");
+            if (corePropertiesEntry is not null)
+            {
+                var corePropertiesXml = ReadEntry(corePropertiesEntry);
+                Assert.DoesNotContain("<cp:keywords", corePropertiesXml, StringComparison.OrdinalIgnoreCase);
+
+                foreach (var disallowed in disallowedCorePropertiesText.Where(static value => !string.IsNullOrWhiteSpace(value)))
+                {
+                    Assert.DoesNotContain(disallowed, corePropertiesXml, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+
+        using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
+        Assert.Empty(wordDoc.MainDocumentPart!.CustomXmlParts);
+    }
+
+    private static bool IsDisallowedHiddenPart(string fullName)
+        => fullName.Contains("vbaProject", StringComparison.OrdinalIgnoreCase)
+            || fullName.Contains("/embeddings/", StringComparison.OrdinalIgnoreCase)
+            || fullName.Contains("oleObject", StringComparison.OrdinalIgnoreCase)
+            || fullName.Contains("/activeX/", StringComparison.OrdinalIgnoreCase)
+            || fullName.Contains("afchunk", StringComparison.OrdinalIgnoreCase);
+
+    private static string ReadEntry(ZipArchiveEntry entry)
+    {
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 
     [Fact]
     public async Task ExportAsync_WritesOnlyDocxFile()
@@ -221,6 +266,8 @@ External leaders consistently describe Alex as a pragmatic architecture partner.
             var filePath = result.FilePath;
 
             Assert.True(File.Exists(filePath));
+            AssertVisibleContentOnlyPackage(filePath, "Alex Taylor", "alex.taylor@example.com", "Lead Architect", "Contoso");
+
             using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
@@ -276,6 +323,8 @@ External leaders consistently describe Alex as a pragmatic architecture partner.
             var filePath = result.FilePath;
 
             Assert.True(File.Exists(filePath));
+            AssertVisibleContentOnlyPackage(filePath, "Alex Taylor", "alex.taylor@example.com", "Lead Architect", "Contoso", "Jane Smith");
+
             using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
             var mainPart = wordDoc.MainDocumentPart;
             Assert.NotNull(mainPart);
@@ -538,28 +587,6 @@ Danish — Native, English — Professional
 - Junior Engineer | LegacyCorp (2004-2007)
 """;
 
-    private static AtsCandidateSnapshot BuildSnapshot() =>
-        new(
-            FullName: "Alex Taylor",
-            Headline: "Senior Architect",
-            Contact: new PersonalContactInfo(
-                Email: "alex.taylor@example.com",
-                Phone: "+45 00 00 00 00",
-                LinkedInUrl: "https://www.linkedin.com/in/alex-taylor-demo",
-                City: "Aarhus"),
-            TargetRoleTitle: "Lead Architect",
-            TargetCompanyName: "Contoso",
-            Skills: ["Azure", ".NET", "Kubernetes"],
-            MustHaveThemes: ["Azure", "Kubernetes"],
-            Experience: [new AtsExperienceEntry("Lead Architect", "Contoso", "2020-2024")],
-            Education: [new AtsEducationEntry("MSc Computer Science", "Aarhus University", "2008-2010")],
-            Certifications: ["Azure Solutions Architect Expert"],
-            Languages:
-            [
-                new LanguageProficiency("Danish", "Native"),
-                new LanguageProficiency("English", "Professional")
-            ]);
-
     [Fact]
     public async Task ExportAsync_CvKind_PopulatesAllSectionTags()
     {
@@ -569,8 +596,7 @@ Danish — Native, English — Professional
         {
             var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
             var document = new GeneratedDocument(
-                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
-                AtsSnapshot: BuildSnapshot());
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
 
             var result = await service.ExportAsync(document);
 
@@ -717,7 +743,7 @@ Danish — Native, English — Professional
     }
 
     [Fact]
-    public async Task ExportAsync_CvKind_EmitsCustomXmlCandidateData()
+    public async Task ExportAsync_CvKind_UsesVisibleContentOnlyPackage()
     {
         var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
 
@@ -725,44 +751,23 @@ Danish — Native, English — Professional
         {
             var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
             var document = new GeneratedDocument(
-                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
-                AtsSnapshot: BuildSnapshot());
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
 
             var result = await service.ExportAsync(document);
 
-            using var wordDoc = WordprocessingDocument.Open(result.FilePath!, isEditable: false);
-            var customXmlParts = wordDoc.MainDocumentPart!.CustomXmlParts.ToArray();
-            Assert.NotEmpty(customXmlParts);
-
-            string? candidateDataXml = null;
-            foreach (var part in customXmlParts)
-            {
-                using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
-                using var reader = new StreamReader(stream);
-                var content = reader.ReadToEnd();
-                if (content.Contains("candidateData", StringComparison.Ordinal))
-                {
-                    candidateDataXml = content;
-                    break;
-                }
-            }
-
-            Assert.NotNull(candidateDataXml);
-            Assert.Contains("urn:licvwriter:cv:v1", candidateDataXml);
-            Assert.Contains("<name", candidateDataXml);
-            Assert.Contains("Alex Taylor", candidateDataXml);
-            Assert.Contains("alex.taylor@example.com", candidateDataXml);
-            Assert.Contains("Aarhus University", candidateDataXml);
-            Assert.Contains("<skills", candidateDataXml);
-            Assert.Contains("Azure", candidateDataXml);
-            Assert.Contains("<languages", candidateDataXml);
-            Assert.Contains("Danish", candidateDataXml);
-
-            // Public-safe: must not leak internal assessment data.
-            Assert.DoesNotContain("overallScore", candidateDataXml);
-            Assert.DoesNotContain("gaps", candidateDataXml);
-            Assert.DoesNotContain("model", candidateDataXml);
-            Assert.DoesNotContain("fit", candidateDataXml, StringComparison.OrdinalIgnoreCase);
+            AssertVisibleContentOnlyPackage(
+                result.FilePath!,
+                "Alex Taylor",
+                "alex.taylor@example.com",
+                "+45 00 00 00 00",
+                "alex-taylor-demo",
+                "Aarhus",
+                "Lead Architect",
+                "Contoso",
+                "Azure",
+                "Kubernetes",
+                "candidateData",
+                "urn:licvwriter:cv:v1");
         }
         finally
         {
@@ -779,8 +784,7 @@ Danish — Native, English — Professional
         {
             var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
             var document = new GeneratedDocument(
-                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow,
-                AtsSnapshot: BuildSnapshot());
+                DocumentKind.Cv, "Alex Taylor CV", FullCvMarkdown, "Alex Taylor", DateTimeOffset.UtcNow);
 
             var result = await service.ExportAsync(document);
 

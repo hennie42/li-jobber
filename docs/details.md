@@ -786,6 +786,8 @@ Standalone recommendation documents annotate each quote with translation context
 
 CV documents are exported through a template-based pipeline using an embedded `.dotx` template with named content controls. Recommendations use a dedicated recommendations `.dotx` template, while cover letters, profile summaries, and interview questions use the focused application-material `.dotx` template with the same content-control population and cleanup path.
 
+Exports follow a visible-content-only policy. DOCX remains a zipped OpenXML package internally, but LiCvWriter does not intentionally add hidden ATS XML, hidden candidate/job metadata, hidden keyword stuffing, macros, embedded objects, alt-chunks, or external relationships. ATS and AI readability improvements must be present in the visible document body: headings, clean paragraphs/lists, flattened link text, and keyword lines the recipient can inspect.
+
 ### Template Architecture
 
 ```mermaid
@@ -867,6 +869,7 @@ For each mapping in `CvSectionMappings`:
 | Unwrap SDT blocks | `UnwrapAllSdtBlocks()` | Strips structured-document-tag wrappers — ATS parsers skip SDT-wrapped content |
 | Flatten hyperlinks | `FlattenHyperlinks()` | Converts hyperlink runs to plain text — ATS parsers often ignore or misread linked text |
 | Strip underlines | `StripUnderlines()` | Removes underline formatting that HtmlToOpenXml may add from HTML anchor elements |
+| Remove external relationships | `RemoveExternalRelationships()` | Deletes package relationships to external targets after visible hyperlink text has been flattened |
 
 ### ATS/AI Readability Design Decisions
 
@@ -876,8 +879,8 @@ For each mapping in `CvSectionMappings`:
 | Single-column layout with 0.6–0.75 inch margins | Multi-column and table-based layouts confuse most ATS parsers |
 | No tables for content layout | Tables are for data only; using them for layout breaks ATS reading order |
 | Standard section titles ("Professional Profile", "Professional Experience", etc.) | ATS parsers match against known section name patterns |
-| Calibri font throughout | Universal, clean, highly readable sans-serif |
-| Document metadata (title, subject) | Some ATS systems extract metadata for candidate identification |
+| Aptos with Calibri fallback | Clean modern default with stable fallback on older Office installs |
+| Visible-content-only package policy | Prevents hidden candidate/job data from being embedded outside the visible document body |
 | Keyword-rich profile line | Increases ATS keyword match rate for technology skills |
 | Hyperlinks flattened to plain text | Ensures linked text is readable by all ATS parsers |
 | SDT blocks unwrapped | ATS parsers may skip content inside structured document tags |
@@ -1101,6 +1104,7 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 - CV generation uses a wave-based approach (two parallel waves + optional refinement pass for must-have theme coverage).
 - CV, recommendations, and other non-CV documents use template-based export with named content controls; recommendations have a dedicated template and other non-CV documents use the focused application-material template.
 - All ATS-unfriendly artifacts (SDT blocks, hyperlinks, underlines) are post-processed away before final .docx output.
+- Exports are visible-content-only: no app-added hidden ATS XML, hidden candidate/job metadata, hidden keyword stuffing, macros, embedded objects, alt-chunks, or external relationships.
 - Repetition loop detection automatically aborts degenerate LLM streaming (configurable, default 500-char threshold).
 - Early career roles (end date before 2009) are rendered in compact format; ongoing roles are always modern.
 - Umbrella roles covering 3+ projects get inline client sub-items.

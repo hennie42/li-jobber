@@ -8,7 +8,7 @@ LI CV Writer is a local-first Blazor application that imports your LinkedIn prof
 
 The application walks a senior professional through a structured pipeline: establish a session with a local model, import the full LinkedIn member snapshot, optionally capture applicant differentiators (manually or from an Insights Discovery PDF), then open parallel job tabs where each target role gets its own research, fit review, evidence ranking, technology gap analysis, and multi-document generation. LLM-backed job-context analysis, fit enhancement, technology-gap analysis, refresh-all, and draft generation stream progress into the UI through a brokered SSE pipeline, with persistent sidebar reasoning and status monitors. The output is a set of ATS-friendly Word (.docx) and Markdown files ready for direct submission.
 
-No data leaves your machine. The LinkedIn token is used once for import and discarded, the LLM runs locally through Ollama, and all generated files are written to a local export folder. The application is designed as a productivity tool for senior consulting and technology professionals targeting roles where evidence-grounded, keyword-optimized application material makes a measurable difference.
+No data leaves your machine. The LinkedIn token is used once for import and discarded, the LLM runs locally through Ollama, and all generated files are written to a local export folder. Generated Word files follow a visible-content-only policy: the app does not intentionally add hidden ATS XML, hidden candidate/job metadata, macros, embedded objects, or external relationships. The application is designed as a productivity tool for senior consulting and technology professionals targeting roles where evidence-grounded, keyword-optimized application material makes a measurable difference.
 
 ## Tech Stack
 
@@ -19,7 +19,7 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 | LLM inference | Ollama (local, `http://localhost:11434`) |
 | Architecture | Domain-Driven Design — Core → Application → Infrastructure → Web |
 | Profile import | LinkedIn DMA Portability API (`r_dma_portability_self_serve`) or CSV data export |
-| Word export | Embedded .dotx template with OpenXml content controls, Markdig, HtmlToOpenXml — built-in heading styles, Calibri, single-column ATS layout |
+| Word export | Embedded .dotx template with OpenXml content controls, Markdig, HtmlToOpenXml — built-in heading styles, single-column ATS layout, visible-content-only cleanup |
 | Testing | xUnit (206 tests) |
 
 ## Key Features
@@ -30,7 +30,7 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 - **Ranked evidence selection** — interactive multi-criteria evidence ranking by requirement alignment, differentiator alignment, and recommendation strength
 - **Technology gap analysis** — surfaces underrepresented technologies from the target role
 - **Two-pass CV generation** — first pass generates experience highlights, refinement pass fills must-have theme gaps with grounded evidence, and CV output is kept to a maximum of four pages without recommendation quotes
-- **Template-based Word export** — embedded .dotx template with named content controls, ATS-friendly unwrapping, hyperlink flattening, and underline stripping
+- **Template-based Word export** — embedded .dotx template with named content controls, ATS-friendly unwrapping, hyperlink flattening, underline stripping, and visible-content-only package cleanup
 - **Early career separation** — roles ending before 2009 rendered in a compact "Early Career" section; modern roles get full detail with achievement bullets
 - **Umbrella role detection** — consulting roles covering 3+ projects shown with client sub-items inline
 - **Multi-document generation** — CV, cover letter, profile summary, recommendations, and interview questions per job tab
