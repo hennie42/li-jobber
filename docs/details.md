@@ -910,6 +910,8 @@ graph LR
 
 The full prompt surface inventory and quality matrix lives in [LLM Prompt Inventory And Quality Matrix](llm-prompt-inventory.md). Keep that document current when adding prompt surfaces, changing output contracts, or introducing prompt IDs/versions.
 
+The local prompt evaluation scaffold is described in [Local Prompt Eval Scaffold](llm-local-prompt-evals.md). It currently provides deterministic golden fixtures tied to `LlmPromptCatalog` prompt IDs without requiring live model calls.
+
 ### System Prompt (per DocumentKind)
 
 Each system prompt specifies:
