@@ -9,20 +9,24 @@ namespace LiCvWriter.Tests.Infrastructure;
 public sealed class ApplicationMaterialWordTemplateGeneratorTests
 {
     [Fact]
-    public void RegenerateEmbeddedApplicationMaterialTemplate()
+    public void Generate_CanCreateEmbeddedApplicationMaterialTemplateCandidate()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "LiCvWriter.sln")))
+        var templatePath = Path.Combine(
+            Path.GetTempPath(),
+            $"licvwriter-embedded-application-template-{Guid.NewGuid():N}.dotx");
+
+        try
         {
-            dir = dir.Parent;
+            ApplicationMaterialWordTemplateGenerator.Generate(templatePath);
+            Assert.True(File.Exists(templatePath));
         }
-
-        Assert.NotNull(dir);
-        var templatePath = Path.Combine(dir.FullName,
-            "src", "LiCvWriter.Infrastructure", "Documents", "Templates", "application-material-template.dotx");
-
-        ApplicationMaterialWordTemplateGenerator.Generate(templatePath);
-        Assert.True(File.Exists(templatePath));
+        finally
+        {
+            if (File.Exists(templatePath))
+            {
+                File.Delete(templatePath);
+            }
+        }
     }
 
     [Fact]

@@ -9,20 +9,24 @@ namespace LiCvWriter.Tests.Infrastructure;
 public sealed class RecommendationsWordTemplateGeneratorTests
 {
     [Fact]
-    public void RegenerateEmbeddedRecommendationsTemplate()
+    public void Generate_CanCreateEmbeddedRecommendationsTemplateCandidate()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "LiCvWriter.sln")))
+        var templatePath = Path.Combine(
+            Path.GetTempPath(),
+            $"licvwriter-embedded-recommendations-template-{Guid.NewGuid():N}.dotx");
+
+        try
         {
-            dir = dir.Parent;
+            RecommendationsWordTemplateGenerator.Generate(templatePath);
+            Assert.True(File.Exists(templatePath));
         }
-
-        Assert.NotNull(dir);
-        var templatePath = Path.Combine(dir.FullName,
-            "src", "LiCvWriter.Infrastructure", "Documents", "Templates", "recommendations-template.dotx");
-
-        RecommendationsWordTemplateGenerator.Generate(templatePath);
-        Assert.True(File.Exists(templatePath));
+        finally
+        {
+            if (File.Exists(templatePath))
+            {
+                File.Delete(templatePath);
+            }
+        }
     }
 
     [Fact]
