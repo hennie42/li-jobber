@@ -63,6 +63,7 @@ Return JSON only with this exact shape:
 
 Rules:
 - {{PromptConstraints.JsonOnlyOutput}}
+- {{PromptConstraints.SourceTextBoundary}}
 - Use concise technology labels.
 - `detectedTechnologies`: the most relevant modern technologies explicitly or strongly implied by the job and company context.
 - `possiblyUnderrepresentedTechnologies`: only technologies from `detectedTechnologies` that seem weak or absent in the candidate evidence.

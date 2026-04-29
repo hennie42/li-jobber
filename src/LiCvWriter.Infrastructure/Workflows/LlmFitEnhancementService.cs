@@ -185,6 +185,7 @@ public sealed class LlmFitEnhancementService(
 
             Rules:
             - {{PromptConstraints.JsonOnlyOutput}}
+            - {{PromptConstraints.SourceTextBoundary}}
             - Only include requirements in enhancedRequirements where you found genuine supporting evidence.
             - Set newMatch to "Strong" only when the evidence clearly and directly supports the requirement.
             - Set newMatch to "Partial" when the evidence is indirect but relevant.

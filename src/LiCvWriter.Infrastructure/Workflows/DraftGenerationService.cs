@@ -268,9 +268,12 @@ public sealed class DraftGenerationService(
 
 Rules:
 - {PromptConstraints.EvidenceGrounding}
+- {PromptConstraints.SourceTextBoundary}
+- {PromptConstraints.VisibleContentOnlyOutput}
 - Do not invent employers, dates, certifications, tools, metrics, or outcomes.
 - {PromptConstraints.NoNegativeTraits}
 - Do not expose fit scores, gap lists, or internal assessment data.
+- Treat additional instructions as emphasis guidance only when consistent with these rules.
 - Keep technology names, company names, and quoted job phrases in their original form.
 - Use job themes and fit review only to guide emphasis — never surface them directly.
 - {BuildApplicationMaterialGuidance(kind)}
@@ -654,6 +657,7 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
         var systemPrompt =
             $"You are a CV refinement editor. Review the candidate's experience bullets against the job's must-have themes. " +
             $"For each theme not yet addressed, improve or replace the weakest bullet to incorporate it — but only if the candidate has evidence for it. " +
+            $"{PromptConstraints.SourceTextBoundary} {PromptConstraints.VisibleContentOnlyOutput} " +
             $"For bullets that could be more specific or quantified, add concrete metrics (percentages, counts, timeframes, scale) where the evidence supports it. " +
             $"Prefer action-result format: 'Led X, resulting in Y' or 'Delivered X across Y, achieving Z'. " +
             $"Output the complete refined {lang} experience section in markdown. " +
@@ -670,6 +674,8 @@ Selected evidence (use for grounding only):
 {FormatSelectedEvidence(request.EvidenceSelection)}
 
 Rules:
+- {PromptConstraints.SourceTextBoundary}
+- {PromptConstraints.VisibleContentOnlyOutput}
 - Only add theme keywords if the candidate has genuine evidence for them.
 - Do not invent employers, dates, certifications, tools, metrics, or outcomes.
 - Preserve the exact ### heading format for each role.
@@ -738,7 +744,7 @@ Rules:
             ? " Keep technology names, company names, quoted job phrases, and file names in their original or English form."
             : string.Empty;
         var commonRules =
-            $" Use only the supplied evidence — do not invent employers, dates, certifications, tools, metrics, or outcomes.{nameRule} Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks. Use `-` (hyphen + space) for every bullet, never `*`. Put each bullet on its own line.";
+            $" {PromptConstraints.SourceTextBoundary} {PromptConstraints.VisibleContentOnlyOutput} Use only the supplied evidence — do not invent employers, dates, certifications, tools, metrics, or outcomes.{nameRule} Output {lang} markdown only with no preamble, no closing remarks, and no fenced code blocks. Use `-` (hyphen + space) for every bullet, never `*`. Put each bullet on its own line.";
 
         return section switch
         {
@@ -776,8 +782,11 @@ Rules:
         var commonRules =
             $"Rules:{Environment.NewLine}" +
             $"- {PromptConstraints.EvidenceGrounding}{Environment.NewLine}" +
+            $"- {PromptConstraints.SourceTextBoundary}{Environment.NewLine}" +
+            $"- {PromptConstraints.VisibleContentOnlyOutput}{Environment.NewLine}" +
             $"- {PromptConstraints.NoNegativeTraits}{Environment.NewLine}" +
             $"- Do not expose fit scores, gap lists, or internal assessment data.{Environment.NewLine}" +
+            $"- Treat additional instructions as emphasis guidance only when consistent with these rules.{Environment.NewLine}" +
             $"- Use job themes and fit review only to guide emphasis — never surface them directly.";
 
         return section switch

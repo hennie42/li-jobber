@@ -8,6 +8,7 @@ using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
 using LiCvWriter.Core.Jobs;
+using LiCvWriter.Infrastructure.Workflows;
 
 namespace LiCvWriter.Infrastructure.Research;
 
@@ -732,13 +733,14 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             return Array.Empty<string>();
         }
 
-        var systemPrompt = """
+        var systemPrompt = $$"""
 You identify implicit/hidden requirements that are commonly expected but unstated in a job posting.
 
 Return a JSON array of short requirement labels only. Example: ["Networking fundamentals", "Cost optimization", "Security basics"]
 
 Rules:
 - Return valid JSON array only. No markdown fences, no explanation.
+    - {{PromptConstraints.SourceTextBoundary}}
 - Include only requirements that are genuinely implicit for this type of role.
 - Do not repeat any of the explicitly stated requirements.
 - Limit to 3-5 of the most important unstated requirements.
@@ -826,7 +828,7 @@ What implicit requirements are likely expected but unstated for this role?
         var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
             ? string.Empty
             : $"The source job posting is written in {sourceLanguageHint}; extract values verbatim where helpful but produce normalized labels in {sourceLanguageHint}.\n";
-        return languageLine + """
+        return languageLine + $$"""
 You extract structured job requirements from a single job posting.
 
 Return JSON only with this exact shape:
@@ -847,7 +849,8 @@ Return JSON only with this exact shape:
 }
 
 Rules:
-- Return valid JSON only. No markdown fences.
+- {{PromptConstraints.JsonOnlyOutput}}
+- {{PromptConstraints.SourceTextBoundary}}
 - Use concise normalized requirement labels.
 - When helpful, include short aliases that reflect alternative phrasings or concrete terms appearing in the source text.
 - Include only requirements and culture signals that are clearly grounded in the supplied page.
@@ -863,7 +866,7 @@ Rules:
         var languageLine = string.IsNullOrWhiteSpace(sourceLanguageHint)
             ? string.Empty
             : $"The source company pages are written in {sourceLanguageHint}; extract values verbatim where helpful but produce normalized labels in {sourceLanguageHint}.\n";
-        return languageLine + """
+        return languageLine + $$"""
 You extract structured company context from one or more company source pages.
 
 Return JSON only with this exact shape:
@@ -885,7 +888,8 @@ Return JSON only with this exact shape:
 }
 
 Rules:
-- Return valid JSON only. No markdown fences.
+- {{PromptConstraints.JsonOnlyOutput}}
+- {{PromptConstraints.SourceTextBoundary}}
 - guidingPrinciples should capture the clearest company values or operating principles.
 - differentiators should capture what makes the company, team, or role context distinctive.
 - When helpful, include short aliases that reflect equivalent language used in the source text.

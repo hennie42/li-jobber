@@ -100,6 +100,7 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
         builder.AppendLine();
         builder.AppendLine("Rules:");
         builder.AppendLine($"- {PromptConstraints.JsonOnlyOutput}");
+        builder.AppendLine($"- {PromptConstraints.SourceTextBoundary}");
         builder.AppendLine("- Use concise, reusable job-search language.");
         builder.AppendLine("- Prefer 1-3 short sentences per field.");
         builder.AppendLine("- Generalize the source instead of copying raw assessment text verbatim.");
