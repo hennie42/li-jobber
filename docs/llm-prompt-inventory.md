@@ -44,7 +44,7 @@ Risk ratings:
 3. Hidden requirement inference needs a stricter separation between inferred expectations and source-backed requirements.
 4. CV section generation is already chunked by section, but it lacks an explicit shared outline and claim/evidence ledger.
 5. Prompt snapshots now include prompt IDs and semantic versions through `LlmPromptCatalog`; future work should add changelog notes when versions increment.
-6. Local golden eval fixtures now exist as deterministic test scaffolding; a live local Ollama runner still needs to be added.
+6. Local golden eval fixtures and deterministic string/rule scoring now exist as test scaffolding; a live local Ollama runner still needs to be added.
 
 ## Phase Order
 
@@ -53,4 +53,4 @@ Risk ratings:
 3. Harden fit enhancement, technology gap, and Insights differentiator prompts.
 4. Harden draft-generation prompts and visible-only output wording.
 5. Design outline-first CV chunking with evidence ledger and final harmonization.
-6. Add local golden eval fixtures and rubric output. Fixture scaffold exists in `tests/LiCvWriter.Tests/PromptEvals`; rubric runner remains pending.
+6. Add local golden eval fixtures and rubric output. Fixture and deterministic scorer scaffolding exist in `tests/LiCvWriter.Tests/PromptEvals`; live Ollama runner remains pending.

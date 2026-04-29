@@ -43,9 +43,18 @@ The catalog currently covers all production prompt IDs:
 
 These tests do not judge model quality yet. They keep the local eval dataset from silently shrinking while prompt work continues.
 
+`PromptEvalScorer` adds deterministic scoring for candidate outputs. It checks:
+
+- schema validity, supplied by the future runner,
+- visible-only compliance, supplied by the future runner,
+- missing expected signals,
+- forbidden strings that leaked into output.
+
+The scorer returns a pass/fail result plus the missing and leaked strings so a local runner can print actionable rubric output.
+
 ## Future Runner
 
-A later local runner can execute fixtures against a selected Ollama model and score outputs with the same rubric used by the inventory:
+A later local runner can execute fixtures against a selected Ollama model and feed outputs into `PromptEvalScorer` with the same rubric used by the inventory:
 
 | Dimension | Deterministic Check |
 | --- | --- |
