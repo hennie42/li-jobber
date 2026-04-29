@@ -677,6 +677,8 @@ sequenceDiagram
 
 The CV generation uses a wave-based approach with an optional refinement pass:
 
+The next-step design for making this outline-first, source-led, and claim-auditable lives in [Outline-First Chunked CV Generation Design](llm-cv-chunking-design.md). That design keeps the current renderer/export policy intact and adds a planning contract before section generation.
+
 **Wave 1** (parallel): `ProfileSummary`, `KeySkills` — short, context-setting sections.
 
 **Wave 2** (parallel): `ExperienceHighlights`, `ProjectHighlights` — longer, content-rich sections requiring deeper LLM reasoning.
