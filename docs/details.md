@@ -906,6 +906,8 @@ graph LR
 
 `DraftGenerationService` constructs a system prompt and a user prompt per document kind.
 
+The full prompt surface inventory and quality matrix lives in [LLM Prompt Inventory And Quality Matrix](llm-prompt-inventory.md). Keep that document current when adding prompt surfaces, changing output contracts, or introducing prompt IDs/versions.
+
 ### System Prompt (per DocumentKind)
 
 Each system prompt specifies:
