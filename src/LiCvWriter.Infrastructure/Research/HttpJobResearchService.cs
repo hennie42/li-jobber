@@ -76,7 +76,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
                 NumPredict: ExtractionNumPredict,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.JobExtractJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -141,7 +143,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
                 NumPredict: ExtractionNumPredict,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.CompanyExtractJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -180,7 +184,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
                 NumPredict: ExtractionNumPredict,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.JobExtractJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing job posting",
@@ -217,7 +223,9 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
                 NumPredict: ExtractionNumPredict,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.CompanyExtractJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             progress is null ? null : update => progress(update with
             {
                 Message = "Parsing company context",
@@ -768,7 +776,9 @@ What implicit requirements are likely expected but unstated for this role?
                     KeepAlive: ollamaOptions.KeepAlive,
                     Temperature: 0.0,
                     NumPredict: InferenceNumPredict,
-                    ResponseFormat: LlmResponseFormat.Json),
+                    ResponseFormat: LlmResponseFormat.Json,
+                    PromptId: LlmPromptCatalog.HiddenRequirementsJson,
+                    PromptVersion: LlmPromptCatalog.Version1),
                 progress is null ? null : update => progress(update with
                 {
                     Message = "Inferring hidden requirements",

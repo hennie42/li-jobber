@@ -46,10 +46,12 @@ public sealed class PromptCapturingLlmClient(ILlmClient inner) : ILlmClient
         lock (gate)
         {
             capturedPrompts.Enqueue(new LlmPromptSnapshot(
-                operationLabel ?? TruncateSystemPrompt(request.SystemPrompt),
+                operationLabel ?? BuildOperationLabel(request),
                 request.SystemPrompt ?? string.Empty,
                 FormatUserMessages(request.Messages),
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                request.PromptId,
+                request.PromptVersion));
 
             while (capturedPrompts.Count > MaxCapturedPrompts)
             {
@@ -85,6 +87,18 @@ public sealed class PromptCapturingLlmClient(ILlmClient inner) : ILlmClient
         return firstLine.Length > 80
             ? $"{firstLine[..77]}..."
             : firstLine.ToString();
+    }
+
+    private static string BuildOperationLabel(LlmRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.PromptId))
+        {
+            return TruncateSystemPrompt(request.SystemPrompt);
+        }
+
+        return string.IsNullOrWhiteSpace(request.PromptVersion)
+            ? request.PromptId
+            : $"{request.PromptId} v{request.PromptVersion}";
     }
 
     private static string FormatUserMessages(IReadOnlyList<LlmChatMessage> messages)

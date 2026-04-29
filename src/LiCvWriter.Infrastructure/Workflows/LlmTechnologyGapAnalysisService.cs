@@ -33,7 +33,9 @@ public sealed class LlmTechnologyGapAnalysisService(ILlmClient llmClient, Ollama
                 Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.TechGapJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             ParseAssessment,
             progress is null ? null : update => progress(update with
             {

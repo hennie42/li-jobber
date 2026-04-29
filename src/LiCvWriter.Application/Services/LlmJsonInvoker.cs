@@ -53,7 +53,9 @@ public sealed class LlmJsonInvoker(ILlmClient llmClient)
             Temperature: 0.0,
             NumPredict: request.NumPredict,
             NumCtx: request.NumCtx,
-            ResponseFormat: request.ResponseFormat ?? LlmResponseFormat.Json);
+            ResponseFormat: request.ResponseFormat ?? LlmResponseFormat.Json,
+            PromptId: LlmPromptCatalog.JsonRepair,
+            PromptVersion: LlmPromptCatalog.Version1);
 
         var repairResponse = await llmClient.GenerateAsync(repairRequest, progress: null, cancellationToken);
         attempts.Add(new("repair", repairResponse.Content));

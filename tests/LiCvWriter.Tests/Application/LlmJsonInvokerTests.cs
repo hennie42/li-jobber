@@ -67,6 +67,8 @@ public sealed class LlmJsonInvokerTests
         Assert.Equal(3, result.Attempts.Count);
         Assert.Equal("repair", result.Attempts[2].Stage);
         Assert.Equal(2, stub.Calls);
+        Assert.Equal(LlmPromptCatalog.JsonRepair, stub.Requests[1].PromptId);
+        Assert.Equal(LlmPromptCatalog.Version1, stub.Requests[1].PromptVersion);
     }
 
     [Fact]
@@ -106,6 +108,7 @@ public sealed class LlmJsonInvokerTests
     private sealed class StubLlmClient(Queue<string> responses) : ILlmClient
     {
         public int Calls { get; private set; }
+        public List<LlmRequest> Requests { get; } = [];
 
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -113,6 +116,7 @@ public sealed class LlmJsonInvokerTests
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {
             Calls++;
+            Requests.Add(request);
             var content = responses.Count > 0 ? responses.Dequeue() : string.Empty;
             return Task.FromResult(new LlmResponse(
                 Model: request.Model,

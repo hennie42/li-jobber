@@ -25,6 +25,24 @@ public sealed class PromptCapturingLlmClientTests
         Assert.Contains(client.CapturedPrompts, prompt => string.Equals(prompt.SystemPrompt, "System prompt 25", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task GenerateAsync_WhenPromptMetadataIsPresent_CapturesIdAndVersion()
+    {
+        var client = new PromptCapturingLlmClient(new StubLlmClient());
+
+        await client.GenerateAsync(new LlmRequest(
+            "model",
+            "System prompt",
+            [new LlmChatMessage("user", "User prompt")],
+            PromptId: LlmPromptCatalog.JobExtractJson,
+            PromptVersion: LlmPromptCatalog.Version1));
+
+        var snapshot = Assert.Single(client.CapturedPrompts);
+        Assert.Equal(LlmPromptCatalog.JobExtractJson, snapshot.PromptId);
+        Assert.Equal(LlmPromptCatalog.Version1, snapshot.PromptVersion);
+        Assert.Equal($"{LlmPromptCatalog.JobExtractJson} v{LlmPromptCatalog.Version1}", snapshot.OperationLabel);
+    }
+
     private sealed class StubLlmClient : ILlmClient
     {
         public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)

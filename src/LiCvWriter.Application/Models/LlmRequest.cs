@@ -11,4 +11,6 @@ public sealed record LlmRequest(
     double? Temperature = null,
     int? NumPredict = null,
     int? NumCtx = null,
-    LlmResponseFormat? ResponseFormat = null);
+    LlmResponseFormat? ResponseFormat = null,
+    string? PromptId = null,
+    string? PromptVersion = null);

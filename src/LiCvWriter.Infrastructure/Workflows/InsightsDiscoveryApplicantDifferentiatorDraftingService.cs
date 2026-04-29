@@ -37,7 +37,9 @@ public sealed class InsightsDiscoveryApplicantDifferentiatorDraftingService(ILlm
                 Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
                 Temperature: 0.0,
-                ResponseFormat: LlmResponseFormat.Json),
+                ResponseFormat: LlmResponseFormat.Json,
+                PromptId: LlmPromptCatalog.InsightsDifferentiatorsJson,
+                PromptVersion: LlmPromptCatalog.Version1),
             ParseDifferentiator,
             progress is null ? null : update => progress(update with
             {

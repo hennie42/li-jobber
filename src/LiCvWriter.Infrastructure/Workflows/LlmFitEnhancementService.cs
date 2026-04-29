@@ -58,7 +58,9 @@ public sealed class LlmFitEnhancementService(
                     Think: string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel,
                     KeepAlive: ollamaOptions.KeepAlive,
                     Temperature: 0.0,
-                    ResponseFormat: LlmResponseFormat.Json),
+                    ResponseFormat: LlmResponseFormat.Json,
+                    PromptId: LlmPromptCatalog.FitEnhanceJson,
+                    PromptVersion: LlmPromptCatalog.Version1),
                 ParseEnhancement,
                 progress is null ? null : update => progress(update with
                 {

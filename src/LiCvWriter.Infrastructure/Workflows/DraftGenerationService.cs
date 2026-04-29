@@ -61,7 +61,9 @@ public sealed class DraftGenerationService(
                     Stream: true,
                     Think: selectedThinkingLevel,
                     KeepAlive: ollamaOptions.KeepAlive,
-                    Temperature: ollamaOptions.Temperature),
+                    Temperature: ollamaOptions.Temperature,
+                    PromptId: LlmPromptCatalog.DraftDocumentMarkdown,
+                    PromptVersion: LlmPromptCatalog.Version1),
                     progress is null ? null : update => progress(PrefixProgress(kind, update)),
                     cancellationToken);
 
@@ -608,7 +610,9 @@ Client engagements during consulting/freelance roles (list the most relevant 3-5
                 Stream: true,
                 Think: selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: ollamaOptions.Temperature),
+                Temperature: ollamaOptions.Temperature,
+                PromptId: LlmPromptCatalog.CvSectionsMarkdown,
+                PromptVersion: LlmPromptCatalog.Version1),
                 progress is null ? null : update => progress(PrefixCvSectionProgress(sectionLabel, update)),
                 cancellationToken);
 
@@ -694,7 +698,9 @@ Rules:
                 Stream: true,
                 Think: selectedThinkingLevel,
                 KeepAlive: ollamaOptions.KeepAlive,
-                Temperature: ollamaOptions.Temperature),
+                Temperature: ollamaOptions.Temperature,
+                PromptId: LlmPromptCatalog.CvRefineMarkdown,
+                PromptVersion: LlmPromptCatalog.Version1),
                 progress is null ? null : update => progress(PrefixCvSectionProgress(sectionLabel, update)),
                 cancellationToken);
 
