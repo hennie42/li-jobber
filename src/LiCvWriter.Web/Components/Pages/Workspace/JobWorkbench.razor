@@ -44,6 +44,7 @@
             <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
             <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
             <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Summary</label>
+            <label><input type="checkbox" @bind="generateRecommendations" @bind:after="PersistDraftGenerationPreferences" /> Recommendations</label>
             <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview questions</label>
         </div>
         <div class="button-row">
@@ -100,7 +101,7 @@ else
         </div>
         <div class="button-row">
             <button class="secondary-button" @onclick="RefreshAllAnalysisAsync" disabled="@(isBusy || !Workspace.IsLlmReady || isBatchRunning)">@(isRefreshingAll ? $"Refreshing {GetOperationElapsed()}" : "Refresh all elements")</button>
-            <button class="secondary-button" @onclick="DeleteThisJobSetAsync" disabled="@(isBusy || isBatchRunning || Workspace.JobSets.Count <= 1)">Delete this jobset</button>
+            <button class="secondary-button destructive-button" @onclick="DeleteThisJobSetAsync" disabled="@(isBusy || isBatchRunning || Workspace.JobSets.Count <= 1)">Delete this jobset</button>
         </div>
     </div>
 
@@ -612,6 +613,7 @@ else if (CanRunFitReview)
         <label><input type="checkbox" @bind="generateCv" @bind:after="PersistDraftGenerationPreferences" /> CV</label>
         <label><input type="checkbox" @bind="generateCoverLetter" @bind:after="PersistDraftGenerationPreferences" /> Cover letter</label>
         <label><input type="checkbox" @bind="generateSummary" @bind:after="PersistDraftGenerationPreferences" /> Profile summary</label>
+        <label><input type="checkbox" @bind="generateRecommendations" @bind:after="PersistDraftGenerationPreferences" /> Recommendations</label>
         <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview questions</label>
     </div>
 
@@ -770,6 +772,7 @@ else if (CanRunFitReview)
     private bool generateCv = true;
     private bool generateCoverLetter = true;
     private bool generateSummary = true;
+    private bool generateRecommendations = true;
     private bool generateInterviewNotes = true;
     private string? activeStreamOperationId;
     private LlmOperationSnapshot? activeStreamSnapshot;
@@ -1296,6 +1299,7 @@ else if (CanRunFitReview)
             GenerateCv = generateCv,
             GenerateCoverLetter = generateCoverLetter,
             GenerateSummary = generateSummary,
+            GenerateRecommendations = generateRecommendations,
             GenerateInterviewNotes = generateInterviewNotes,
             ContactEmail = contactEmail,
             ContactPhone = contactPhone,
@@ -1351,6 +1355,7 @@ else if (CanRunFitReview)
         generateCv = preferences.GenerateCv;
         generateCoverLetter = preferences.GenerateCoverLetter;
         generateSummary = preferences.GenerateSummary;
+        generateRecommendations = preferences.GenerateRecommendations;
         generateInterviewNotes = preferences.GenerateInterviewNotes;
         contactEmail = preferences.ContactEmail;
         contactPhone = preferences.ContactPhone;
@@ -1894,7 +1899,8 @@ else if (CanRunFitReview)
             return;
         }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete jobset \"{CurrentJobSet.Title}\"? This cannot be undone.");
+        var deletedTitle = CurrentJobSet.Title;
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete jobset \"{deletedTitle}\"? This cannot be undone.");
         if (!confirmed)
         {
             return;
@@ -1905,8 +1911,8 @@ else if (CanRunFitReview)
             Workspace.DeleteJobSet(JobSetId);
             errorMessage = null;
             ClearRetainedStreamState();
-            SyncFromWorkspace();
-            Navigation.NavigateTo("/workspace/job-workbench");
+            Operations.Success("Jobset deleted.", deletedTitle);
+            Navigation.NavigateTo("/workspace/job-workbench", replace: true);
         }
         catch (Exception exception)
         {
@@ -1999,6 +2005,11 @@ else if (CanRunFitReview)
         if (generateSummary)
         {
             kinds.Add(DocumentKind.ProfileSummary);
+        }
+
+        if (generateRecommendations)
+        {
+            kinds.Add(DocumentKind.Recommendations);
         }
 
         if (generateInterviewNotes)

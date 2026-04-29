@@ -245,7 +245,7 @@ public sealed class DraftGenerationServiceTests
         var baseRequest = CreateRequest();
         var request = baseRequest with
         {
-            DocumentKinds = [DocumentKind.CoverLetter, DocumentKind.ProfileSummary, DocumentKind.InterviewNotes]
+            DocumentKinds = [DocumentKind.CoverLetter, DocumentKind.ProfileSummary, DocumentKind.Recommendations, DocumentKind.InterviewNotes]
         };
 
         await service.GenerateAsync(request);
@@ -255,6 +255,8 @@ public sealed class DraftGenerationServiceTests
 
         Assert.Contains("no more than one page", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("very focused", combinedUserPrompts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Generate a recommendation brief", combinedUserPrompts);
+        Assert.Contains("recommendation brief", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Generate interview questions", combinedUserPrompts);
         Assert.DoesNotContain("STAR Examples", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
     }

@@ -90,7 +90,7 @@ public static class TemplateContentPopulator
     /// <summary>
     /// Removes any <see cref="SdtBlock"/> from the body whose tag is not present
     /// in <paramref name="populatedTags"/>. Use after population to drop empty
-    /// optional sections (e.g. recommendations or certifications when the
+    /// optional sections (e.g. certifications or early career when the
     /// candidate has none).
     /// </summary>
     /// <param name="body">The document body containing template controls.</param>

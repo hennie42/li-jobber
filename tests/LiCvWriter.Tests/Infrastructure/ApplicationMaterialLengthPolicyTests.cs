@@ -39,4 +39,12 @@ public sealed class ApplicationMaterialLengthPolicyTests
         Assert.True(ApplicationMaterialLengthPolicy.CountWords(result.Markdown) <= maxWordCount.Value);
         Assert.Equal(result.Markdown, result.PlainText);
     }
+
+    [Fact]
+    public void GetMaxWordCount_Recommendations_ReturnsLongerRecommendationBudget()
+    {
+        var maxWordCount = ApplicationMaterialLengthPolicy.GetMaxWordCount(DocumentKind.Recommendations);
+
+        Assert.Equal(850, maxWordCount);
+    }
 }

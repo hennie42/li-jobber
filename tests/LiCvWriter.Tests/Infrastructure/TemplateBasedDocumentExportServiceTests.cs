@@ -40,6 +40,28 @@ Experienced architect with deep cloud delivery experience.
 Led the cloud migration program.
 """;
 
+    private const string SampleRecommendationsMarkdown = """
+# Alex Taylor
+
+> Senior Architect
+
+alex.taylor@example.com
+
+## Target Role
+
+- Role: Lead Architect
+- Company: Contoso
+
+## Recommendation Brief
+
+External leaders consistently describe Alex as a pragmatic architecture partner.
+
+## Recommendations
+
+> *"Alex consistently turns complex cloud goals into useful delivery plans."*
+> — Jane Smith at Contoso, CTO
+""";
+
     [Fact]
     public async Task ExportAsync_WritesOnlyDocxFile()
     {
@@ -222,6 +244,57 @@ Led the cloud migration program.
             var validationErrors = new OpenXmlValidator().Validate(wordDoc).ToArray();
             Assert.True(validationErrors.Length == 0,
                 "Application material OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
+                    $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_RecommendationsKindUsesRecommendationsTemplate()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-template-export-{Guid.NewGuid():N}");
+
+        try
+        {
+            var service = new TemplateBasedDocumentExportService(new StorageOptions { ExportRoot = root });
+            var document = new GeneratedDocument(
+                DocumentKind.Recommendations,
+                "Alex Taylor Recommendations",
+                SampleRecommendationsMarkdown,
+                "Alex Taylor Recommendations",
+                DateTimeOffset.UtcNow);
+
+            var result = await service.ExportAsync(document);
+
+            Assert.NotNull(result.FilePath);
+            var filePath = result.FilePath;
+
+            Assert.True(File.Exists(filePath));
+            using var wordDoc = WordprocessingDocument.Open(filePath, isEditable: false);
+            var mainPart = wordDoc.MainDocumentPart;
+            Assert.NotNull(mainPart);
+            var body = mainPart.Document?.Body;
+            Assert.NotNull(body);
+            var allText = body.InnerText;
+
+            Assert.Contains("Alex Taylor", allText);
+            Assert.Contains("Lead Architect", allText);
+            Assert.Contains("External leaders", allText);
+            Assert.Contains("Jane Smith", allText);
+            Assert.Contains("complex cloud goals", allText);
+            Assert.DoesNotContain("[Recommendation quotes", allText);
+            Assert.Empty(body.Descendants<SdtBlock>());
+            Assert.Empty(body.Descendants<Table>());
+
+            var validationErrors = new OpenXmlValidator().Validate(wordDoc).ToArray();
+            Assert.True(validationErrors.Length == 0,
+                "Recommendations OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
                     $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
         }
         finally
@@ -514,7 +587,7 @@ Danish — Native, English — Professional
             Assert.Contains("Aarhus University", allText);      // Education
             Assert.Contains("Azure Solutions Architect", allText); // Certifications
             Assert.Contains("Danish", allText);                 // Languages
-            Assert.Contains("Pat Reviewer", allText);           // Recommendations
+            Assert.DoesNotContain("Pat Reviewer", allText);     // Recommendations are a separate document
             Assert.Contains("LegacyCorp", allText);             // EarlyCareer
         }
         finally

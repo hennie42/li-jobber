@@ -99,7 +99,6 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                 }
 
                 AppendLanguages(builder, request.Candidate, outputLanguage);
-                AppendTopRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
                 AppendEarlyCareer(builder, earlyCareerExperience, earlyCareerProjects, outputLanguage);
 
                 break;
@@ -108,6 +107,10 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                 break;
             case DocumentKind.ProfileSummary:
                 AppendSection(builder, Translate(outputLanguage, "Profile Summary", "Profil"), generatedBody);
+                break;
+            case DocumentKind.Recommendations:
+                AppendSection(builder, Translate(outputLanguage, "Recommendation Brief", "Anbefalingsresumé"), generatedBody);
+                AppendRecommendations(builder, request.Candidate, selectedEvidence, outputLanguage);
                 break;
             case DocumentKind.InterviewNotes:
                 AppendSection(builder, Translate(outputLanguage, "Interview Questions", "Interviewspørgsmål"), generatedBody);
@@ -128,6 +131,7 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         DocumentKind.Cv => "CV",
         DocumentKind.CoverLetter => "Cover Letter",
         DocumentKind.ProfileSummary => "Profile Summary",
+        DocumentKind.Recommendations => "Recommendations",
         DocumentKind.InterviewNotes => "Interview Questions",
         _ => kind.ToString()
     };
@@ -417,10 +421,10 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
     }
 
     /// <summary>
-    /// Renders the top 3 recommendations ranked by evidence score for the
-    /// current job context, each with a heading and blockquote.
+    /// Renders recommendations ranked by evidence score for the current job
+    /// context, each as an attributed blockquote.
     /// </summary>
-    private static void AppendTopRecommendations(
+    private static void AppendRecommendations(
         StringBuilder builder,
         CandidateProfile candidate,
         IReadOnlyList<RankedEvidenceItem> selectedEvidence,
@@ -439,13 +443,12 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
                 static item => item.Score,
                 StringComparer.OrdinalIgnoreCase);
 
-        // Rank: evidence-backed first (by score), then original order. Cap at 3.
+        // Rank: evidence-backed first (by score), then original order.
         var ranked = candidate.Recommendations
             .OrderByDescending(rec =>
                 recommendationScores.TryGetValue($"Recommendation from {rec.Author.FullName}", out var score)
                     ? score
                     : -1)
-            .Take(3)
             .ToArray();
 
         builder.AppendLine($"## {Translate(outputLanguage, "Recommendations", "Anbefalinger")}");
@@ -620,23 +623,6 @@ public sealed class MarkdownDocumentRenderer : IDocumentRenderer
         foreach (var item in certItems)
         {
             builder.AppendLine($"- {item.Evidence.Title}");
-        }
-
-        builder.AppendLine();
-    }
-
-    private static void AppendRecommendations(StringBuilder builder, DocumentRenderRequest request, OutputLanguage outputLanguage)
-    {
-        if (request.Candidate.Recommendations.Count == 0)
-        {
-            return;
-        }
-
-        builder.AppendLine($"## {Translate(outputLanguage, "Recommendations", "Anbefalinger")}");
-        builder.AppendLine();
-        foreach (var recommendation in request.Candidate.Recommendations.Take(3))
-        {
-            builder.AppendLine($"- {recommendation.Author.FullName}{FormatAt(recommendation.Company, outputLanguage)}: {recommendation.Text}");
         }
 
         builder.AppendLine();

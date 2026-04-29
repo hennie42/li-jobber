@@ -47,24 +47,47 @@ public sealed class MarkdownDocumentRendererTests
     }
 
     [Fact]
-    public async Task RenderAsync_Cv_IncludesAllRecommendations()
+    public async Task RenderAsync_Cv_ExcludesRecommendations()
     {
         var renderer = new MarkdownDocumentRenderer();
         var request = BuildCvRequest();
 
         var result = await renderer.RenderAsync(request);
 
+        Assert.DoesNotContain("## Recommendations", result.Markdown);
+        Assert.DoesNotContain("> *\"", result.Markdown);
+        Assert.DoesNotContain("Jane Smith", result.Markdown);
+        Assert.DoesNotContain("Lars Madsen", result.Markdown);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Recommendations_IncludesRecommendationBriefAndQuotes()
+    {
+        var renderer = new MarkdownDocumentRenderer();
+        var request = BuildCvRequest(generatedBody: "External validation themes for the target role.") with
+        {
+            Kind = DocumentKind.Recommendations
+        };
+
+        var result = await renderer.RenderAsync(request);
+
+        Assert.Contains("## Recommendation Brief", result.Markdown);
+        Assert.Contains("External validation themes for the target role.", result.Markdown);
         Assert.Contains("## Recommendations", result.Markdown);
         Assert.Contains("> *\"", result.Markdown);
         Assert.Contains("Jane Smith", result.Markdown);
         Assert.Contains("Lars Madsen", result.Markdown);
+        Assert.Null(result.AtsSnapshot);
     }
 
     [Fact]
-    public async Task RenderAsync_Cv_AnnotatesDanishRecommendationForEnglishOutput()
+    public async Task RenderAsync_Recommendations_AnnotatesDanishRecommendationForEnglishOutput()
     {
         var renderer = new MarkdownDocumentRenderer();
-        var request = BuildCvRequest(outputLanguage: OutputLanguage.English);
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.English) with
+        {
+            Kind = DocumentKind.Recommendations
+        };
 
         var result = await renderer.RenderAsync(request);
 
@@ -72,10 +95,13 @@ public sealed class MarkdownDocumentRendererTests
     }
 
     [Fact]
-    public async Task RenderAsync_Cv_AnnotatesEnglishRecommendationForDanishOutput()
+    public async Task RenderAsync_Recommendations_AnnotatesEnglishRecommendationForDanishOutput()
     {
         var renderer = new MarkdownDocumentRenderer();
-        var request = BuildCvRequest(outputLanguage: OutputLanguage.Danish);
+        var request = BuildCvRequest(outputLanguage: OutputLanguage.Danish) with
+        {
+            Kind = DocumentKind.Recommendations
+        };
 
         var result = await renderer.RenderAsync(request);
 

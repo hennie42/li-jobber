@@ -24,5 +24,5 @@ internal static class PromptConstraints
     /// <summary>
     /// Rule set for CV outputs to keep content concise and recruiter-friendly.
     /// </summary>
-    internal const string CvQualityGuidance = "For CV outputs, keep the professional profile concise (3-4 lines), prioritize quantified achievements, and follow a one-page-first mindset by emphasizing the most relevant and recent evidence.";
+    internal const string CvQualityGuidance = "For CV outputs, keep the professional profile concise (3-4 lines), prioritize quantified achievements, keep the complete CV within four pages, and do not include recommendations because they are generated as a separate document.";
 }

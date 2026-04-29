@@ -22,6 +22,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Documents\Templates\cv-template.dotx" />
     <EmbeddedResource Include="Documents\Templates\application-material-template.dotx" />
+    <EmbeddedResource Include="Documents\Templates\recommendations-template.dotx" />
   </ItemGroup>
 </Project>
 

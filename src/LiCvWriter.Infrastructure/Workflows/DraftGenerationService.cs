@@ -207,7 +207,7 @@ public sealed class DraftGenerationService(
         var focus = kind switch
         {
             DocumentKind.Cv =>
-                $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements. Weave as many of the job's key technologies and themes into the professional profile as truthfully possible. If any recommendation text is not in {lang}, translate it to {lang} and append '(translated from <original language>)' after the translated text.",
+                $"Write a concise {lang} CV for a {role} position at {company}, grounded strictly in supplied evidence.{nameRule} Emphasize impact, technical judgment, and concrete achievements. Weave as many of the job's key technologies and themes into the professional profile as truthfully possible. Keep the CV within four pages and do not include recommendations; those are generated as a separate document.",
             DocumentKind.CoverLetter =>
                 $"""
                 Write a direct {lang} cover letter for a {role} position at {company}, using only supplied evidence.{nameRule}
@@ -219,6 +219,8 @@ public sealed class DraftGenerationService(
                 """,
             DocumentKind.ProfileSummary =>
                 $"Write a very focused {lang} profile summary tailored toward a {role} position at {company}, using only supplied evidence.{nameRule} Keep it to one page or less, ideally 120-180 words. Make it crisp, concrete, senior, and free of hype. Do not include fit scores, evidence tables, or appendices.",
+            DocumentKind.Recommendations =>
+                $"Write a compact {lang} recommendation brief for a {role} position at {company}, using only supplied recommendation evidence.{nameRule} Produce 1-2 short paragraphs that introduce the strongest credibility themes. Do not invent, rewrite, translate, or quote recommendation text; the renderer will append the original recommendations with attribution.",
             DocumentKind.InterviewNotes =>
                 $"""
                 Prepare focused {lang} interview questions for a {role} position at {company}, grounded in supplied evidence.{nameRule}
@@ -250,8 +252,10 @@ public sealed class DraftGenerationService(
             ? string.Join(Environment.NewLine, candidate.Projects.Select(static project =>
                 $"- {project.Title} ({project.Period.DisplayValue}). {project.Description}"))
             : "none";
-        var recommendations = string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Select(static recommendation =>
-            $"Recommendation from {recommendation.Author.FullName}{FormatOptional($" at {recommendation.Company}")}: {recommendation.Text}"));
+        var recommendations = candidate.Recommendations.Count > 0
+            ? string.Join(Environment.NewLine + Environment.NewLine, candidate.Recommendations.Select(static recommendation =>
+                $"Recommendation from {recommendation.Author.FullName}{FormatOptional($" at {recommendation.Company}")}: {recommendation.Text}"))
+            : "none";
         var fitSummary = BuildFitSummary(request.JobFitAssessment);
         var differentiators = FormatLines(request.ApplicantDifferentiatorProfile?.ToSummaryLines(), "- No applicant differentiator profile is stored for this session.");
         var selectedEvidence = FormatSelectedEvidence(request.EvidenceSelection);
@@ -346,6 +350,7 @@ Additional instructions:
         DocumentKind.Cv => "CV",
         DocumentKind.CoverLetter => "cover letter",
         DocumentKind.ProfileSummary => "profile summary",
+        DocumentKind.Recommendations => "recommendations document",
         DocumentKind.InterviewNotes => "interview questions",
         _ => kind.ToString()
     };
@@ -353,6 +358,7 @@ Additional instructions:
     private static string BuildGenerationInstruction(DocumentKind kind, string languageLabel) => kind switch
     {
         DocumentKind.InterviewNotes => $"Generate interview questions in {languageLabel}",
+        DocumentKind.Recommendations => $"Generate a recommendation brief in {languageLabel}",
         _ => $"Generate a {GetDocumentDisplayName(kind)} in {languageLabel}"
     };
 
@@ -361,6 +367,7 @@ Additional instructions:
         DocumentKind.Cv => PromptConstraints.CvQualityGuidance,
         DocumentKind.CoverLetter => "Keep the cover letter very focused and no more than one page; target 250-350 words in 3-4 compact paragraphs.",
         DocumentKind.ProfileSummary => "Keep the profile summary very focused and no more than one page; target 120-180 words.",
+        DocumentKind.Recommendations => "Keep the recommendation brief very focused; target 120-180 words and let the deterministic recommendation section carry the full quotes.",
         DocumentKind.InterviewNotes => "Keep the interview questions very focused and no more than one page; produce 6-8 grounded questions with brief answer angles.",
         _ => "Keep the output focused, grounded, and concise."
     };

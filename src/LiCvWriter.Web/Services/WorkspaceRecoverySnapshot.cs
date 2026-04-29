@@ -26,6 +26,8 @@ public sealed record DraftGenerationPreferences
 
     public bool GenerateSummary { get; init; } = true;
 
+    public bool GenerateRecommendations { get; init; } = true;
+
     public bool GenerateInterviewNotes { get; init; } = true;
 
     public string ContactEmail { get; init; } = string.Empty;

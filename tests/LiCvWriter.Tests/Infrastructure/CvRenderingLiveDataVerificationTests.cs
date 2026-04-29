@@ -42,14 +42,13 @@ public sealed class CvRenderingLiveDataVerificationTests
             ["Professional Experience"] = markdown.IndexOf("## Professional Experience", StringComparison.Ordinal),
             ["Early Career"] = markdown.IndexOf("## Early Career", StringComparison.Ordinal),
             ["Certifications"] = markdown.IndexOf("## Certifications", StringComparison.Ordinal),
-            ["Recommendations"] = markdown.IndexOf("## Recommendations", StringComparison.Ordinal),
         };
 
         Assert.True(sectionPositions["Professional Profile"] >= 0, "Missing: ## Professional Profile");
         Assert.True(sectionPositions["Professional Experience"] >= 0, "Missing: ## Professional Experience");
         Assert.True(sectionPositions["Early Career"] >= 0, "Missing: ## Early Career");
         Assert.True(sectionPositions["Certifications"] >= 0, "Missing: ## Certifications");
-        Assert.True(sectionPositions["Recommendations"] >= 0, "Missing: ## Recommendations");
+        Assert.DoesNotContain("## Recommendations", markdown);
 
         Assert.True(
             sectionPositions["Professional Experience"] > sectionPositions["Professional Profile"],
@@ -58,11 +57,8 @@ public sealed class CvRenderingLiveDataVerificationTests
             sectionPositions["Certifications"] > sectionPositions["Professional Experience"],
             "Certifications must come after Professional Experience");
         Assert.True(
-            sectionPositions["Recommendations"] > sectionPositions["Certifications"],
-            "Recommendations must come after Certifications");
-        Assert.True(
-            sectionPositions["Early Career"] > sectionPositions["Recommendations"],
-            "Early Career must come last (after Recommendations)");
+            sectionPositions["Early Career"] > sectionPositions["Certifications"],
+            "Early Career must come after Certifications");
 
         // ── Modern experience (post-2008): must appear under Professional Experience ──
         // Modern experience now ends before Certifications (Education sits in between
@@ -105,14 +101,6 @@ public sealed class CvRenderingLiveDataVerificationTests
         // ── Umbrella role: Freelance should contain client sub-items ──
         AssertBetween(markdown, "Senior IT Consultant", "## Certifications",
             "**Client:", "Freelance umbrella role must have Client: sub-items");
-
-        // ── Recommendations as italic blockquotes ──
-        Assert.Contains("> *\"", markdown);
-        Assert.Contains("> —", markdown);
-
-        // ── No ### headings for individual recommendations ──
-        Assert.DoesNotContain("### Jane", markdown);
-        Assert.DoesNotContain("### Lars", markdown);
 
         // ── Early career entries as bullet items (not ### headings) ──
         // Early Career is the last section, so extract from its heading to end of document.
@@ -174,9 +162,8 @@ public sealed class CvRenderingLiveDataVerificationTests
             Assert.Contains("Certifications", allText);
             Assert.Contains("Certified Ethical Hacker", allText);
 
-            // Recommendations
-            Assert.Contains("Recommendations", allText);
-            Assert.Contains("Alex", allText);
+            // Recommendations are generated as a separate document, not embedded in the CV.
+            Assert.DoesNotContain("Recommendations", allText);
         }
         finally
         {

@@ -6,13 +6,11 @@ using LiCvWriter.Infrastructure.Documents.Templates;
 
 namespace LiCvWriter.Tests.Infrastructure;
 
-public sealed class CvWordTemplateGeneratorTests
+public sealed class RecommendationsWordTemplateGeneratorTests
 {
     [Fact]
-    public void RegenerateEmbeddedTemplate()
+    public void RegenerateEmbeddedRecommendationsTemplate()
     {
-        // Walk up from the test output directory to find the repo root,
-        // then overwrite the embedded template so the build picks it up.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "LiCvWriter.sln")))
         {
@@ -21,9 +19,9 @@ public sealed class CvWordTemplateGeneratorTests
 
         Assert.NotNull(dir);
         var templatePath = Path.Combine(dir.FullName,
-            "src", "LiCvWriter.Infrastructure", "Documents", "Templates", "cv-template.dotx");
+            "src", "LiCvWriter.Infrastructure", "Documents", "Templates", "recommendations-template.dotx");
 
-        CvWordTemplateGenerator.Generate(templatePath);
+        RecommendationsWordTemplateGenerator.Generate(templatePath);
         Assert.True(File.Exists(templatePath));
     }
 
@@ -32,23 +30,21 @@ public sealed class CvWordTemplateGeneratorTests
     {
         var outputPath = Path.Combine(
             Path.GetTempPath(),
-            $"licvwriter-template-{Guid.NewGuid():N}.dotx");
+            $"licvwriter-recommendations-template-{Guid.NewGuid():N}.dotx");
 
         try
         {
-            CvWordTemplateGenerator.Generate(outputPath);
+            RecommendationsWordTemplateGenerator.Generate(outputPath);
 
             Assert.True(File.Exists(outputPath));
 
             using var document = WordprocessingDocument.Open(outputPath, isEditable: false);
-
             Assert.Equal(WordprocessingDocumentType.Template, document.DocumentType);
 
             var mainPart = document.MainDocumentPart;
             Assert.NotNull(mainPart);
-            var documentRoot = mainPart.Document;
-            Assert.NotNull(documentRoot);
-            var body = documentRoot.Body;
+
+            var body = mainPart.Document?.Body;
             Assert.NotNull(body);
 
             var tags = body.Descendants<SdtBlock>()
@@ -56,12 +52,10 @@ public sealed class CvWordTemplateGeneratorTests
                 .Where(static value => value is not null)
                 .ToArray();
 
-            foreach (var section in CvWordTemplateGenerator.Sections)
+            foreach (var section in RecommendationsWordTemplateGenerator.Sections)
             {
                 Assert.Contains(section.Tag, tags);
             }
-
-            Assert.DoesNotContain("Recommendations", tags);
 
             var styles = mainPart.StyleDefinitionsPart?.Styles;
             Assert.NotNull(styles);
@@ -77,7 +71,7 @@ public sealed class CvWordTemplateGeneratorTests
 
             var validationErrors = new OpenXmlValidator().Validate(document).ToArray();
             Assert.True(validationErrors.Length == 0,
-                "Template OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
+                "Recommendations template OpenXML validation errors:\n" + string.Join("\n", validationErrors.Select(static error =>
                     $"- {error.Part?.Uri}: {error.Path?.XPath}: {error.Description}")));
         }
         finally
@@ -94,15 +88,15 @@ public sealed class CvWordTemplateGeneratorTests
     {
         var firstPath = Path.Combine(
             Path.GetTempPath(),
-            $"licvwriter-template-{Guid.NewGuid():N}.dotx");
+            $"licvwriter-recommendations-template-{Guid.NewGuid():N}.dotx");
         var secondPath = Path.Combine(
             Path.GetTempPath(),
-            $"licvwriter-template-{Guid.NewGuid():N}.dotx");
+            $"licvwriter-recommendations-template-{Guid.NewGuid():N}.dotx");
 
         try
         {
-            CvWordTemplateGenerator.Generate(firstPath);
-            CvWordTemplateGenerator.Generate(secondPath);
+            RecommendationsWordTemplateGenerator.Generate(firstPath);
+            RecommendationsWordTemplateGenerator.Generate(secondPath);
 
             using var firstDocument = WordprocessingDocument.Open(firstPath, isEditable: false);
             using var secondDocument = WordprocessingDocument.Open(secondPath, isEditable: false);

@@ -25,6 +25,7 @@ internal static class ApplicationMaterialLengthPolicy
     {
         DocumentKind.CoverLetter => 380,
         DocumentKind.ProfileSummary => 180,
+        DocumentKind.Recommendations => 850,
         DocumentKind.InterviewNotes => 450,
         _ => null
     };

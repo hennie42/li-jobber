@@ -593,7 +593,8 @@ details.card-panel summary .status-chip {
   min-height: 120px;
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   width: fit-content;
   border: 0;
   border-radius: 999px;
@@ -604,18 +605,27 @@ details.card-panel summary .status-chip {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 14px 30px rgba(191, 107, 57, 0.24);
+  transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .secondary-button {
-  width: fit-content;
-  border: 1px solid rgba(31, 41, 51, 0.16);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--ink);
-  padding: 0.9rem 1.2rem;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(191, 107, 57, 0.18);
+}
+
+.primary-button:hover:not(:disabled),
+.primary-button:focus-visible:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.secondary-button:focus-visible:not(:disabled) {
+  background: linear-gradient(135deg, #a9572d, #c9794f);
+  box-shadow: 0 14px 30px rgba(191, 107, 57, 0.28);
+}
+
+.primary-button.destructive-button:hover:not(:disabled),
+.primary-button.destructive-button:focus-visible:not(:disabled),
+.secondary-button.destructive-button:hover:not(:disabled),
+.secondary-button.destructive-button:focus-visible:not(:disabled) {
+  background: linear-gradient(135deg, #8f3f2d, #b94f38);
+  box-shadow: 0 14px 30px rgba(143, 63, 45, 0.3);
 }
 
 .primary-button:disabled {
@@ -1029,10 +1039,11 @@ details.card-panel summary .status-chip {
 }
 
 .editable-list-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 0.75rem;
+  padding: 0.15rem 0;
 }
 
 .editable-list-body {
@@ -1260,6 +1271,13 @@ textarea.inline-edit-input {
   gap: 0.5rem;
 }
 
+.profile-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
 .profile-entry-header h4 {
   margin: 0;
   font-size: 1rem;
@@ -1268,6 +1286,10 @@ textarea.inline-edit-input {
 .profile-entry-period {
   color: var(--muted);
   font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.profile-remove-button {
   white-space: nowrap;
 }
 
@@ -1700,6 +1722,16 @@ a.meta-chip-link:hover {
 
 .link-button:hover {
   background: rgba(191, 107, 57, 0.08);
+}
+
+.link-button.destructive-button {
+  color: #b94f38;
+}
+
+.link-button.destructive-button:hover,
+.link-button.destructive-button:focus-visible {
+  background: rgba(185, 79, 56, 0.12);
+  color: #8f3f2d;
 }
 
 .setup-grid {

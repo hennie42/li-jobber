@@ -49,12 +49,12 @@ Strong profile line 2.
     }
 
     [Fact]
-    public void ValidateAndAutoFix_Cv_TrimsOptionalSections_WhenLengthExceedsOnePageHeuristic()
+    public void ValidateAndAutoFix_Cv_TrimsOptionalSections_WhenLengthExceedsLineHeuristic()
     {
         var validator = new CvQualityValidator();
         var request = BuildRequest();
 
-        var longRecommendations = string.Join(Environment.NewLine, Enumerable.Range(1, 90).Select(index => $"- Recommendation line {index}"));
+        var longProjects = string.Join(Environment.NewLine, Enumerable.Range(1, 90).Select(index => $"- Project line {index}"));
         var longCertifications = string.Join(Environment.NewLine, Enumerable.Range(1, 70).Select(index => $"- Certification line {index}"));
 
         var document = BuildCvDocument(
@@ -75,11 +75,7 @@ line 5
 
 ## Projects
 
-- Built delivery platform.
-
-## Recommendations
-
-{longRecommendations}
+{longProjects}
 
 ## Certifications
 
@@ -89,9 +85,9 @@ line 5
         var result = validator.ValidateAndAutoFix(document, request);
 
         Assert.Contains("TrimmedOptionalSectionsForLength", result.Report.AppliedFixes);
-        Assert.DoesNotContain("## Recommendations", result.Document.Markdown);
+        Assert.DoesNotContain("## Projects", result.Document.Markdown);
         Assert.DoesNotContain("## Certifications", result.Document.Markdown);
-        Assert.Contains("Recommendations", result.Report.TrimmedOptionalSections);
+        Assert.Contains("Projects", result.Report.TrimmedOptionalSections);
         Assert.Contains("Certifications", result.Report.TrimmedOptionalSections);
     }
 

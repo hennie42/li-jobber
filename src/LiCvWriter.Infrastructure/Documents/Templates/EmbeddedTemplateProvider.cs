@@ -16,12 +16,22 @@ public static class EmbeddedTemplateProvider
     /// <summary>Default embedded resource name for focused non-CV application materials.</summary>
     public const string ApplicationMaterialTemplateResourceName = "LiCvWriter.Infrastructure.Documents.Templates.application-material-template.dotx";
 
+    /// <summary>Default embedded resource name for recommendation documents.</summary>
+    public const string RecommendationsTemplateResourceName = "LiCvWriter.Infrastructure.Documents.Templates.recommendations-template.dotx";
+
     /// <summary>
     /// Copies the embedded CV template to a unique temporary <c>.dotx</c> file
     /// and returns its path. The caller is responsible for deleting the file.
     /// </summary>
     public static string ExtractCvTemplate()
         => ExtractTemplate(CvTemplateResourceName);
+
+    /// <summary>
+    /// Copies the embedded recommendations template to a unique temporary
+    /// <c>.dotx</c> file and returns its path. The caller is responsible for deleting the file.
+    /// </summary>
+    public static string ExtractRecommendationsTemplate()
+        => ExtractTemplate(RecommendationsTemplateResourceName);
 
     /// <summary>
     /// Copies the named embedded template resource to a unique temporary

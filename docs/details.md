@@ -123,7 +123,7 @@ The two main pages share `WorkspaceSession` for state and `OperationStatusServic
 
 | Record | Fields |
 | --- | --- |
-| `DocumentKind` | Cv, CoverLetter, ProfileSummary, InterviewNotes |
+| `DocumentKind` | Cv, CoverLetter, ProfileSummary, Recommendations, InterviewNotes |
 | `GeneratedDocument` | Kind, Title, Markdown, PlainText, GeneratedAtUtc, OutputPath, LlmDuration, PromptTokens, CompletionTokens, Model |
 
 ---
@@ -628,7 +628,7 @@ graph TD
 
 ### Batch Mode
 
-`RunAllRefreshThenDraftsAsync()` orchestrates refresh-all for all job sets, then conditional draft generation. Checkbox flags control which document kinds to generate (CV, Cover Letter, Summary, Interview Questions). Job sets missing profile or evidence are skipped.
+`RunAllRefreshThenDraftsAsync()` orchestrates refresh-all for all job sets, then conditional draft generation. Checkbox flags control which document kinds to generate (CV, Cover Letter, Summary, Recommendations, Interview Questions). Job sets missing profile or evidence are skipped.
 
 ---
 
@@ -716,12 +716,12 @@ graph TD
     A[LLM section outputs] --> B[Assemble CV sections]
     B --> C["## Candidate Header — Name, headline, target role"]
     B --> D["## Professional Profile — LLM overview + keyword line"]
-    B --> E["## Fit Snapshot — Strengths and score"]
     B --> F["## Professional Experience — Modern roles with bullets"]
     B --> G["## Projects — Standalone projects"]
     B --> H["## Early Career — Pre-2009 compact listing"]
     B --> I["## Certifications — From selected evidence"]
-    B --> J["## Recommendations — All with translation annotation"]
+    B --> J["## Languages — From profile signals"]
+    B --> N["Recommendations omitted — separate document"]
     F --> K{Umbrella role?}
     K -->|"3+ projects in period"| L[Client sub-items inline]
     K -->|"< 3 projects"| M[Standard role format]
@@ -761,7 +761,7 @@ A role qualifies as an "umbrella" (consulting/contracting parent) if it covers *
 
 ### Language Detection and Translation Annotation
 
-Recommendations are annotated with translation context when the recommendation language differs from the output language.
+Standalone recommendation documents annotate each quote with translation context when the recommendation language differs from the output language.
 
 **Detection** uses `DetectDanish()`, a word-frequency heuristic:
 - Scans all words against a 36-word `DanishMarkers` set (common Danish function words: "og", "er", "med", "har", "det", "en", "af", "til", etc.)
@@ -777,13 +777,14 @@ Recommendations are annotated with translation context when the recommendation l
 
 - **Cover Letter** — focused one-page letter body generated from fit/evidence context without internal appendices
 - **Profile Summary** — focused one-page profile summary generated from fit/evidence context without internal appendices
+- **Recommendations** — focused recommendation brief plus deterministic recommendation quotes with attribution
 - **Interview Questions** — focused one-page question set generated from fit/evidence context without internal appendices
 
 ---
 
 ## 15. Template-Based Word Export
 
-CV documents are exported through a template-based pipeline using an embedded `.dotx` template with named content controls. Non-CV documents (cover letter, profile summary, interview questions) use a focused application-material `.dotx` template with the same content-control population and cleanup path.
+CV documents are exported through a template-based pipeline using an embedded `.dotx` template with named content controls. Recommendations use a dedicated recommendations `.dotx` template, while cover letters, profile summaries, and interview questions use the focused application-material `.dotx` template with the same content-control population and cleanup path.
 
 ### Template Architecture
 
@@ -791,13 +792,17 @@ CV documents are exported through a template-based pipeline using an embedded `.
 graph TD
     A[cv-template.dotx] -->|EmbeddedResource| B[EmbeddedTemplateProvider]
     A2[application-material-template.dotx] -->|EmbeddedResource| B
+    A3[recommendations-template.dotx] -->|EmbeddedResource| B
     B --> C[TemplateBasedDocumentExportService]
     D[GeneratedDocument.Markdown] --> E[CvMarkdownSectionExtractor]
     E --> F["CV section fragments"]
     D --> E2[Application material section extraction]
     E2 --> F2["CandidateHeader + TargetRole + DocumentBody"]
+    D --> E3[Recommendations section extraction]
+    E3 --> F3["CandidateHeader + TargetRole + DocumentIntro + RecommendationsBody"]
     F --> C
     F2 --> C
+    F3 --> C
     C --> G[TemplateContentPopulator]
     G --> H["Populate content controls"]
     H --> I["Remove empty controls"]
@@ -807,7 +812,7 @@ graph TD
     L --> M[".docx file"]
 ```
 
-### CV Template Sections (10 Named Content Controls)
+### CV Template Sections (9 Named Content Controls)
 
 | Tag | Content | Source |
 | --- | --- | --- |
@@ -819,7 +824,6 @@ graph TD
 | `Education` | Education entries | Extracted from assembled markdown |
 | `Certifications` | Certification list from evidence | Extracted from assembled markdown |
 | `Languages` | Language entries | Extracted from assembled markdown |
-| `Recommendations` | All recommendations with attribution | Extracted from assembled markdown |
 | `EarlyCareer` | Pre-2009 roles in compact format | Extracted from assembled markdown |
 
 ### Application Material Template Sections (3 Named Content Controls)
@@ -829,6 +833,15 @@ graph TD
 | `CandidateHeader` | Name, optional headline, and contact line | Extracted from assembled markdown |
 | `TargetRole` | Target role and company | Extracted from assembled markdown |
 | `DocumentBody` | Cover letter, profile summary, or interview questions body | Extracted from assembled markdown |
+
+### Recommendations Template Sections (4 Named Content Controls)
+
+| Tag | Content | Source |
+| --- | --- | --- |
+| `CandidateHeader` | Name, optional headline, and contact line | Extracted from assembled markdown |
+| `TargetRole` | Target role and company | Extracted from assembled markdown |
+| `DocumentIntro` | Recommendation brief | Extracted from assembled markdown |
+| `RecommendationsBody` | Recommendation quotes with attribution | Extracted from assembled markdown |
 
 ### Section Extraction
 
@@ -850,7 +863,7 @@ For each mapping in `CvSectionMappings`:
 
 | Step | Method | Purpose |
 | --- | --- | --- |
-| Remove empty controls | `RemoveEmptyControls()` | Removes unpopulated content control tags (e.g., no certifications, no recommendations) |
+| Remove empty controls | `RemoveEmptyControls()` | Removes unpopulated content control tags (e.g., no certifications, no early career) |
 | Unwrap SDT blocks | `UnwrapAllSdtBlocks()` | Strips structured-document-tag wrappers — ATS parsers skip SDT-wrapped content |
 | Flatten hyperlinks | `FlattenHyperlinks()` | Converts hyperlink runs to plain text — ATS parsers often ignore or misread linked text |
 | Strip underlines | `StripUnderlines()` | Removes underline formatting that HtmlToOpenXml may add from HTML anchor elements |
@@ -871,7 +884,7 @@ For each mapping in `CvSectionMappings`:
 
 ### Non-CV Export (Template Pipeline)
 
-Cover letters, profile summaries, and interview questions use the application-material template:
+Cover letters, profile summaries, and interview questions use the application-material template. Recommendations use `recommendations-template.dotx` so quote attribution and the generated intro have separate content controls.
 
 ```mermaid
 graph LR
@@ -898,7 +911,8 @@ Each system prompt specifies:
 - Evidence grounding rule ("grounded strictly in supplied evidence")
 - Naming convention for Danish ("Keep technology names, company names, quoted job phrases in their original or English form")
 - CV-specific: "Weave as many of the job's key technologies and themes into the professional profile as truthfully possible"
-- CV-specific: "If any recommendation text is not in {lang}, translate it to {lang} and append '(translated from \<original language\>)'"
+- CV-specific: keep the CV within four pages and do not include recommendations
+- Recommendations-specific: write only a compact recommendation brief; deterministic rendering appends the original recommendation quotes with attribution
 
 ### User Prompt Structure
 
@@ -943,7 +957,7 @@ Recommendations: {all recommendations with author and company}
 Additional instructions: {user-supplied per job set}
 ```
 
-Experience is capped at 8 entries in the prompt with a truncation note. Recommendations and projects are included in full.
+Experience is capped at 8 entries in the prompt with a truncation note. Recommendations and projects are included in full; recommendations are rendered only in the standalone recommendations document.
 
 ---
 
@@ -1085,15 +1099,15 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 - Session model and thinking settings remain editable after LLM-backed work starts; changes apply to future operations until the user reruns affected analyses or drafts.
 - Brokered SSE endpoints exist for job-context, fit-review, technology-gap, refresh-all, and draft-generation operations.
 - CV generation uses a wave-based approach (two parallel waves + optional refinement pass for must-have theme coverage).
-- CV and non-CV documents use template-based export with named content controls; non-CV documents use the focused application-material template.
+- CV, recommendations, and other non-CV documents use template-based export with named content controls; recommendations have a dedicated template and other non-CV documents use the focused application-material template.
 - All ATS-unfriendly artifacts (SDT blocks, hyperlinks, underlines) are post-processed away before final .docx output.
 - Repetition loop detection automatically aborts degenerate LLM streaming (configurable, default 500-char threshold).
 - Early career roles (end date before 2009) are rendered in compact format; ongoing roles are always modern.
 - Umbrella roles covering 3+ projects get inline client sub-items.
-- Output language (English/Danish) is per-job-set with automatic recommendation translation annotation.
+- Output language (English/Danish) is per-job-set with automatic recommendation translation annotation in the standalone recommendations document.
 - Document export produces both .md and .docx for every generated document.
-- CV rendering includes all recommendations (not just selected evidence) with language detection.
-- The shared sidebar carries floating navigation, two CRT monitors, and finished activity history; the diagnostics page remains the verbose inspection surface.
+- CV rendering excludes recommendations; standalone recommendation documents include all recommendations with language detection.
+- The shared sidebar carries floating navigation, two CRT monitors, and finished activity history.
 - Workspace recovery persists the full session snapshot to JSON for cross-restart continuity.
 
 ---

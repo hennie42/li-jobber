@@ -13,11 +13,8 @@ public sealed class CvQualityValidator
     private const int CharsPerPage = 3000;
     private const int ExtraCharsPerHeading = 80;
     private const int MaxBulletsPerRoleWhenTrimming = 3;
-    private const int MaxRecommendationSentencesWhenTrimming = 2;
     private static readonly string[] OptionalTrimOrder =
     [
-        "Recommendations",
-        "Anbefalinger",
         "Certifications",
         "Certificeringer",
         "Projects",
@@ -52,29 +49,13 @@ public sealed class CvQualityValidator
             fixes.Add("TrimmedOptionalSectionsForLength");
         }
 
-        var careerYears = request.Candidate.Experience.Count > 0
-            ? DateTime.UtcNow.Year - (request.Candidate.Experience.Min(static e => e.Period.StartedOn?.Year) ?? DateTime.UtcNow.Year)
-            : 0;
-        var targetPages = careerYears switch
-        {
-            < 10 => 2,
-            < 20 => 3,
-            _ => 4
-        };
-
         var estimatedPages = EstimatePageCount(processedMarkdown);
-        if (estimatedPages > targetPages)
+        if (estimatedPages > 4)
         {
             processedMarkdown = TrimBulletsPerRole(processedMarkdown, out var bulletsTrimmed);
             if (bulletsTrimmed)
             {
                 fixes.Add("TrimmedBulletsPerRoleForPageCount");
-            }
-
-            processedMarkdown = TrimRecommendationQuotes(processedMarkdown, out var recsTrimmed);
-            if (recsTrimmed)
-            {
-                fixes.Add("TrimmedRecommendationQuotesForPageCount");
             }
         }
 
@@ -343,46 +324,6 @@ public sealed class CvQualityValidator
             }
 
             result.Add(line);
-        }
-
-        return changed ? string.Join(Environment.NewLine, result) : markdown;
-    }
-
-    /// <summary>
-    /// Trims recommendation blockquotes to max <see cref="MaxRecommendationSentencesWhenTrimming"/> sentences.
-    /// </summary>
-    private static string TrimRecommendationQuotes(string markdown, out bool changed)
-    {
-        var lines = markdown.Split(["\r\n", "\n"], StringSplitOptions.None);
-        var result = new List<string>();
-        changed = false;
-
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i];
-            if (!line.StartsWith("> ", StringComparison.Ordinal))
-            {
-                result.Add(line);
-                continue;
-            }
-
-            var quoteText = line[2..];
-            var sentences = quoteText.Split([". ", "! ", "? "], StringSplitOptions.RemoveEmptyEntries);
-            if (sentences.Length > MaxRecommendationSentencesWhenTrimming)
-            {
-                var trimmedQuote = string.Join(". ", sentences.Take(MaxRecommendationSentencesWhenTrimming));
-                if (!trimmedQuote.EndsWith('.'))
-                {
-                    trimmedQuote += ".";
-                }
-
-                result.Add($"> {trimmedQuote}");
-                changed = true;
-            }
-            else
-            {
-                result.Add(line);
-            }
         }
 
         return changed ? string.Join(Environment.NewLine, result) : markdown;

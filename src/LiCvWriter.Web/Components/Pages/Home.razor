@@ -12,6 +12,7 @@
 @inject WorkspaceSession Workspace
 @inject OllamaCapacityProbe CapacityProbe
 @inject ModelBenchmarkCoordinator BenchmarkCoordinator
+@inject IJSRuntime JS
 
 <PageTitle>Start / Setup</PageTitle>
 
@@ -37,17 +38,16 @@
 
 <div class="stepper-container">
 <section class="content-grid setup-grid">
-    <article class="card-panel stack-gap step-card @Step1StateClass">
-        <div class="step-card-header">
-            <div>
-                <div class="field-label">Step 1</div>
-                <h3>Check Ollama and set the session model</h3>
+    <details class="card-panel stack-gap step-card @Step1StateClass" open="@(!Workspace.IsLlmReady)">
+        <summary>
+            <div class="field-label">Step 1</div>
+            <h3>Check Ollama and set the session model</h3>
+            <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+                @(Workspace.IsLlmReady
+                    ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
+                    : "Model selection is still pending.")
             </div>
-            @if (Workspace.IsLlmReady && !isStep1Expanded)
-            {
-                <button class="link-button" @onclick="() => isStep1Expanded = true">Edit</button>
-            }
-        </div>
+        </summary>
         <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
             @(Workspace.IsLlmReady
                 ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
@@ -64,145 +64,130 @@
         }
         <p class="muted-text">Discover locally available models, then choose which one to use for this session.</p>
 
-        @if (isStep1Expanded)
+        @if (availability is not null)
         {
-            @if (availability is not null)
+            <dl class="key-value-grid compact-grid">
+                <dt>Version</dt>
+                <dd>@availability.Version</dd>
+                <dt>Configured default</dt>
+                <dd>@OllamaOptions.Model</dd>
+                <dt>Available models</dt>
+                <dd>@availability.AvailableModels.Count</dd>
+                <dt>Loaded models</dt>
+                <dd>@availability.EffectiveRunningModels.Count</dd>
+                <dt>Session model loaded</dt>
+                <dd>@FormatLoadedState(availability, selectedModel)</dd>
+            </dl>
+
+            <p class="muted-text">Loaded now: @FormatRunningModels(availability)</p>
+
+            @if (availability.AvailableModels.Count > 0)
             {
-                <dl class="key-value-grid compact-grid">
-                    <dt>Version</dt>
-                    <dd>@availability.Version</dd>
-                    <dt>Configured default</dt>
-                    <dd>@OllamaOptions.Model</dd>
-                    <dt>Available models</dt>
-                    <dd>@availability.AvailableModels.Count</dd>
-                    <dt>Loaded models</dt>
-                    <dd>@availability.EffectiveRunningModels.Count</dd>
-                    <dt>Session model loaded</dt>
-                    <dd>@FormatLoadedState(availability, selectedModel)</dd>
-                </dl>
+                <label class="field-label" for="sessionModel">Session model</label>
+                <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@isCheckingOllama">
+                    @foreach (var model in availability.AvailableModels.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@model">@model</option>
+                    }
+                </select>
 
-                <p class="muted-text">Loaded now: @FormatRunningModels(availability)</p>
+                <label class="field-label" for="thinkingLevel">Thinking level</label>
+                <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@isCheckingOllama">
+                    @foreach (var level in ThinkingLevels)
+                    {
+                        <option value="@level">@FormatThinkingLevel(level)</option>
+                    }
+                </select>
 
-                @if (availability.AvailableModels.Count > 0)
+                <div class="button-row">
+                    <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
+                    <button class="secondary-button" @onclick="StartBenchmarkAsync" disabled="@(!CanStartBenchmark)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking…" : "Benchmark all installed models")</button>
+                    @if (BenchmarkCoordinator.IsRunning)
+                    {
+                        <button class="link-button" @onclick="CancelBenchmark">Cancel benchmark</button>
+                    }
+                </div>
+
+                @if (BenchmarkCoordinator.Current is { IsRunning: true } liveBenchmark)
                 {
-                    <label class="field-label" for="sessionModel">Session model</label>
-                    <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@isCheckingOllama">
-                        @foreach (var model in availability.AvailableModels.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+                    <div class="status-chip status-pending">
+                        Benchmarking @liveBenchmark.CompletedCount/@liveBenchmark.TotalCount
+                        @if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel))
                         {
-                            <option value="@model">@model</option>
-                        }
-                    </select>
-
-                    <label class="field-label" for="thinkingLevel">Thinking level</label>
-                    <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@isCheckingOllama">
-                        @foreach (var level in ThinkingLevels)
-                        {
-                            <option value="@level">@FormatThinkingLevel(level)</option>
-                        }
-                    </select>
-
-                    <div class="button-row">
-                        <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
-                        <button class="secondary-button" @onclick="StartBenchmarkAsync" disabled="@(!CanStartBenchmark)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking…" : "Benchmark all installed models")</button>
-                        @if (BenchmarkCoordinator.IsRunning)
-                        {
-                            <button class="link-button" @onclick="CancelBenchmark">Cancel benchmark</button>
+                            <span> — currently @liveBenchmark.CurrentModel</span>
                         }
                     </div>
-
-                    @if (BenchmarkCoordinator.Current is { IsRunning: true } liveBenchmark)
-                    {
-                        <div class="status-chip status-pending">
-                            Benchmarking @liveBenchmark.CompletedCount/@liveBenchmark.TotalCount
-                            @if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel))
-                            {
-                                <span> — currently @liveBenchmark.CurrentModel</span>
-                            }
-                        </div>
-                    }
-                    else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
-                    {
-                        <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
-                            Last benchmark: @lastBenchmark.Results.Count model(s)
-                            @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
-                            — completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
-                        </div>
-                        <table class="compact-grid">
-                            <thead>
-                                <tr><th>#</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var benchmarkRow in lastBenchmark.Results)
-                                {
-                                    <tr>
-                                        <td>@benchmarkRow.Rank</td>
-                                        <td>@benchmarkRow.Model</td>
-                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.OverallScore.ToString("0.00") : "—")</td>
-                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.QualityScore.ToString("0.00") : "—")</td>
-                                        <td>@(benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "—")</td>
-                                        <td>@(benchmarkRow.Succeeded ? benchmarkRow.Fit.ToString() : (benchmarkRow.FailedReason ?? "failed"))</td>
-                                        <td>
-                                            @if (benchmarkRow.Succeeded)
-                                            {
-                                                <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(benchmarkRow.Model)">Use</button>
-                                            }
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    }
                 }
-                else
+                else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
                 {
-                    <p class="muted-text">Ollama responded, but no models were returned from the tags endpoint.</p>
+                    <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
+                        Last benchmark: @lastBenchmark.Results.Count model(s)
+                        @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
+                        — completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
+                    </div>
+                    <table class="compact-grid">
+                        <thead>
+                            <tr><th>#</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var benchmarkRow in lastBenchmark.Results)
+                            {
+                                <tr>
+                                    <td>@benchmarkRow.Rank</td>
+                                    <td>@benchmarkRow.Model</td>
+                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.OverallScore.ToString("0.00") : "—")</td>
+                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.QualityScore.ToString("0.00") : "—")</td>
+                                    <td>@(benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "—")</td>
+                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.Fit.ToString() : (benchmarkRow.FailedReason ?? "failed"))</td>
+                                    <td>
+                                        @if (benchmarkRow.Succeeded)
+                                        {
+                                            <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(benchmarkRow.Model)">Use</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
                 }
             }
             else
             {
-                <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
-            }
-
-            @if (Workspace.HasStartedLlmWork)
-            {
-                <p class="muted-text">Updated session model and thinking changes apply to future LLM operations. Re-run any completed analysis or draft generation that you want refreshed with the new settings.</p>
-            }
-
-            @if (!string.IsNullOrWhiteSpace(llmErrorMessage))
-            {
-                <div class="message error">@llmErrorMessage</div>
+                <p class="muted-text">Ollama responded, but no models were returned from the tags endpoint.</p>
             }
         }
-        @if (!isStep1Expanded && !Workspace.IsLlmReady)
+        else
         {
-            <p class="muted-text">Click the button below to discover local models and pick one for this session.</p>
+            <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
         }
 
-        @if (isStep1Expanded || !Workspace.IsLlmReady)
+        @if (Workspace.HasStartedLlmWork)
         {
-            <div class="button-row">
-                <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
-            </div>
+            <p class="muted-text">Updated session model and thinking changes apply to future LLM operations. Re-run any completed analysis or draft generation that you want refreshed with the new settings.</p>
         }
-    </article>
 
-    <article class="card-panel stack-gap step-card @Step2StateClass">
-        <div class="step-card-header">
-            <div>
-                <div class="field-label">Step 2</div>
-                <h3>Load your LinkedIn profile</h3>
-            </div>
-            @if (hasProfile && !isStep2Expanded)
-            {
-                <button class="link-button" @onclick="() => isStep2Expanded = true">Edit</button>
-            }
+        @if (!string.IsNullOrWhiteSpace(llmErrorMessage))
+        {
+            <div class="message error">@llmErrorMessage</div>
+        }
+
+        <div class="button-row">
+            <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
         </div>
+    </details>
+
+    <details class="card-panel stack-gap step-card @Step2StateClass" open="@(!hasProfile)">
+        <summary>
+            <div class="field-label">Step 2</div>
+            <h3>Load your LinkedIn profile</h3>
+            <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
+                @Workspace.LinkedInAuthorizationStatus.Message
+            </div>
+        </summary>
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
             @Workspace.LinkedInAuthorizationStatus.Message
         </div>
 
-        @if (!hasProfile || isStep2Expanded)
-        {
         <dl class="key-value-grid compact-grid">
             <dt>Required scope</dt>
             <dd>@LinkedInOptions.PortabilityScope</dd>
@@ -250,8 +235,7 @@
         {
             <div class="message error">@profileErrorMessage</div>
         }
-        }
-    </article>
+    </details>
 </section>
 
 <details class="card-panel stack-gap step-card @Step3StateClass">
@@ -425,9 +409,11 @@
         <div class="profile-tabs">
             <button class="profile-tab @(activeProfileTab == "experience" ? "active" : "")" @onclick='() => activeProfileTab = "experience"'>Experience <span class="tab-count">@Workspace.CandidateProfile.Experience.Count</span></button>
             <button class="profile-tab @(activeProfileTab == "education" ? "active" : "")" @onclick='() => activeProfileTab = "education"'>Education <span class="tab-count">@Workspace.CandidateProfile.Education.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "skills" ? "active" : "")" @onclick='() => activeProfileTab = "skills"'>Skills <span class="tab-count">@Workspace.CandidateProfile.Skills.Count</span></button>
             <button class="profile-tab @(activeProfileTab == "certifications" ? "active" : "")" @onclick='() => activeProfileTab = "certifications"'>Certifications <span class="tab-count">@Workspace.CandidateProfile.Certifications.Count</span></button>
             <button class="profile-tab @(activeProfileTab == "projects" ? "active" : "")" @onclick='() => activeProfileTab = "projects"'>Projects <span class="tab-count">@Workspace.CandidateProfile.Projects.Count</span></button>
             <button class="profile-tab @(activeProfileTab == "recommendations" ? "active" : "")" @onclick='() => activeProfileTab = "recommendations"'>Recommendations <span class="tab-count">@Workspace.CandidateProfile.Recommendations.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "signals" ? "active" : "")" @onclick='() => activeProfileTab = "signals"'>Notes <span class="tab-count">@Workspace.CandidateProfile.ManualSignals.Count</span></button>
         </div>
 
         @if (activeProfileTab == "experience")
@@ -449,7 +435,10 @@
                             }
                             @if (savedField == $"exp-title-{index}") { <span class="save-flash">Saved</span> }
                         </h4>
-                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveExperienceAsync(index)">Remove</button>
+                        </div>
                     </div>
                     <div class="profile-entry-sub">
                         @if (editingField == $"exp-company-{index}")
@@ -496,7 +485,10 @@
                             }
                             @if (savedField == $"edu-school-{index}") { <span class="save-flash">Saved</span> }
                         </h4>
-                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveEducationAsync(index)">Remove</button>
+                        </div>
                     </div>
                     <div class="profile-entry-sub">
                         @if (editingField == $"edu-degree-{index}")
@@ -524,6 +516,21 @@
             }
         }
 
+        @if (activeProfileTab == "skills")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Skills.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Skills[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Name</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveSkillAsync(index)">Remove</button>
+                    </div>
+                </div>
+            }
+        }
+
         @if (activeProfileTab == "certifications")
         {
             @for (var i = 0; i < Workspace.CandidateProfile.Certifications.Count; i++)
@@ -543,7 +550,10 @@
                             }
                             @if (savedField == $"cert-name-{index}") { <span class="save-flash">Saved</span> }
                         </h4>
-                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveCertificationAsync(index)">Remove</button>
+                        </div>
                     </div>
                     <div class="profile-entry-sub">
                         @if (editingField == $"cert-authority-{index}")
@@ -579,7 +589,10 @@
                             }
                             @if (savedField == $"proj-title-{index}") { <span class="save-flash">Saved</span> }
                         </h4>
-                        <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveProjectAsync(index)">Remove</button>
+                        </div>
                     </div>
                     <div class="profile-entry-body">
                         @if (editingField == $"proj-desc-{index}")
@@ -598,17 +611,35 @@
 
         @if (activeProfileTab == "recommendations")
         {
-            @foreach (var entry in Workspace.CandidateProfile.Recommendations)
+            @for (var i = 0; i < Workspace.CandidateProfile.Recommendations.Count; i++)
             {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Recommendations[index];
                 <div class="profile-entry">
                     <div class="profile-entry-header">
                         <h4>@entry.Author.FullName</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveRecommendationAsync(index)">Remove</button>
                     </div>
                     @if (!string.IsNullOrWhiteSpace(entry.Company) || !string.IsNullOrWhiteSpace(entry.JobTitle))
                     {
                         <div class="profile-entry-sub">@entry.JobTitle @(!string.IsNullOrWhiteSpace(entry.Company) ? $"at {entry.Company}" : "")</div>
                     }
                     <div class="profile-entry-body">@entry.Text</div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "signals")
+        {
+            @foreach (var entry in Workspace.CandidateProfile.ManualSignals.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var key = entry.Key;
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Key</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveManualSignalAsync(key)">Remove</button>
+                    </div>
+                    <div class="profile-entry-body">@entry.Value</div>
                 </div>
             }
         }
@@ -624,11 +655,9 @@
 
     private bool isCheckingOllama;
     private bool isImportingProfile;
+    private bool isProfileExpanded = true;
     private string? importProgressStatus;
     private bool isProcessingInsightsPdf;
-    private bool isStep1Expanded = false;
-    private bool isStep2Expanded = false;
-    private bool isProfileExpanded;
     private string activeProfileTab = "experience";
     private string? editingField;
     private string editingValue = string.Empty;
@@ -714,7 +743,6 @@
         if (firstRender && availability is null)
         {
             await CheckOllamaAsync();
-            isStep1Expanded = false;
             StateHasChanged();
         }
     }
@@ -827,7 +855,6 @@
     private async Task CheckOllamaAsync()
     {
         llmErrorMessage = null;
-        isStep1Expanded = true;
         isCheckingOllama = true;
 
         try
@@ -862,7 +889,6 @@
         try
         {
             Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
-            isStep1Expanded = false;
             Operations.Success(
                 "Session LLM settings updated.",
                 $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking");
@@ -1190,6 +1216,137 @@
 
         editingField = null;
     }
+
+    private Task RemoveExperienceAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "experience",
+            static profile => profile.Experience,
+            static (profile, values) => profile with { Experience = values },
+            static entry => entry.Title);
+
+    private Task RemoveEducationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "education",
+            static profile => profile.Education,
+            static (profile, values) => profile with { Education = values },
+            static entry => string.IsNullOrWhiteSpace(entry.DegreeName) ? entry.SchoolName : entry.DegreeName!);
+
+    private Task RemoveSkillAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "skill",
+            static profile => profile.Skills,
+            static (profile, values) => profile with { Skills = values },
+            static entry => entry.Name);
+
+    private Task RemoveCertificationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "certification",
+            static profile => profile.Certifications,
+            static (profile, values) => profile with { Certifications = values },
+            static entry => entry.Name);
+
+    private Task RemoveProjectAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "project",
+            static profile => profile.Projects,
+            static (profile, values) => profile with { Projects = values },
+            static entry => entry.Title);
+
+    private Task RemoveRecommendationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "recommendation",
+            static profile => profile.Recommendations,
+            static (profile, values) => profile with { Recommendations = values },
+            static entry => entry.Author.FullName);
+
+    private async Task RemoveManualSignalAsync(string key)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || !profile.ManualSignals.ContainsKey(key))
+        {
+            return;
+        }
+
+        if (!await ConfirmProfileRemovalAsync($"note '{key}'"))
+        {
+            return;
+        }
+
+        profile = Workspace.CandidateProfile;
+        if (profile is null || !profile.ManualSignals.ContainsKey(key))
+        {
+            return;
+        }
+
+        var manualSignals = new Dictionary<string, string>(profile.ManualSignals, StringComparer.OrdinalIgnoreCase);
+        manualSignals.Remove(key);
+        Workspace.UpdateCandidateProfile(profile with { ManualSignals = manualSignals });
+        ClearProfileEditState();
+        Operations.Info("Imported profile note removed.", $"'{key}' was removed from the current profile.");
+    }
+
+    private async Task RemoveProfileItemAsync<T>(
+        int index,
+        string itemKind,
+        Func<CandidateProfile, IReadOnlyList<T>> getItems,
+        Func<CandidateProfile, IReadOnlyList<T>, CandidateProfile> updateProfile,
+        Func<T, string> getLabel)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        var items = getItems(profile);
+        if (index < 0 || index >= items.Count)
+        {
+            return;
+        }
+
+        var label = getLabel(items[index]);
+        if (!await ConfirmProfileRemovalAsync($"{itemKind} '{label}'"))
+        {
+            return;
+        }
+
+        profile = Workspace.CandidateProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        items = getItems(profile);
+        if (index < 0 || index >= items.Count)
+        {
+            return;
+        }
+
+        var updatedProfile = updateProfile(profile, RemoveAt(items, index));
+        Workspace.UpdateCandidateProfile(updatedProfile);
+        ClearProfileEditState();
+        Operations.Info("Imported profile item removed.", $"{itemKind} '{label}' was removed from the current profile.");
+    }
+
+    private async Task<bool> ConfirmProfileRemovalAsync(string itemDescription)
+        => await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Remove {itemDescription} from the current profile? This only changes the current profile and can be restored by re-importing LinkedIn data.");
+
+    private void ClearProfileEditState()
+    {
+        editingField = null;
+        savedField = null;
+    }
+
+    private static IReadOnlyList<T> RemoveAt<T>(IReadOnlyList<T> values, int index)
+        => values.Where((_, candidateIndex) => candidateIndex != index).ToArray();
 
     private void StartEdit(string fieldKey, string? currentValue)
     {

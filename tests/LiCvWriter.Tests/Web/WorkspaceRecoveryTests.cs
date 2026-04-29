@@ -69,6 +69,7 @@ public sealed class WorkspaceRecoveryTests
                 GenerateCv = true,
                 GenerateCoverLetter = false,
                 GenerateSummary = false,
+                GenerateRecommendations = true,
                 GenerateInterviewNotes = true,
                 ContactEmail = "alex@example.com",
                 ContactPhone = "12345",
@@ -82,6 +83,7 @@ public sealed class WorkspaceRecoveryTests
             Assert.True(preferences.GenerateCv);
             Assert.False(preferences.GenerateCoverLetter);
             Assert.False(preferences.GenerateSummary);
+            Assert.True(preferences.GenerateRecommendations);
             Assert.True(preferences.GenerateInterviewNotes);
             Assert.Equal("alex@example.com", preferences.ContactEmail);
             Assert.Equal("12345", preferences.ContactPhone);

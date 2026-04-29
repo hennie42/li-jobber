@@ -14,8 +14,8 @@ namespace LiCvWriter.Infrastructure.Documents;
 /// <summary>
 /// Exports generated documents to disk as Word (<c>.docx</c>) files. CVs are
 /// produced from the embedded <c>cv-template.dotx</c> by populating named
-/// content controls per section. Other document kinds use a focused
-/// application-material template with the same content-control cleanup path.
+/// content controls per section. Recommendations use their own template;
+/// other document kinds use the focused application-material template.
 /// </summary>
 public sealed class TemplateBasedDocumentExportService(StorageOptions options) : IDocumentExportService
 {
@@ -37,7 +37,6 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         new("Education", null, null, null, CvMarkdownSectionExtractor.ExtractEducation),
         new("Certifications", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Certifications", "Certificeringer")),
         new("Languages", null, null, null, CvMarkdownSectionExtractor.ExtractLanguages),
-        new("Recommendations", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Recommendations", "Anbefalinger")),
         new("EarlyCareer", null, null, null, markdown => CvMarkdownSectionExtractor.ExtractSection(markdown, "Early Career", "Tidlig karriere")),
         // FitSnapshot intentionally omitted: it is internal assessment data
         // (strengths/gaps for the user) and must not appear in the document
@@ -59,6 +58,10 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
         {
             await Task.Run(() => GenerateFromTemplate(document, wordPath), cancellationToken);
         }
+        else if (document.Kind is DocumentKind.Recommendations)
+        {
+            await Task.Run(() => GenerateRecommendationsFromTemplate(document, wordPath), cancellationToken);
+        }
         else
         {
             await Task.Run(() => GenerateApplicationMaterialFromTemplate(document, wordPath), cancellationToken);
@@ -70,7 +73,7 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
     /// <summary>
     /// Clones the embedded CV template, splits the rendered CV markdown into
     /// sections, populates each tagged content control, and removes any
-    /// controls left empty (e.g. recommendations or early-career when absent).
+    /// controls left empty (e.g. early-career when absent).
     /// </summary>
     private static void GenerateFromTemplate(GeneratedDocument document, string outputPath)
     {
@@ -153,6 +156,44 @@ public sealed class TemplateBasedDocumentExportService(StorageOptions options) :
             // ATS systems and LLM-based CV parsers can read structured data from
             // the document without re-parsing the rendered text.
             AtsCustomXmlEmitter.Attach(wordDoc, document.AtsSnapshot);
+
+            mainPart.Document!.Save();
+        }
+
+        NormalizeDocumentPackageContentTypes(outputPath);
+    }
+
+    private static void GenerateRecommendationsFromTemplate(GeneratedDocument document, string outputPath)
+    {
+        using (var templateStream = EmbeddedTemplateProvider.OpenTemplate(EmbeddedTemplateProvider.RecommendationsTemplateResourceName))
+        using (var destinationStream = File.Create(outputPath))
+        {
+            templateStream.CopyTo(destinationStream);
+        }
+
+        using (var package = WordprocessingDocument.Open(outputPath, isEditable: true))
+        {
+            package.ChangeDocumentType(WordprocessingDocumentType.Document);
+        }
+
+        using (var wordDoc = WordprocessingDocument.Open(outputPath, isEditable: true))
+        {
+            var mainPart = wordDoc.MainDocumentPart
+                ?? throw new InvalidOperationException("Recommendations template is missing its main document part.");
+
+            SetCoreProperties(wordDoc, document);
+
+            var populatedTags = new HashSet<string>(StringComparer.Ordinal);
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "CandidateHeader", ExtractApplicationCandidateHeader(document.Markdown));
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "TargetRole", CvMarkdownSectionExtractor.ExtractSection(document.Markdown, "Target Role", "Målrolle"));
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "DocumentIntro", CvMarkdownSectionExtractor.ExtractSection(document.Markdown, "Recommendation Brief", "Anbefalingsresumé"));
+            PopulateApplicationMaterialTag(mainPart, populatedTags, "RecommendationsBody", CvMarkdownSectionExtractor.ExtractSection(document.Markdown, "Recommendations", "Anbefalinger"));
+
+            var body = mainPart.Document?.Body
+                ?? throw new InvalidOperationException("Recommendations template body missing.");
+
+            TemplateContentPopulator.RemoveEmptyControls(body, populatedTags);
+            TemplateContentPopulator.UnwrapAllSdtBlocks(body);
 
             mainPart.Document!.Save();
         }
