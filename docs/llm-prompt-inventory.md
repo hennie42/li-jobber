@@ -39,7 +39,7 @@ Risk ratings:
 
 ## Coverage Gaps
 
-1. Source-boundary rules are now centralized in `PromptConstraints.SourceTextBoundary` and applied to current untrusted-source prompt surfaces; adversarial fixture tests are still needed.
+1. Source-boundary rules are centralized in `PromptConstraints.SourceTextBoundary`, and high-risk free-text inputs now use `BEGIN SOURCE BLOCK` delimiters; a live local adversarial runner is still needed.
 2. Draft-generation prompts now distinguish emphasis guidance from final visible output; model-output fixtures are still needed to prove fit scores/gaps stay out of generated documents.
 3. Hidden requirement inference needs a stricter separation between inferred expectations and source-backed requirements.
 4. CV section generation is already chunked by section, but it lacks an explicit shared outline and claim/evidence ledger.

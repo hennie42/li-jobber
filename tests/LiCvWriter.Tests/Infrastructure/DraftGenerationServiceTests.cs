@@ -102,6 +102,7 @@ public sealed class DraftGenerationServiceTests
         Assert.Contains("Pragmatic AI architect", combinedPrompts);
         Assert.Contains("Selected evidence:", combinedPrompts);
         Assert.Contains("Lead Architect @ Contoso", combinedPrompts);
+        Assert.Contains("BEGIN SOURCE BLOCK: ADDITIONAL USER INSTRUCTIONS", combinedPrompts);
     }
 
     [Fact]
@@ -258,6 +259,8 @@ public sealed class DraftGenerationServiceTests
         Assert.Contains("Generate a recommendation brief", combinedUserPrompts);
         Assert.Contains("recommendation brief", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Generate interview questions", combinedUserPrompts);
+        Assert.Contains("BEGIN SOURCE BLOCK: RECOMMENDATIONS", combinedUserPrompts);
+        Assert.Contains("BEGIN SOURCE BLOCK: ADDITIONAL USER INSTRUCTIONS", combinedUserPrompts);
         Assert.DoesNotContain("STAR Examples", combinedSystemPrompts, StringComparison.OrdinalIgnoreCase);
         Assert.All(llmClient.AllRequests, request =>
         {

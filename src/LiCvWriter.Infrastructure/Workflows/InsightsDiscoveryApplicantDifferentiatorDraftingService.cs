@@ -118,7 +118,7 @@ Draft applicant differentiators from the Insights Discovery profile text below.
 The output will be saved into an application form that later steers fit review, evidence selection, and generated drafts.
 
 Insights Discovery profile text:
-{normalizedSource}
+{PromptConstraints.FormatSourceBlock("insights discovery profile text", normalizedSource)}
 """;
 
     private static string NormalizeSourceText(string extractedText)

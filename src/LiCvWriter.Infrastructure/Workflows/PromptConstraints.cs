@@ -28,6 +28,18 @@ internal static class PromptConstraints
     internal const string VisibleContentOnlyOutput = "Generate visible document content only; do not rely on hidden metadata, hidden ATS payloads, or invisible document data.";
 
     /// <summary>
+    /// Delimits user-controlled source text so models are less likely to treat embedded
+    /// instructions from job pages, PDFs, recommendations, or user notes as prompt rules.
+    /// </summary>
+    internal static string FormatSourceBlock(string label, string? content)
+    {
+        var normalizedLabel = string.IsNullOrWhiteSpace(label) ? "SOURCE" : label.Trim().ToUpperInvariant();
+        var normalizedContent = string.IsNullOrWhiteSpace(content) ? "none" : content.Trim();
+
+        return $"BEGIN SOURCE BLOCK: {normalizedLabel}{Environment.NewLine}{normalizedContent}{Environment.NewLine}END SOURCE BLOCK: {normalizedLabel}";
+    }
+
+    /// <summary>
     /// Rule for draft-generation prompts: never surface negative framing about the candidate.
     /// </summary>
     internal const string NoNegativeTraits = "Do not mention gaps, weaknesses, missing skills, or negative traits of the applicant.";

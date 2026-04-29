@@ -312,10 +312,10 @@ Technology context:
 {BuildTechnologyContext(request.TechnologyGapAssessment)}
 
 Recommendations:
-{recommendations}
+{PromptConstraints.FormatSourceBlock("recommendations", recommendations)}
 
 Additional instructions:
-{request.AdditionalInstructions}
+{PromptConstraints.FormatSourceBlock("additional user instructions", request.AdditionalInstructions)}
 """;
     }
 
@@ -814,7 +814,7 @@ Applicant differentiators:
 {differentiators}
 
 Additional instructions:
-{request.AdditionalInstructions}
+{PromptConstraints.FormatSourceBlock("additional user instructions", request.AdditionalInstructions)}
 """,
             CvSection.KeySkills => $"""
 {languageContextLine}Write the Key Technologies & Competencies keyword line in {languageLabel}.
@@ -847,7 +847,7 @@ Selected evidence:
 {selectedEvidence}
 
 Additional instructions:
-{request.AdditionalInstructions}
+{PromptConstraints.FormatSourceBlock("additional user instructions", request.AdditionalInstructions)}
 """,
             CvSection.ProjectHighlights => $"""
 {languageContextLine}Rewrite the Project highlights in {languageLabel}.

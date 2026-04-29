@@ -917,21 +917,23 @@ Rules:
         builder.AppendLine($"HTML title hint: {title}");
         builder.AppendLine($"Main heading hint: {heading}");
         builder.AppendLine();
-        builder.AppendLine("Page text:");
-        builder.AppendLine(Clip(text, MaxJobContextCharacters));
+        builder.AppendLine(PromptConstraints.FormatSourceBlock("job posting page text", Clip(text, MaxJobContextCharacters)));
         return builder.ToString();
     }
 
     private static string BuildCompanyUserPrompt(IEnumerable<(Uri Url, string Text)> sourceDocuments)
     {
+        var documents = sourceDocuments.ToArray();
         var builder = new StringBuilder();
         builder.AppendLine("Company source documents:");
 
-        foreach (var (url, text) in sourceDocuments)
+        foreach (var (url, text) in documents)
         {
             builder.AppendLine();
             builder.AppendLine($"Source URL: {url}");
-            builder.AppendLine(Clip(text, MaxCompanyContextCharacters / Math.Max(1, sourceDocuments.Count())));
+            builder.AppendLine(PromptConstraints.FormatSourceBlock(
+                "company source page",
+                Clip(text, MaxCompanyContextCharacters / Math.Max(1, documents.Length))));
         }
 
         return Clip(builder.ToString(), MaxCompanyContextCharacters);
@@ -942,8 +944,7 @@ Rules:
         var builder = new StringBuilder();
         builder.AppendLine("Source: pasted text (no URL available)");
         builder.AppendLine();
-        builder.AppendLine("Job posting text:");
-        builder.AppendLine(Clip(jobPostingText, MaxJobContextCharacters));
+        builder.AppendLine(PromptConstraints.FormatSourceBlock("pasted job posting text", Clip(jobPostingText, MaxJobContextCharacters)));
         return builder.ToString();
     }
 
@@ -953,7 +954,7 @@ Rules:
         builder.AppendLine("Company source documents:");
         builder.AppendLine();
         builder.AppendLine("Source: pasted text (no URL available)");
-        builder.AppendLine(Clip(companyContextText, MaxCompanyContextCharacters));
+        builder.AppendLine(PromptConstraints.FormatSourceBlock("pasted company context text", Clip(companyContextText, MaxCompanyContextCharacters)));
         return builder.ToString();
     }
 
