@@ -41,7 +41,6 @@ No data leaves your machine. The LinkedIn token is used once for import and disc
 - **Session model control** — change model and thinking level at any time; rerun completed analysis or draft generation with the new settings
 - **Refresh-all orchestration** — single-button re-analysis of job context, fit review, and technology gaps with shared progress streaming
 - **Workspace recovery** — full session state persists across restarts via JSON snapshot
-- **Session diagnostics** — detailed telemetry, import diagnostics, response capture, and audit trail
 
 ## Workflow
 
@@ -58,7 +57,6 @@ graph TD
     I --> J[Generate and export Word + Markdown drafts]
     J --> K[Two-pass refinement for must-have theme coverage]
     F --> L[Refresh All — rerun analysis pipeline in one step]
-    F --> M[Session Diagnostics]
 ```
 
 ## Prerequisites

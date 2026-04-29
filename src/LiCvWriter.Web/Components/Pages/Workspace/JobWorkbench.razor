@@ -674,9 +674,6 @@ else if (CanRunFitReview)
                     <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
                 }
             </dl>
-            <div class="button-row">
-                <a class="secondary-button" href="/diagnostics/session">Session diagnostics</a>
-            </div>
         </div>
     }
 
@@ -684,7 +681,7 @@ else if (CanRunFitReview)
     {
         <div class="details-card stack-gap stream-preview-card">
             <div class="field-label">Live draft preview</div>
-            <pre class="response-box stream-preview-box">@draftSnapshot.ResponseContent</pre>
+            <MarkdownPreview Markdown="@draftSnapshot.ResponseContent" CssClass="markdown-preview stream-preview-box" @rendermode="InteractiveWebAssembly" />
         </div>
     }
 
@@ -714,7 +711,7 @@ else if (CanRunFitReview)
             <details class="details-card">
                 <summary>@document.Kind - @document.Title</summary>
                 <p class="muted-text">Created in @FormatDuration(document.LlmDuration)@(string.IsNullOrWhiteSpace(document.Model) ? string.Empty : $" via {document.Model}")@FormatTokenSummary(document)</p>
-                <pre class="response-box">@document.Markdown</pre>
+                <MarkdownPreview Markdown="@document.Markdown" CssClass="markdown-preview" @rendermode="InteractiveWebAssembly" />
             </details>
         }
     </details>

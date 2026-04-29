@@ -19,5 +19,6 @@
     <ProjectReference Include="..\..\src\LiCvWriter.Application\LiCvWriter.Application.csproj" />
     <ProjectReference Include="..\..\src\LiCvWriter.Infrastructure\LiCvWriter.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\LiCvWriter.Web\LiCvWriter.Web.csproj" />
+    <ProjectReference Include="..\..\src\LiCvWriter.Web.SharedUI\LiCvWriter.Web.SharedUI.csproj" />
   </ItemGroup>
 </Project>

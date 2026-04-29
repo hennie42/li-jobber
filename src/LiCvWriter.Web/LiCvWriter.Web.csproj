@@ -9,5 +9,11 @@
     <ProjectReference Include="..\LiCvWriter.Application\LiCvWriter.Application.csproj" />
     <ProjectReference Include="..\LiCvWriter.Infrastructure\LiCvWriter.Infrastructure.csproj" />
     <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Web.Client\LiCvWriter.Web.Client.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Web.SharedUI\LiCvWriter.Web.SharedUI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.7" />
   </ItemGroup>
 </Project>

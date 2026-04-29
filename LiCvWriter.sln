@@ -12,6 +12,10 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Web", "src\LiCvW
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiCvWriter.Tests", "tests\LiCvWriter.Tests\LiCvWriter.Tests.csproj", "{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Web.SharedUI", "src\LiCvWriter.Web.SharedUI\LiCvWriter.Web.SharedUI.csproj", "{E6793C32-4E99-4037-B63B-32CE8A504BAA}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiCvWriter.Web.Client", "src\LiCvWriter.Web.Client\LiCvWriter.Web.Client.csproj", "{9E4C29A1-9022-4338-900E-2FE24E95FB82}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,6 +42,14 @@ Global
 		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6E09B6CE-2E7F-4A8C-A28D-BED35AD9E9F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E6793C32-4E99-4037-B63B-32CE8A504BAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6793C32-4E99-4037-B63B-32CE8A504BAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6793C32-4E99-4037-B63B-32CE8A504BAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6793C32-4E99-4037-B63B-32CE8A504BAA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9E4C29A1-9022-4338-900E-2FE24E95FB82}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9E4C29A1-9022-4338-900E-2FE24E95FB82}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9E4C29A1-9022-4338-900E-2FE24E95FB82}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9E4C29A1-9022-4338-900E-2FE24E95FB82}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

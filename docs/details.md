@@ -71,7 +71,7 @@ graph TB
 | Document rendering | [MarkdownDocumentRenderer.cs](../src/LiCvWriter.Infrastructure/Documents/MarkdownDocumentRenderer.cs) | Shapes LLM output into structured Markdown with ATS sections |
 | Template export | [TemplateBasedDocumentExportService.cs](../src/LiCvWriter.Infrastructure/Documents/TemplateBasedDocumentExportService.cs), [CvMarkdownSectionExtractor.cs](../src/LiCvWriter.Infrastructure/Documents/CvMarkdownSectionExtractor.cs), [CvWordTemplateGenerator.cs](../src/LiCvWriter.Infrastructure/Documents/Templates/CvWordTemplateGenerator.cs), [TemplateContentPopulator.cs](../src/LiCvWriter.Infrastructure/Documents/Templates/TemplateContentPopulator.cs) | Template-based Word export with content controls |
 | LLM client | [OllamaClient.cs](../src/LiCvWriter.Infrastructure/Llm/OllamaClient.cs) | Streaming transport, chunk aggregation, repetition detection |
-| Diagnostics | [SessionDiagnostics.razor](../src/LiCvWriter.Web/Components/Pages/Diagnostics/SessionDiagnostics.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Sidebar telemetry feeds, import diagnostics, session inspection |
+| Operational status | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Sidebar telemetry feeds and recent activity |
 
 ---
 
@@ -83,18 +83,15 @@ graph TB
     B --> C[MainLayout.razor]
     C --> D[Start / Setup]
     C --> E[Job Workbench]
-    C --> F[Session Diagnostics]
     D --> G[WorkspaceSession]
     E --> G
-    F --> G
     D --> H[OperationStatusService]
     E --> H
-    F --> H
     G --> I[WorkspaceRecoveryStore]
     I --> J[workspace-recovery.json]
 ```
 
-The three pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, status monitor, and completed-activity list in sync while long-running work streams in. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery.
+The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, status monitor, and completed-activity list in sync while long-running work streams in. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery.
 
 ---
 
@@ -310,9 +307,9 @@ graph LR
 
 The typed/enrichment split is deliberate. Typed collections (Experience, Education, Skills, Certifications, Projects, Recommendations) feed ranking and document generation more strongly than enrichment notes. Enrichment domains in `ManualSignals` preserve extra context without overloading narrower concepts.
 
-### Diagnostics
+### Import Diagnostics Data
 
-The diagnostics page reads `WorkspaceSession.ImportResult` and formats it via `LinkedInImportDiagnosticsFormatter` into overview counts, discovered files, experience previews, enrichment notes, and warnings.
+`WorkspaceSession.SetImportResult` keeps the latest `LinkedInExportImportResult` and its formatted diagnostics snapshot available to the local session. The dedicated Session Diagnostics page was removed; future diagnostics should remain non-routed developer internals unless an explicit local-only UI need returns.
 
 ```mermaid
 graph TD
@@ -321,7 +318,7 @@ graph TD
     B --> D[Experience entries]
     B --> E[Manual signal entries]
     B --> F[Files and warnings]
-    C --> G[SessionDiagnostics.razor]
+    C --> G[WorkspaceSession diagnostics snapshot]
     D --> G
     E --> G
     F --> G
@@ -1020,14 +1017,8 @@ graph LR
     C --> D[Reasoning monitor — live/last thinking text]
     C --> E[Status monitor — live/last streaming status]
     C --> F[Finished activity list — last 6 entries]
-    G[WorkspaceSession] --> H[SessionDiagnostics.razor]
-    B --> H
-    I[LinkedInImportDiagnosticsFormatter] --> H
-    H --> J[Current telemetry]
-    H --> K[Session context]
-    H --> L[LinkedIn import details]
-    H --> M[Full thinking content]
-    H --> N[Recent activity]
+    G[WorkspaceSession] --> H[Local recovery snapshot]
+    I[LinkedInImportDiagnosticsFormatter] --> G
 ```
 
 ### Telemetry Model
@@ -1076,7 +1067,7 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 | Document rendering | `MarkdownDocumentRenderer.RenderAsync()` | No | Deterministic Markdown shaping |
 | Word export (CV) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based with content controls |
 | Word export (other) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based DOCX with content controls |
-| Diagnostics | `MainLayout.razor`, `SessionDiagnostics.razor`, and formatters | No | Shared sidebar for live summary, diagnostics page for deep inspection |
+| Operational status | `MainLayout.razor` and `OperationStatusService` | No | Shared sidebar for live summary and recent activity |
 
 ---
 

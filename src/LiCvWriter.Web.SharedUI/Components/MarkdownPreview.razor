@@ -1,0 +1,11 @@
+@using LiCvWriter.Web.SharedUI.Markdown
+
+<div class="@CssClass">
+    @((MarkupString)ClientMarkdownRenderer.RenderHtml(Markdown))
+</div>
+
+@code {
+    [Parameter] public string? Markdown { get; set; }
+
+    [Parameter] public string CssClass { get; set; } = "markdown-preview";
+}
