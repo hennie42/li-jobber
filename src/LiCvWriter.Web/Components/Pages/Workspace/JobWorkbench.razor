@@ -1525,7 +1525,7 @@ else if (CanRunFitReview)
             activeStreamSnapshot = snapshot;
         }
 
-        if (snapshot.IsTerminal)
+        if (eventType is "completed" or "failed" or "cancelled")
         {
             currentOperation = BusyOperation.None;
             activeOperationJobSetId = null;
