@@ -46,6 +46,12 @@ window.liCvWriterLlmStream = (() => {
   };
 })();
 
+window.openDetailsElement = (element) => {
+  if (element) {
+    element.open = true;
+  }
+};
+
 window.liCvWriterUi = window.liCvWriterUi || {};
 window.liCvWriterUi.scrollElementToBottom = (element) => {
   if (!element) {

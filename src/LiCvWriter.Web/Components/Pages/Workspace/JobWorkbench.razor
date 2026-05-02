@@ -374,7 +374,7 @@ else
 
 @if (CurrentJobSet.JobFitAssessment.HasSignals)
 {
-    <details class="card-panel stack-gap">
+    <details @ref="_fitReviewDetailsRef" class="card-panel stack-gap">
         <summary>
             <div class="fit-header">
                 <div>
@@ -780,6 +780,9 @@ else if (CanRunFitReview)
     private string? activeOperationJobSetId;
     private DotNetObjectReference<JobWorkbench>? streamCallbackReference;
     private bool disposed;
+    private ElementReference _fitReviewDetailsRef;
+    private bool _openFitReviewAfterRender;
+    private bool _previousFitReviewHasSignals;
     private bool isBatchRunning;
     private int batchCompletedCount;
     private int batchTotalCount;
@@ -839,6 +842,7 @@ else if (CanRunFitReview)
         Operations.Changed += HandleChanged;
         Workspace.Changed += HandleWorkspaceChanged;
         SyncFromWorkspace();
+        _previousFitReviewHasSignals = !string.IsNullOrWhiteSpace(JobSetId) && CurrentJobSet.JobFitAssessment.HasSignals;
     }
 
     protected override void OnParametersSet()
@@ -849,6 +853,22 @@ else if (CanRunFitReview)
         }
 
         SyncFromWorkspace();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_openFitReviewAfterRender && !string.IsNullOrWhiteSpace(JobSetId) && CurrentJobSet.JobFitAssessment.HasSignals)
+        {
+            _openFitReviewAfterRender = false;
+            try
+            {
+                await JS.InvokeVoidAsync("openDetailsElement", _fitReviewDetailsRef);
+            }
+            catch
+            {
+                // Ignore JS interop errors during teardown.
+            }
+        }
     }
 
     public void Dispose()
@@ -1530,6 +1550,12 @@ else if (CanRunFitReview)
             if (matchesCurrentRoute && snapshot.Status == "failed")
             {
                 errorMessage = snapshot.Error ?? snapshot.Detail;
+            }
+
+            if (matchesCurrentRoute && snapshot.Status == "completed"
+                && snapshot.Kind is "fit-review" or "refresh-all" or "generate-drafts")
+            {
+                _openFitReviewAfterRender = true;
             }
 
             activeOperationCompletionSource?.TrySetResult(snapshot);
@@ -2246,6 +2272,15 @@ else if (CanRunFitReview)
     private void HandleWorkspaceChanged()
     {
         SyncFromWorkspace();
+        if (!string.IsNullOrWhiteSpace(JobSetId))
+        {
+            var hasSignals = CurrentJobSet.JobFitAssessment.HasSignals;
+            if (hasSignals && !_previousFitReviewHasSignals)
+            {
+                _openFitReviewAfterRender = true;
+            }
+            _previousFitReviewHasSignals = hasSignals;
+        }
         _ = InvokeAsync(StateHasChanged);
     }
 
