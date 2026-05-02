@@ -1007,144 +1007,43 @@ public sealed class LlmOperationBroker(
 
     private async Task RunRefreshAllAnalysisAsync(LlmOperationState state, RefreshAllOperationInput input)
     {
+        var maxAttempts = Math.Max(1, ollamaOptions.RetryAttempts);
+        var retryDelay = TimeSpan.FromSeconds(Math.Max(0, ollamaOptions.RetryDelaySeconds));
+
         try
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var jobResearchService = scope.ServiceProvider.GetRequiredService<IJobResearchService>();
-            var fitRefreshService = scope.ServiceProvider.GetRequiredService<JobFitWorkspaceRefreshService>();
-            var fitEnhancementService = scope.ServiceProvider.GetRequiredService<LlmFitEnhancementService>();
-            var gapAnalysisService = scope.ServiceProvider.GetRequiredService<LlmTechnologyGapAnalysisService>();
-
-            PublishStage(
-                state,
-                input.JobSet.Id,
-                "Analyzing job and company context",
-                input.InputMode == JobSetInputMode.PasteText
-                    ? $"Refreshing pasted job text for {input.JobSet.Title}."
-                    : $"Refreshing {input.JobUri} for {input.JobSet.Title}.",
-                input.SelectedModel,
-                JobSetSubtask.JobContext);
-
-            if (input.InputMode == JobSetInputMode.PasteText)
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var analysis = await jobResearchService.AnalyzeTextAsync(
-                    input.JobPostingText!,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
-
-                workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
-
-                if (!string.IsNullOrWhiteSpace(input.CompanyContextText))
+                if (attempt > 1)
                 {
-                    var companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
-                        input.CompanyContextText,
+                    await Task.Delay(retryDelay, state.Cancellation.Token);
+                    workspace.MarkJobSetRunning(
+                        input.JobSet.Id,
+                        $"Retrying (attempt {attempt} of {maxAttempts}).",
+                        JobSetSubtask.JobContext);
+                    PublishStage(
+                        state,
+                        input.JobSet.Id,
+                        "Retrying analysis",
+                        $"Retrying analysis for {input.JobSet.Title} (attempt {attempt} of {maxAttempts}).",
                         input.SelectedModel,
-                        input.SelectedThinkingLevel,
-                        update => HandleProgress(state, input.JobSet.Id, update),
-                        input.JobSet.InputLanguage.ToPromptHint(),
-                        state.Cancellation.Token);
+                        JobSetSubtask.JobContext);
+                }
 
-                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                try
+                {
+                    await ExecuteRefreshAllAnalysisAsync(state, input);
+                    return;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception) when (attempt < maxAttempts)
+                {
+                    // transient failure — will retry after delay
                 }
             }
-            else
-            {
-                var analysis = await jobResearchService.AnalyzeAsync(
-                    input.JobUri!,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
-
-                workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
-
-                if (input.CompanyUrls.Count > 0)
-                {
-                    var companyProfile = await jobResearchService.BuildCompanyProfileAsync(
-                        input.CompanyUrls,
-                        input.SelectedModel,
-                        input.SelectedThinkingLevel,
-                        update => HandleProgress(state, input.JobSet.Id, update),
-                        input.JobSet.InputLanguage.ToPromptHint(),
-                        state.Cancellation.Token);
-
-                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
-                }
-            }
-
-            state.Cancellation.Token.ThrowIfCancellationRequested();
-
-            if (input.CandidateProfile is not null)
-            {
-                var latestJobSet = GetJobSetOrThrow(input.JobSet.Id);
-                var fitReviewFingerprint = BuildFitReviewFingerprint(
-                    input.CandidateProfile,
-                    latestJobSet,
-                    workspace.ApplicantDifferentiatorProfile,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    useLlmEnhancement: true);
-
-                await RefreshFitReviewCoreAsync(
-                    state,
-                    input.JobSet.Id,
-                    input.JobSet.Title,
-                    input.CandidateProfile,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    useLlmEnhancement: true,
-                    resetEvidenceSelections: true,
-                    fitReviewFingerprint,
-                    fitRefreshService,
-                    fitEnhancementService,
-                    state.Cancellation.Token);
-
-                PublishStage(
-                    state,
-                    input.JobSet.Id,
-                    "Analyzing technology gaps",
-                    $"Comparing profile evidence against {input.JobSet.Title}.",
-                    input.SelectedModel,
-                    JobSetSubtask.TechnologyGap);
-
-                var latestJobSetAfterFitReview = GetJobSetOrThrow(input.JobSet.Id);
-                var technologyGapAssessment = await gapAnalysisService.AnalyzeAsync(
-                    input.CandidateProfile,
-                    latestJobSetAfterFitReview.JobPosting!,
-                    latestJobSetAfterFitReview.CompanyProfile,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
-
-                workspace.SetJobSetTechnologyGapAssessment(input.JobSet.Id, technologyGapAssessment);
-                workspace.ResetJobSetProgress(input.JobSet.Id, "Job, company, fit review, technology gap and evidence are current for this tab.");
-            }
-            else
-            {
-                workspace.ResetJobSetProgress(input.JobSet.Id, "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps.");
-            }
-
-            var completedDetail = input.CandidateProfile is null
-                ? "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps."
-                : "Job, company, fit review, technology gap and evidence are current for this tab.";
-            var completedSnapshot = state.GetSnapshot() with
-            {
-                Status = "completed",
-                UpdatedAt = timeProvider.GetUtcNow(),
-                Message = "All analysis refreshed",
-                Detail = completedDetail,
-                Completed = true,
-                Sequence = state.GetSnapshot().Sequence + 1
-            };
-
-            Publish(state, "completed", completedSnapshot);
-            operations.Success("All analysis refreshed.", completedDetail);
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
@@ -1208,6 +1107,146 @@ public sealed class LlmOperationBroker(
                 activeOperationsByJobSet.Remove(input.JobSet.Id);
             }
         }
+    }
+
+    private async Task ExecuteRefreshAllAnalysisAsync(LlmOperationState state, RefreshAllOperationInput input)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var jobResearchService = scope.ServiceProvider.GetRequiredService<IJobResearchService>();
+        var fitRefreshService = scope.ServiceProvider.GetRequiredService<JobFitWorkspaceRefreshService>();
+        var fitEnhancementService = scope.ServiceProvider.GetRequiredService<LlmFitEnhancementService>();
+        var gapAnalysisService = scope.ServiceProvider.GetRequiredService<LlmTechnologyGapAnalysisService>();
+
+        PublishStage(
+            state,
+            input.JobSet.Id,
+            "Analyzing job and company context",
+            input.InputMode == JobSetInputMode.PasteText
+                ? $"Refreshing pasted job text for {input.JobSet.Title}."
+                : $"Refreshing {input.JobUri} for {input.JobSet.Title}.",
+            input.SelectedModel,
+            JobSetSubtask.JobContext);
+
+        if (input.InputMode == JobSetInputMode.PasteText)
+        {
+            var analysis = await jobResearchService.AnalyzeTextAsync(
+                input.JobPostingText!,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                update => HandleProgress(state, input.JobSet.Id, update),
+                input.JobSet.InputLanguage.ToPromptHint(),
+                state.Cancellation.Token);
+
+            workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
+
+            if (!string.IsNullOrWhiteSpace(input.CompanyContextText))
+            {
+                var companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
+                    input.CompanyContextText,
+                    input.SelectedModel,
+                    input.SelectedThinkingLevel,
+                    update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
+                    state.Cancellation.Token);
+
+                workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+            }
+        }
+        else
+        {
+            var analysis = await jobResearchService.AnalyzeAsync(
+                input.JobUri!,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                update => HandleProgress(state, input.JobSet.Id, update),
+                input.JobSet.InputLanguage.ToPromptHint(),
+                state.Cancellation.Token);
+
+            workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
+
+            if (input.CompanyUrls.Count > 0)
+            {
+                var companyProfile = await jobResearchService.BuildCompanyProfileAsync(
+                    input.CompanyUrls,
+                    input.SelectedModel,
+                    input.SelectedThinkingLevel,
+                    update => HandleProgress(state, input.JobSet.Id, update),
+                    input.JobSet.InputLanguage.ToPromptHint(),
+                    state.Cancellation.Token);
+
+                workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+            }
+        }
+
+        state.Cancellation.Token.ThrowIfCancellationRequested();
+
+        if (input.CandidateProfile is not null)
+        {
+            var latestJobSet = GetJobSetOrThrow(input.JobSet.Id);
+            var fitReviewFingerprint = BuildFitReviewFingerprint(
+                input.CandidateProfile,
+                latestJobSet,
+                workspace.ApplicantDifferentiatorProfile,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                useLlmEnhancement: true);
+
+            await RefreshFitReviewCoreAsync(
+                state,
+                input.JobSet.Id,
+                input.JobSet.Title,
+                input.CandidateProfile,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                useLlmEnhancement: true,
+                resetEvidenceSelections: true,
+                fitReviewFingerprint,
+                fitRefreshService,
+                fitEnhancementService,
+                state.Cancellation.Token);
+
+            PublishStage(
+                state,
+                input.JobSet.Id,
+                "Analyzing technology gaps",
+                $"Comparing profile evidence against {input.JobSet.Title}.",
+                input.SelectedModel,
+                JobSetSubtask.TechnologyGap);
+
+            var latestJobSetAfterFitReview = GetJobSetOrThrow(input.JobSet.Id);
+            var technologyGapAssessment = await gapAnalysisService.AnalyzeAsync(
+                input.CandidateProfile,
+                latestJobSetAfterFitReview.JobPosting!,
+                latestJobSetAfterFitReview.CompanyProfile,
+                input.SelectedModel,
+                input.SelectedThinkingLevel,
+                update => HandleProgress(state, input.JobSet.Id, update),
+                input.JobSet.InputLanguage.ToPromptHint(),
+                state.Cancellation.Token);
+
+            workspace.SetJobSetTechnologyGapAssessment(input.JobSet.Id, technologyGapAssessment);
+            workspace.ResetJobSetProgress(input.JobSet.Id, "Job, company, fit review, technology gap and evidence are current for this tab.");
+        }
+        else
+        {
+            workspace.ResetJobSetProgress(input.JobSet.Id, "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps.");
+        }
+
+        var completedDetail = input.CandidateProfile is null
+            ? "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps."
+            : "Job, company, fit review, technology gap and evidence are current for this tab.";
+        var completedSnapshot = state.GetSnapshot() with
+        {
+            Status = "completed",
+            UpdatedAt = timeProvider.GetUtcNow(),
+            Message = "All analysis refreshed",
+            Detail = completedDetail,
+            Completed = true,
+            Sequence = state.GetSnapshot().Sequence + 1
+        };
+
+        Publish(state, "completed", completedSnapshot);
+        operations.Success("All analysis refreshed.", completedDetail);
     }
 
     private async Task<JobFitAssessment> RefreshFitReviewCoreAsync(

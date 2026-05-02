@@ -214,7 +214,7 @@ public sealed class OllamaClientTests
         var client = new OllamaClient(httpClient, new OllamaOptions
         {
             Model = "session-model",
-            RepetitionDetectionMinLength = 200
+            RepetitionDetectionThinkingMinLength = 200
         });
 
         var exception = await Assert.ThrowsAsync<TimeoutException>(() => client.GenerateAsync(

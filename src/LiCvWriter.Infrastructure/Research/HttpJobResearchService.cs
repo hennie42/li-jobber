@@ -268,6 +268,8 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 exception);
         }
 
+        try
+        {
         using (document)
         {
         var root = document.RootElement;
@@ -295,6 +297,19 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             Signals = signals
         };
         } // using document
+        }
+        catch (InvalidOperationException schemaException)
+        {
+            if (TryParseFallbackJobPostingAnalysis(content, jobPostingUrl, fallbackRoleTitle, jobText, out var schemaFallbackAnalysis))
+            {
+                return schemaFallbackAnalysis;
+            }
+
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
+            throw new InvalidOperationException(
+                $"The parser response did not conform to the expected job analysis schema. Try again or check the session model. Response preview: {preview}",
+                schemaException);
+        }
     }
 
     private static CompanyResearchProfile ParseCompanyResearchProfile(
@@ -320,6 +335,8 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 exception);
         }
 
+        try
+        {
         using (document)
         {
         var root = document.RootElement;
@@ -354,6 +371,19 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             Signals = signals
         };
         } // using document
+        }
+        catch (InvalidOperationException schemaException)
+        {
+            if (TryParseFallbackCompanyResearchProfile(content, sourceUrls, sourceDocuments, out var schemaFallbackProfile))
+            {
+                return schemaFallbackProfile;
+            }
+
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
+            throw new InvalidOperationException(
+                $"The parser response did not conform to the expected company analysis schema. Try again or check the session model. Response preview: {preview}",
+                schemaException);
+        }
     }
 
     private async Task<string> FetchHtmlAsync(Uri sourceUrl, CancellationToken cancellationToken)

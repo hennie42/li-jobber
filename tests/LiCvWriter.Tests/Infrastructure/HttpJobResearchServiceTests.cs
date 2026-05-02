@@ -669,6 +669,84 @@ public sealed class HttpJobResearchServiceTests
           Assert.Equal(4_096, llmClient.LastRequest.NumPredict);
       }
 
+      [Fact]
+      public async Task AnalyzeTextAsync_WhenJsonOmitsRequirements_FallsBackToSignalExtraction()
+      {
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "roleTitle": "Senior Backend Engineer",
+                "companyName": "Acme Corp",
+                "summary": "Build scalable services."
+              }
+              """);
+          var service = new HttpJobResearchService(
+              new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+              llmClient,
+              new OllamaOptions());
+
+          var result = await service.AnalyzeTextAsync(
+              "Senior Backend Engineer at Acme Corp. Must have strong .NET experience. Nice to have Kubernetes.",
+              "model",
+              "low");
+
+          Assert.Equal("Senior Backend Engineer", result.RoleTitle);
+          Assert.Equal("Acme Corp", result.CompanyName);
+          Assert.NotEmpty(result.Signals);
+      }
+
+      [Fact]
+      public async Task AnalyzeTextAsync_WhenRequirementsIsNotArray_FallsBackToSignalExtraction()
+      {
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "roleTitle": "Cloud Engineer",
+                "companyName": "Contoso",
+                "summary": "Build cloud workloads.",
+                "requirements": "Must have Azure experience."
+              }
+              """);
+          var service = new HttpJobResearchService(
+              new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+              llmClient,
+              new OllamaOptions());
+
+          var result = await service.AnalyzeTextAsync(
+              "Cloud Engineer at Contoso. Must have Azure experience for production systems.",
+              "model",
+              "low");
+
+          Assert.Equal("Cloud Engineer", result.RoleTitle);
+          Assert.Equal("Contoso", result.CompanyName);
+          Assert.NotEmpty(result.Signals);
+      }
+
+      [Fact]
+      public async Task BuildCompanyProfileFromTextAsync_WhenJsonOmitsRequirements_FallsBackGracefully()
+      {
+          var llmClient = new FakeLlmClient(
+              """
+              {
+                "name": "Acme Corp",
+                "summary": "Acme Corp builds platform services.",
+                "guidingPrinciples": ["Innovation"],
+                "differentiators": ["Speed"]
+              }
+              """);
+          var service = new HttpJobResearchService(
+              new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+              llmClient,
+              new OllamaOptions());
+
+          var result = await service.BuildCompanyProfileFromTextAsync(
+              "Acme Corp builds platform services. We foster innovation and experimentation.",
+              "model");
+
+          Assert.Equal("Acme Corp", result.Name);
+          Assert.Equal("Acme Corp builds platform services.", result.Summary);
+      }
+
       private static HttpResponseMessage CreateHtmlResponse(string html)
         => new(HttpStatusCode.OK)
         {

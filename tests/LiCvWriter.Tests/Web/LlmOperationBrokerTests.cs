@@ -830,6 +830,79 @@ public sealed class LlmOperationBrokerTests
         Assert.Null(operations.LastCompletedLlmTelemetry);
     }
 
+    [Fact]
+    public async Task StartRefreshAllAnalysis_WhenFirstAttemptFails_RetriesAndCompletes()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", RetryAttempts = 3, RetryDelaySeconds = 0 };
+        var jobResearchService = new FailOnceThenSucceedJobResearchService();
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddSingleton<IJobResearchService>(jobResearchService);
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartRefreshAllAnalysis(new StartRefreshAllOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId, attempts: 300);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal(2, jobResearchService.CallCount);
+        Assert.Equal("Lead Architect", workspace.GetJobSet(jobSetId).JobPosting!.RoleTitle);
+    }
+
+    [Fact]
+    public async Task StartRefreshAllAnalysis_WhenAllAttemptsExhausted_FailsWithLastExceptionMessage()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", RetryAttempts = 2, RetryDelaySeconds = 0 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, AlwaysFailingJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartRefreshAllAnalysis(new StartRefreshAllOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId, attempts: 300);
+
+        Assert.Equal("failed", finalSnapshot.Status);
+        Assert.Contains("persistent failure", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(JobSetProgressState.Failed, workspace.GetJobSet(jobSetId).ProgressState);
+    }
+
     private static async Task<LlmOperationSnapshot> WaitForTerminalSnapshotAsync(LlmOperationBroker broker, string operationId, int attempts = 200)
     {
         for (var attempt = 0; attempt < attempts; attempt++)
@@ -1032,41 +1105,50 @@ public sealed class LlmOperationBrokerTests
         }
     }
 
-    private sealed class FakeCompositeLlmClient : ILlmClient
+    private sealed class FailOnceThenSucceedJobResearchService : IJobResearchService
     {
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
+        private int callCount;
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public int CallCount => callCount;
 
-        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
         {
-            var isFitEnhancement = request.SystemPrompt?.Contains("semantic evidence matcher", StringComparison.OrdinalIgnoreCase) == true;
-            var content = isFitEnhancement
-                ? "{\"enhancedRequirements\":[{\"requirement\":\"Transformation leadership\",\"newMatch\":\"Strong\",\"evidence\":[\"Led Azure platform delivery and modernization programs\"],\"rationale\":\"Modernization delivery demonstrates transformation leadership.\"}]}"
-                : "{\"detectedTechnologies\":[\"Azure\",\"Kubernetes\"],\"possiblyUnderrepresentedTechnologies\":[\"Kubernetes\"]}";
-            var message = isFitEnhancement ? "Enhancing fit review with LLM" : "Analyzing technology gaps";
-            var thinking = isFitEnhancement ? "Comparing semantic fit evidence" : "Comparing technology evidence";
+            if (Interlocked.Increment(ref callCount) == 1)
+            {
+                throw new InvalidOperationException("Transient failure on first attempt.");
+            }
 
-            progress?.Invoke(new LlmProgressUpdate(
-                message,
-                $"{message} is running.",
-                request.Model,
-                TimeSpan.FromMilliseconds(120),
-                ResponseContent: content,
-                ThinkingPreview: thinking,
-                ThinkingContent: thinking,
-                Sequence: 1));
-
-            return Task.FromResult(new LlmResponse(
-                request.Model,
-                content,
-                null,
-                true,
-                12,
-                18,
-                TimeSpan.FromSeconds(1)));
+            return Task.FromResult(new JobPostingAnalysis
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                SourceUrl = jobPostingUrl
+            });
         }
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new CompanyResearchProfile { Summary = "Contoso summary", SourceUrls = sourceUrls.ToArray() });
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new CompanyResearchProfile { Summary = companyContextText });
+    }
+
+    private sealed class AlwaysFailingJobResearchService : IJobResearchService
+    {
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Persistent failure on every attempt.");
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Persistent failure on every attempt.");
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Persistent failure on every attempt.");
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Persistent failure on every attempt.");
     }
 }

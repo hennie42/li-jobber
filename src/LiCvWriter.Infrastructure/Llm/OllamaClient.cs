@@ -483,18 +483,20 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completed |= chunk.Done;
             chunkCount++;
 
-            var repetitionMinLength = options.RepetitionDetectionMinLength > 0
+            var contentRepetitionMinLength = options.RepetitionDetectionMinLength > 0
                 ? options.RepetitionDetectionMinLength
                 : DefaultRepetitionMinLength;
 
-            if (!chunk.Done && DetectRepetitionLoop(thinking, repetitionMinLength))
+            var thinkingRepetitionMinLength = options.RepetitionDetectionThinkingMinLength;
+
+            if (!chunk.Done && thinkingRepetitionMinLength > 0 && DetectRepetitionLoop(thinking, thinkingRepetitionMinLength))
             {
                 throw new TimeoutException(
                     $"Ollama thinking output entered a repetition loop after {thinking.Length} characters. " +
                     $"The model may need a lower temperature or a different prompt.");
             }
 
-            if (!chunk.Done && DetectRepetitionLoop(content, repetitionMinLength))
+            if (!chunk.Done && DetectRepetitionLoop(content, contentRepetitionMinLength))
             {
                 throw new TimeoutException(
                     $"Ollama content output entered a repetition loop after {content.Length} characters. " +

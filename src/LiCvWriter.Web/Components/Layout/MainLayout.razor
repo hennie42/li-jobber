@@ -147,9 +147,24 @@
             ?? "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.";
 
     private string? GetStatusMonitorRawText()
-        => Operations.CurrentLlmTelemetry?.Detail
-            ?? Operations.LastCompletedLlmTelemetry?.Detail
-            ?? (Operations.IsBusy ? BuildBusyFallbackStatus() : null);
+    {
+        if (Operations.CurrentLlmTelemetry is { } current)
+        {
+            return BuildTelemetryStatusText(current);
+        }
+
+        if (Operations.LastCompletedLlmTelemetry is { } last)
+        {
+            return BuildTelemetryStatusText(last);
+        }
+
+        return Operations.IsBusy ? BuildBusyFallbackStatus() : null;
+    }
+
+    private static string BuildTelemetryStatusText(LlmOperationTelemetry telemetry)
+        => string.IsNullOrWhiteSpace(telemetry.Detail)
+            ? telemetry.Message
+            : $"{telemetry.Message}\n{telemetry.Detail}";
 
     private bool HasStatusMonitorText()
         => !string.IsNullOrWhiteSpace(GetStatusMonitorRawText());
