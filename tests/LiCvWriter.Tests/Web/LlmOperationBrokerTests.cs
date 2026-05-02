@@ -557,6 +557,77 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartFitReviewAnalysis_StreamEvents_EmitsExplicitCompletedAfterProgressCompleted()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead Architect",
+            CompanyName = "Contoso",
+            Summary = "Drive Azure delivery and transformation leadership.",
+            MustHaveThemes = ["Azure", "Transformation leadership"]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartFitReviewAnalysis(new StartFitReviewOperationRequest(jobSetId));
+        var eventTypes = new List<string>();
+
+        await foreach (var operationEvent in broker.StreamEventsAsync(startResult.OperationId))
+        {
+            eventTypes.Add(operationEvent.EventType);
+            if (operationEvent.EventType == "completed")
+            {
+                break;
+            }
+        }
+
+        Assert.Contains("progress-completed", eventTypes);
+        Assert.Equal("completed", eventTypes[^1]);
+    }
+
+    [Fact]
     public async Task StartRefreshAllAnalysis_CompletesAndRefreshesResearchFitAndTechnologyGap()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
@@ -840,8 +911,15 @@ public sealed class LlmOperationBrokerTests
         services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
         services.AddSingleton<LlmOperationBroker>();
         services.AddSingleton<IJobResearchService>(jobResearchService);
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
 
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
@@ -876,8 +954,15 @@ public sealed class LlmOperationBrokerTests
         services.AddSingleton(new WorkspaceSession(options));
         services.AddSingleton<OperationStatusService>();
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
         services.AddSingleton<LlmOperationBroker>();
         services.AddScoped<IJobResearchService, AlwaysFailingJobResearchService>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
 
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
@@ -942,6 +1027,77 @@ public sealed class LlmOperationBrokerTests
             return Task.FromResult(new DraftGenerationResult(
                 [new GeneratedDocument(DocumentKind.Cv, "CV", content, content, DateTimeOffset.UtcNow)],
                 Array.Empty<DocumentExportResult>()));
+        }
+    }
+
+    private sealed class FakeCompositeLlmClient : ILlmClient
+    {
+        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new OllamaModelAvailability(
+                "0.19.0",
+                "configured-model",
+                true,
+                ["configured-model"]));
+
+        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<OllamaModelInfo?>(null);
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            var content = request.PromptId switch
+            {
+                LlmPromptCatalog.FitEnhanceJson => """
+                    {
+                      "enhancedRequirements": [
+                        {
+                          "requirement": "Transformation leadership",
+                          "newMatch": "Strong",
+                          "evidence": ["Led Azure platform delivery and modernization programs for enterprise clients."],
+                          "rationale": "The experience description shows direct transformation leadership in enterprise delivery."
+                        }
+                      ],
+                      "gapFramingStrategies": [],
+                      "positioningAngle": null
+                    }
+                    """,
+                LlmPromptCatalog.TechGapJson => """
+                    {
+                      "detectedTechnologies": ["Azure", "Kubernetes"],
+                      "possiblyUnderrepresentedTechnologies": ["Kubernetes"]
+                    }
+                    """,
+                LlmPromptCatalog.JsonRepair => "{}",
+                _ => throw new NotSupportedException($"Unexpected prompt id '{request.PromptId}'.")
+            };
+
+            progress?.Invoke(new LlmProgressUpdate(
+                request.PromptId == LlmPromptCatalog.TechGapJson ? "Analyzing technology gaps" : "Enhancing fit review with LLM",
+                "Streaming model output.",
+                request.Model,
+                TimeSpan.FromMilliseconds(100),
+                Sequence: 1));
+
+            progress?.Invoke(new LlmProgressUpdate(
+                request.PromptId == LlmPromptCatalog.TechGapJson ? "Analyzing technology gaps" : "Enhancing fit review with LLM",
+                "Model output completed.",
+                request.Model,
+                TimeSpan.FromMilliseconds(200),
+                Completed: true,
+                PromptTokens: 12,
+                CompletionTokens: 18,
+                ResponseContent: content,
+                ThinkingPreview: "Reasoning",
+                ThinkingContent: "Reasoning in full",
+                Sequence: 2));
+
+            return Task.FromResult(new LlmResponse(
+                request.Model,
+                content,
+                "Reasoning in full",
+                true,
+                12,
+                18,
+                TimeSpan.FromMilliseconds(220)));
         }
     }
 

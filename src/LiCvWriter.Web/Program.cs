@@ -16,6 +16,8 @@ using LiCvWriter.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+TryEnableStaticWebAssets(builder);
+
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 builder.Services.AddRazorComponents()
@@ -225,5 +227,31 @@ static Uri NormalizeApiBase(string baseUrl)
     }
 
     return new Uri(normalized, UriKind.Absolute);
+}
+
+static void TryEnableStaticWebAssets(WebApplicationBuilder builder)
+{
+    if (!string.IsNullOrWhiteSpace(builder.Configuration[Microsoft.AspNetCore.Hosting.WebHostDefaults.StaticWebAssetsKey]))
+    {
+        return;
+    }
+
+    var objDirectory = Path.Combine(builder.Environment.ContentRootPath, "obj");
+    if (!Directory.Exists(objDirectory))
+    {
+        return;
+    }
+
+    var manifestPath = Directory.EnumerateFiles(objDirectory, "staticwebassets.development.json", SearchOption.AllDirectories)
+        .OrderByDescending(File.GetLastWriteTimeUtc)
+        .FirstOrDefault();
+
+    if (string.IsNullOrWhiteSpace(manifestPath))
+    {
+        return;
+    }
+
+    builder.Configuration[Microsoft.AspNetCore.Hosting.WebHostDefaults.StaticWebAssetsKey] = manifestPath;
+    Microsoft.AspNetCore.Hosting.StaticWebAssets.StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
 }
 

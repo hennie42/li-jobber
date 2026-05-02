@@ -683,7 +683,7 @@ else if (CanRunFitReview)
     {
         <div class="details-card stack-gap stream-preview-card">
             <div class="field-label">Live draft preview</div>
-            <MarkdownPreview Markdown="@draftSnapshot.ResponseContent" CssClass="markdown-preview stream-preview-box" @rendermode="InteractiveWebAssembly" />
+            <MarkdownPreview Markdown="@draftSnapshot.ResponseContent" CssClass="markdown-preview stream-preview-box" />
         </div>
     }
 
@@ -713,7 +713,7 @@ else if (CanRunFitReview)
             <details class="details-card">
                 <summary>@document.Kind - @document.Title</summary>
                 <p class="muted-text">Created in @FormatDuration(document.LlmDuration)@(string.IsNullOrWhiteSpace(document.Model) ? string.Empty : $" via {document.Model}")@FormatTokenSummary(document)</p>
-                <MarkdownPreview Markdown="@document.Markdown" CssClass="markdown-preview" @rendermode="InteractiveWebAssembly" />
+                <MarkdownPreview Markdown="@document.Markdown" CssClass="markdown-preview" />
             </details>
         }
     </details>
