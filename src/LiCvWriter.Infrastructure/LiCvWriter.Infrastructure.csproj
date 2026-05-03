@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.62" />
     <PackageReference Include="HtmlToOpenXml.dll" Version="3.3.2" />
     <PackageReference Include="Markdig" Version="1.1.2" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />

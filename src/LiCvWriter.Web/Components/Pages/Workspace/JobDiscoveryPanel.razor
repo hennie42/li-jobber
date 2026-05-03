@@ -1,0 +1,338 @@
+@using LiCvWriter.Application.Abstractions
+@using LiCvWriter.Application.Models
+@using LiCvWriter.Application.Options
+@using LiCvWriter.Application.Services
+@implements IDisposable
+@inject IJobDiscoveryService DiscoveryService
+@inject JobDiscoveryOptions DiscoveryOptions
+@inject JobDiscoveryProfileLightService ProfileLightService
+@inject JobDiscoverySearchPlanService SearchPlanService
+@inject JobDiscoverySuggestionService SuggestionService
+@inject NavigationManager Navigation
+@inject WorkspaceSession Workspace
+
+<section class="card-panel stack-gap">
+    <div class="hero-row">
+        <div>
+            <h3>Discovery</h3>
+            <p class="muted-text">Build a configurable public search from the loaded profile before turning good matches into jobsets.</p>
+        </div>
+        <div class="button-row">
+                <button class="secondary-button" @onclick="DiscoverSuggestionsAsync" disabled="@(!currentSearchPlan.CanOpen || isDiscovering)">@(isDiscovering ? "Finding suggestions..." : "Find suggestions")</button>
+            @if (currentSearchPlan.CanOpen)
+            {
+                <a class="primary-button" href="@currentSearchPlan.SearchUri!.AbsoluteUri" target="_blank" rel="noopener">Open search on @currentSearchPlan.ProviderDisplayName</a>
+            }
+            else
+            {
+                <button class="primary-button" disabled>Open search</button>
+            }
+        </div>
+    </div>
+
+    @if (!DiscoveryOptions.Enabled)
+    {
+        <div class="status-chip status-pending">Discovery disabled</div>
+        <p class="muted-text">Enable the JobDiscovery section in appsettings to use provider-backed public search links.</p>
+    }
+    else
+    {
+        <div class="checkbox-row">
+            <span class="status-chip @(Workspace.CandidateProfile is not null ? "status-ok" : "status-pending")">
+                Profile: @(Workspace.CandidateProfile is not null ? "loaded" : "missing")
+            </span>
+            <span class="status-chip status-neutral">Provider: @GetProviderLabel()</span>
+            <span class="status-chip @(profileLight.HasSignals ? "status-ok" : "status-pending")">
+                Query: @(profileLight.HasSignals ? "ready" : "incomplete")
+            </span>
+            <span class="status-chip status-neutral">Suggestions: @suggestions.Count</span>
+            <span class="status-chip @GetRankingStatusClass()">@GetRankingStatusLabel()</span>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(discoveryErrorMessage))
+        {
+            <div class="message error">@discoveryErrorMessage</div>
+        }
+
+        @if (providers.Count > 1)
+        {
+            <label class="field-label" for="discoveryProvider">Provider</label>
+            <select id="discoveryProvider" class="text-input" @bind="selectedProviderId" @bind:after="RefreshSearchPlan">
+                @foreach (var provider in providers)
+                {
+                    <option value="@provider.Id">@provider.DisplayName</option>
+                }
+            </select>
+        }
+
+        <label class="field-label" for="discoveryQuery">Search query</label>
+        <input id="discoveryQuery" class="text-input" @bind="queryText" @bind:event="oninput" @bind:after="RefreshSearchPlan" />
+
+        <label class="field-label" for="discoveryLocation">Preferred location</label>
+        <input id="discoveryLocation" class="text-input" @bind="locationText" @bind:event="oninput" @bind:after="RefreshSearchPlan" placeholder="Optional unless your provider uses a location parameter" />
+
+        @if (profileLight.HasSignals)
+        {
+            <dl class="key-value-grid compact-grid">
+                <dt>Primary role</dt>
+                <dd>@GetValueOrFallback(profileLight.PrimaryRole)</dd>
+                <dt>Headline</dt>
+                <dd>@GetValueOrFallback(profileLight.Headline)</dd>
+                <dt>Location</dt>
+                <dd>@GetValueOrFallback(profileLight.PreferredLocation)</dd>
+                <dt>Industry</dt>
+                <dd>@GetValueOrFallback(profileLight.Industry)</dd>
+                <dt>Recent titles</dt>
+                <dd>@GetListOrFallback(profileLight.RecentTitles)</dd>
+                <dt>Top skills</dt>
+                <dd>@GetListOrFallback(profileLight.SkillKeywords)</dd>
+                <dt>Target narrative</dt>
+                <dd>@GetValueOrFallback(profileLight.TargetNarrative)</dd>
+            </dl>
+        }
+        else
+        {
+            <p class="muted-text">Load a profile on Start / Setup to derive a discovery query.</p>
+        }
+
+        <p class="muted-text">This slice fetches public Jobindex-style search results into local suggestions. Accepting a suggestion creates a normal URL-based jobset prefilled with the job link.</p>
+
+        @if (suggestions.Count > 0)
+        {
+            <div class="stack-gap">
+                <div class="field-label">Suggested jobs</div>
+                @foreach (var suggestion in suggestions)
+                {
+                    <article class="details-card stack-gap">
+                        <div class="hero-row">
+                            <div>
+                                <h4>@suggestion.Suggestion.Title</h4>
+                                <p class="muted-text">@suggestion.Suggestion.DisplayCompany @(!string.IsNullOrWhiteSpace(suggestion.Suggestion.Location) ? $"· {suggestion.Suggestion.Location}" : string.Empty) @(!string.IsNullOrWhiteSpace(suggestion.Suggestion.PostedLabel) ? $"· {suggestion.Suggestion.PostedLabel}" : string.Empty)</p>
+                            </div>
+                            <div class="button-row">
+                                @if (suggestion.HasFitAssessment)
+                                {
+                                    <div class="status-chip @GetRecommendationStatusClass(suggestion.JobFitAssessment.Recommendation)">@FormatRecommendation(suggestion.JobFitAssessment.Recommendation) @suggestion.JobFitAssessment.OverallScore/100</div>
+                                }
+                                <button class="primary-button" @onclick="() => CreateJobSetFromSuggestion(suggestion)">Accept as jobset</button>
+                                <button class="secondary-button" @onclick="() => DismissSuggestion(suggestion)">Dismiss</button>
+                                <a class="link-button" href="@suggestion.Suggestion.DetailUrl.AbsoluteUri" target="_blank" rel="noopener">Open listing</a>
+                            </div>
+                        </div>
+
+                        <p>@GetSummaryOrFallback(suggestion)</p>
+
+                        @if (suggestion.WhySuggested.Count > 0)
+                        {
+                            <ul class="feature-list compact-list">
+                                @foreach (var reason in suggestion.WhySuggested)
+                                {
+                                    <li>@reason</li>
+                                }
+                            </ul>
+                        }
+
+                        @if (suggestion.HasAnalysisError)
+                        {
+                            <p class="muted-text">Fit-aware ranking unavailable for this listing: @suggestion.AnalysisError</p>
+                        }
+                    </article>
+                }
+            </div>
+        }
+        else if (hasLoadedSuggestions)
+        {
+            <p class="muted-text">No suggestions were extracted from the current provider page. Refine the query or open the search directly to inspect the source page.</p>
+        }
+    }
+</section>
+
+@code {
+    private IReadOnlyList<JobDiscoveryProviderOptions> providers = Array.Empty<JobDiscoveryProviderOptions>();
+    private JobDiscoveryProfileLight profileLight = JobDiscoveryProfileLight.Empty;
+    private JobDiscoverySearchPlan currentSearchPlan = JobDiscoverySearchPlan.Empty;
+    private IReadOnlyList<JobDiscoverySuggestionReview> suggestions = Array.Empty<JobDiscoverySuggestionReview>();
+    private string previousSuggestedQuery = string.Empty;
+    private string previousSuggestedLocation = string.Empty;
+    private string selectedProviderId = string.Empty;
+    private string queryText = string.Empty;
+    private string locationText = string.Empty;
+    private string discoveryErrorMessage = string.Empty;
+    private bool isDiscovering;
+    private bool hasLoadedSuggestions;
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += HandleWorkspaceChanged;
+        SyncFromWorkspace();
+    }
+
+    public void Dispose()
+    {
+        Workspace.Changed -= HandleWorkspaceChanged;
+    }
+
+    private void HandleWorkspaceChanged()
+        => InvokeAsync(() =>
+        {
+            SyncFromWorkspace();
+            StateHasChanged();
+        });
+
+    private void SyncFromWorkspace()
+    {
+        providers = SearchPlanService.GetProviders();
+        selectedProviderId = ResolveSelectedProviderId();
+        profileLight = ProfileLightService.Build(Workspace.CandidateProfile, Workspace.ApplicantDifferentiatorProfile);
+
+        if (string.IsNullOrWhiteSpace(queryText) || string.Equals(queryText, previousSuggestedQuery, StringComparison.Ordinal))
+        {
+            queryText = profileLight.SearchQuery;
+        }
+
+        if (string.IsNullOrWhiteSpace(locationText) || string.Equals(locationText, previousSuggestedLocation, StringComparison.Ordinal))
+        {
+            locationText = profileLight.PreferredLocation;
+        }
+
+        previousSuggestedQuery = profileLight.SearchQuery;
+        previousSuggestedLocation = profileLight.PreferredLocation;
+        RefreshSearchPlan();
+    }
+
+    private void RefreshSearchPlan()
+    {
+        currentSearchPlan = SearchPlanService.Build(profileLight, selectedProviderId, queryText, locationText);
+        discoveryErrorMessage = string.Empty;
+    }
+
+    private async Task DiscoverSuggestionsAsync()
+    {
+        if (!currentSearchPlan.CanOpen)
+        {
+            discoveryErrorMessage = "Complete the profile-derived query before loading suggestions.";
+            suggestions = Array.Empty<JobDiscoverySuggestionReview>();
+            hasLoadedSuggestions = false;
+            return;
+        }
+
+        isDiscovering = true;
+        discoveryErrorMessage = string.Empty;
+
+        try
+        {
+            suggestions = await SuggestionService.DiscoverAsync(
+                currentSearchPlan,
+                Workspace.CandidateProfile,
+                Workspace.ApplicantDifferentiatorProfile,
+                Workspace.SelectedLlmModel,
+                Workspace.SelectedThinkingLevel,
+                enrichWithFit: Workspace.IsLlmReady && Workspace.CandidateProfile is not null);
+            hasLoadedSuggestions = true;
+        }
+        catch (Exception exception)
+        {
+            suggestions = Array.Empty<JobDiscoverySuggestionReview>();
+            hasLoadedSuggestions = true;
+            discoveryErrorMessage = exception.Message;
+        }
+        finally
+        {
+            isDiscovering = false;
+        }
+    }
+
+    private void CreateJobSetFromSuggestion(JobDiscoverySuggestionReview suggestion)
+    {
+        var existingIds = Workspace.JobSets.Select(static jobSet => jobSet.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Workspace.AddJobSet(JobSetInputMode.LinkToUrls);
+        var newJobSet = Workspace.JobSets.FirstOrDefault(jobSet => !existingIds.Contains(jobSet.Id));
+
+        if (newJobSet is null)
+        {
+            discoveryErrorMessage = "The jobset could not be created from the selected suggestion.";
+            return;
+        }
+
+        Workspace.UpdateJobSetInputs(newJobSet.Id, suggestion.Suggestion.DetailUrl.AbsoluteUri, string.Empty, string.Empty, string.Empty);
+
+        if (suggestion.JobPosting is not null)
+        {
+            Workspace.SetJobSetJobPosting(newJobSet.Id, suggestion.JobPosting);
+
+            if (suggestion.HasFitAssessment)
+            {
+                Workspace.SetJobSetJobFitAssessment(newJobSet.Id, suggestion.JobFitAssessment);
+            }
+
+            if (suggestion.HasEvidenceSelection)
+            {
+                Workspace.SetJobSetEvidenceSelection(newJobSet.Id, suggestion.EvidenceSelection, preserveExistingSelections: false);
+            }
+        }
+
+        DismissSuggestion(suggestion);
+        Navigation.NavigateTo($"/workspace/job-workbench/{newJobSet.Id}");
+    }
+
+    private void DismissSuggestion(JobDiscoverySuggestionReview suggestion)
+        => suggestions = suggestions
+            .Where(item => !item.Suggestion.DetailUrl.Equals(suggestion.Suggestion.DetailUrl))
+            .ToArray();
+
+    private string ResolveSelectedProviderId()
+    {
+        if (!string.IsNullOrWhiteSpace(selectedProviderId)
+            && providers.Any(provider => provider.Id.Equals(selectedProviderId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return selectedProviderId;
+        }
+
+        var resolved = SearchPlanService.ResolveProvider(selectedProviderId);
+        return resolved?.Id ?? string.Empty;
+    }
+
+    private string GetProviderLabel()
+        => string.IsNullOrWhiteSpace(currentSearchPlan.ProviderDisplayName)
+            ? "Not configured"
+            : currentSearchPlan.ProviderDisplayName;
+
+    private string GetRankingStatusLabel()
+        => Workspace.IsLlmReady && Workspace.CandidateProfile is not null
+            ? "Fit-aware ranking"
+            : "Provider order";
+
+    private string GetRankingStatusClass()
+        => Workspace.IsLlmReady && Workspace.CandidateProfile is not null
+            ? "status-ok"
+            : "status-pending";
+
+    private static string GetSummaryOrFallback(JobDiscoverySuggestionReview suggestion)
+        => string.IsNullOrWhiteSpace(suggestion.Suggestion.Summary)
+            ? "No short summary was extracted from the provider result card. Open the listing to inspect the full posting."
+            : suggestion.Suggestion.Summary;
+
+    private static string FormatRecommendation(JobFitRecommendation recommendation)
+        => recommendation switch
+        {
+            JobFitRecommendation.Apply => "Apply",
+            JobFitRecommendation.Stretch => "Stretch",
+            JobFitRecommendation.Skip => "Skip",
+            _ => "Insufficient data"
+        };
+
+    private static string GetRecommendationStatusClass(JobFitRecommendation recommendation)
+        => recommendation switch
+        {
+            JobFitRecommendation.Apply => "status-ok",
+            JobFitRecommendation.Stretch => "status-pending",
+            JobFitRecommendation.Skip => "status-error",
+            _ => "status-pending"
+        };
+
+    private static string GetListOrFallback(IReadOnlyList<string> values)
+        => values.Count == 0 ? "-" : string.Join(", ", values);
+
+    private static string GetValueOrFallback(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "-" : value;
+}

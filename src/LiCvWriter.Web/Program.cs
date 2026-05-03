@@ -25,10 +25,12 @@ builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
 
 var linkedInOptions = builder.Configuration.GetSection(LinkedInAuthOptions.SectionName).Get<LinkedInAuthOptions>() ?? new LinkedInAuthOptions();
+var jobDiscoveryOptions = builder.Configuration.GetSection(JobDiscoveryOptions.SectionName).Get<JobDiscoveryOptions>() ?? new JobDiscoveryOptions();
 var ollamaOptions = builder.Configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>() ?? new OllamaOptions();
 var storageOptions = builder.Configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>() ?? new StorageOptions();
 
 builder.Services.AddSingleton(linkedInOptions);
+builder.Services.AddSingleton(jobDiscoveryOptions);
 builder.Services.AddSingleton(ollamaOptions);
 builder.Services.AddSingleton(storageOptions);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -36,6 +38,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SimpleCsvParser>();
 builder.Services.AddSingleton<LinkedInPartialDateParser>();
 builder.Services.AddSingleton<CandidateProfileMergeService>();
+builder.Services.AddSingleton<JobDiscoveryProfileLightService>();
+builder.Services.AddSingleton<JobDiscoverySearchPlanService>();
+builder.Services.AddScoped<JobDiscoverySuggestionService>();
 var defaultSelectedEvidenceCount = builder.Configuration.GetValue("Evidence:DefaultSelectedCount", 30);
 
 builder.Services.AddSingleton<CandidateEvidenceService>();
@@ -75,6 +80,15 @@ builder.Services.AddSingleton<ModelBenchmarkCoordinator>();
 builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(1);
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+    });
+
+builder.Services.AddHttpClient<IJobDiscoveryService, HttpJobDiscoveryService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
 })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
