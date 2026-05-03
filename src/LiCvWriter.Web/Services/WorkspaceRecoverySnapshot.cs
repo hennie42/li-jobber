@@ -16,7 +16,9 @@ public sealed record WorkspaceRecoverySnapshot(
     LinkedInImportDiagnosticsSnapshot? LinkedInImportDiagnostics = null,
     LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null,
     IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null,
-    ModelBenchmarkSession? LastBenchmarkSession = null);
+    ModelBenchmarkSession? LastBenchmarkSession = null,
+    IReadOnlyList<string>? HiddenSuggestionUrls = null,
+    IReadOnlyList<SavedSuggestionListState>? SavedSuggestionLists = null);
 
 public sealed record DraftGenerationPreferences
 {
@@ -38,6 +40,13 @@ public sealed record DraftGenerationPreferences
 
     public string ContactCity { get; init; } = string.Empty;
 }
+
+public sealed record SavedSuggestionListState(
+    string ProviderId,
+    string ProviderDisplayName,
+    string Query,
+    string PreferredLocation,
+    IReadOnlyList<JobDiscoverySuggestionReview> Suggestions);
 
 public sealed record JobSetRecoveryState(
     string Id,
@@ -61,6 +70,8 @@ public sealed record JobSetRecoveryState(
     EvidenceSelectionResult? EvidenceSelection = null,
     IReadOnlyList<GeneratedDocument>? GeneratedDocuments = null,
     string AdditionalInstructions = "",
+    bool IsSelectedForBatch = false,
     string? LastFitReviewFingerprint = null,
     bool LastFitReviewIncludedLlmEnhancement = false,
-    JobSetSourceLanguage InputLanguage = JobSetSourceLanguage.Auto);
+    JobSetSourceLanguage InputLanguage = JobSetSourceLanguage.Auto,
+    DateOnly? ManualApplicationDeadlineOverride = null);

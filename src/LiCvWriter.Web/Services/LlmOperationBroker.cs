@@ -358,11 +358,6 @@ public sealed class LlmOperationBroker(
             .Cast<Uri>()
             .ToArray();
 
-        if (companyUrls.Length == 0)
-        {
-            throw new InvalidOperationException("Add at least one absolute company URL.");
-        }
-
         return new JobContextOperationInput(
             jobSet,
             workspace.SelectedLlmModel,
@@ -708,15 +703,37 @@ public sealed class LlmOperationBroker(
 
                 workspace.SetJobSetJobPosting(input.JobSet.Id, analysis);
 
-                companyProfile = await jobResearchService.BuildCompanyProfileAsync(
-                    input.CompanyUrls,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
+                var companyUrls = input.CompanyUrls;
+                if (companyUrls.Count == 0)
+                {
+                    companyUrls = await jobResearchService.DiscoverCompanyContextUrlsAsync(
+                        input.JobUri!,
+                        analysis.CompanyName,
+                        state.Cancellation.Token);
 
-                workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                    if (companyUrls.Count > 0)
+                    {
+                        workspace.UpdateJobSetInputs(
+                            input.JobSet.Id,
+                            input.JobSet.JobUrl,
+                            string.Join(Environment.NewLine, companyUrls.Select(static uri => uri.AbsoluteUri)),
+                            input.JobSet.JobPostingText,
+                            input.JobSet.CompanyContextText);
+                    }
+                }
+
+                if (companyUrls.Count > 0)
+                {
+                    companyProfile = await jobResearchService.BuildCompanyProfileAsync(
+                        companyUrls,
+                        input.SelectedModel,
+                        input.SelectedThinkingLevel,
+                        update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
+                        state.Cancellation.Token);
+
+                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                }
             }
 
             var detail = companyProfile is null

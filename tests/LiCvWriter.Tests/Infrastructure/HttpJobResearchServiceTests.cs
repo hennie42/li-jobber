@@ -23,6 +23,7 @@ public sealed class HttpJobResearchServiceTests
                   <p>Must have Azure and Kubernetes experience.</p>
                   <p>Must have architecture and stakeholder management experience.</p>
                   <p>Nice to have generative AI and RAG delivery experience.</p>
+                  <p>Apply no later than 31 May 2026.</p>
                   <p>We value trust, collaboration, and knowledge sharing.</p>
                 </section>
               </body>
@@ -36,6 +37,8 @@ public sealed class HttpJobResearchServiceTests
               "roleTitle": "Lead AI Architect",
               "companyName": "Contoso",
               "summary": "Lead the delivery of practical Azure and AI architecture for enterprise clients.",
+              "applicationDeadline": "2026-05-31",
+              "applicationDeadlineSourceSnippet": "Apply no later than 31 May 2026.",
               "requirements": [
                 {
                   "category": "Must have",
@@ -75,6 +78,7 @@ public sealed class HttpJobResearchServiceTests
 
         Assert.Equal("Lead AI Architect", result.RoleTitle);
         Assert.Equal("Contoso", result.CompanyName);
+        Assert.Equal(new DateOnly(2026, 5, 31), result.ApplicationDeadline);
         Assert.Contains("Azure", result.MustHaveThemes);
         Assert.Contains("Kubernetes", result.MustHaveThemes);
         Assert.Contains("Generative AI", result.NiceToHaveThemes);
@@ -94,6 +98,51 @@ public sealed class HttpJobResearchServiceTests
         });
         Assert.Contains("BEGIN SOURCE BLOCK: JOB POSTING PAGE TEXT", llmClient.AllRequests[0].Messages[0].Content);
         Assert.Contains("END SOURCE BLOCK: JOB POSTING PAGE TEXT", llmClient.AllRequests[0].Messages[0].Content);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_WhenDeadlineEvidenceIsNotPresent_LeavesApplicationDeadlineEmpty()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            CreateHtmlResponse(
+            """
+            <html>
+              <head><title>Lead AI Architect</title></head>
+              <body>
+                <h1>Lead AI Architect</h1>
+                <section>
+                  <p>Must have Azure and Kubernetes experience.</p>
+                  <p>We value trust, collaboration, and knowledge sharing.</p>
+                </section>
+              </body>
+            </html>
+            """));
+
+        var client = new HttpClient(handler);
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Lead AI Architect",
+              "companyName": "Contoso",
+              "summary": "Lead the delivery of practical Azure and AI architecture for enterprise clients.",
+              "applicationDeadline": "2026-05-31",
+              "applicationDeadlineSourceSnippet": "Apply no later than 31 May 2026.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Azure",
+                  "sourceSnippet": "Must have Azure and Kubernetes experience.",
+                  "confidence": 97,
+                  "sourceUrl": "https://jobs.example.test/lead-ai-architect"
+                }
+              ]
+            }
+            """);
+        var service = new HttpJobResearchService(client, llmClient, new OllamaOptions());
+
+        var result = await service.AnalyzeAsync(new Uri("https://jobs.example.test/lead-ai-architect"), "session-model", "low");
+
+        Assert.Null(result.ApplicationDeadline);
     }
 
     [Fact]
@@ -155,6 +204,38 @@ public sealed class HttpJobResearchServiceTests
         Assert.Contains("BEGIN SOURCE BLOCK: COMPANY SOURCE PAGE", llmClient.LastRequest.Messages[0].Content);
         Assert.Contains("END SOURCE BLOCK: COMPANY SOURCE PAGE", llmClient.LastRequest.Messages[0].Content);
     }
+
+      [Fact]
+      public async Task DiscoverCompanyContextUrlsAsync_ReturnsLikelyCompanyPagesFromJobPosting()
+      {
+        var handler = new StubHttpMessageHandler(_ =>
+          CreateHtmlResponse(
+          """
+          <html>
+            <body>
+            <a href="https://contoso.example/about">About Contoso</a>
+            <a href="https://contoso.example/careers">Careers</a>
+            <a href="https://jobs.example.test/privacy">Privacy</a>
+            <a href="/apply">Apply now</a>
+            </body>
+          </html>
+          """));
+
+        var service = new HttpJobResearchService(
+          new HttpClient(handler),
+          new FakeLlmClient("{}"),
+          new OllamaOptions());
+
+        var result = await service.DiscoverCompanyContextUrlsAsync(
+          new Uri("https://jobs.example.test/lead-ai-architect"),
+          "Contoso");
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, uri => uri.AbsoluteUri == "https://contoso.example/about");
+        Assert.Contains(result, uri => uri.AbsoluteUri == "https://contoso.example/careers");
+        Assert.DoesNotContain(result, uri => uri.AbsoluteUri.Contains("privacy", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result, uri => uri.AbsoluteUri.Contains("apply", StringComparison.OrdinalIgnoreCase));
+      }
 
       [Fact]
       public async Task AnalyzeAsync_SendsBrowserLikeHeaders()

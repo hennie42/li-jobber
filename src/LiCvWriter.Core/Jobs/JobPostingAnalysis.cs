@@ -10,6 +10,12 @@ public sealed record JobPostingAnalysis
 
     public string Summary { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Exact application deadline date extracted from trusted source content.
+    /// Leave empty when the posting does not state a reliable deadline.
+    /// </summary>
+    public DateOnly? ApplicationDeadline { get; init; }
+
     public IReadOnlyList<string> MustHaveThemes { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<string> NiceToHaveThemes { get; init; } = Array.Empty<string>();

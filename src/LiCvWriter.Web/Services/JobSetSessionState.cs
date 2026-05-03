@@ -53,6 +53,14 @@ public sealed record JobSetSessionState
 
     public string AdditionalInstructions { get; init; } = string.Empty;
 
+    public bool IsSelectedForBatch { get; init; }
+
+    /// <summary>
+    /// Manual application deadline override that wins over freshly extracted deadlines
+    /// until the user clears it.
+    /// </summary>
+    public DateOnly? ManualApplicationDeadlineOverride { get; init; }
+
     public JobPostingAnalysis? JobPosting { get; init; }
 
     public CompanyResearchProfile? CompanyProfile { get; init; }

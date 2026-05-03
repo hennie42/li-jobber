@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using HtmlAgilityPack;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
@@ -37,6 +39,37 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         "about",
         "contact"
     };
+    private static readonly string[] CompanyContextHintKeywords =
+    [
+        "about",
+        "about-us",
+        "company",
+        "careers",
+        "career",
+        "culture",
+        "values",
+        "team",
+        "mission",
+        "vision",
+        "who-we-are",
+        "om",
+        "virksomhed",
+        "karriere"
+    ];
+    private static readonly string[] CompanyContextIgnoreKeywords =
+    [
+        "apply",
+        "ansoeg",
+        "privacy",
+        "cookie",
+        "terms",
+        "login",
+        "sign-in",
+        "signin",
+        "register",
+        "share",
+        "jobagent"
+    ];
 
     private static readonly HashSet<string> NonDomainTokens = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -156,6 +189,59 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             cancellationToken);
 
         return ParseCompanyResearchProfile(response.Content, urls, sourceDocuments);
+    }
+
+    public async Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(
+        Uri jobPostingUrl,
+        string? companyName = null,
+        CancellationToken cancellationToken = default)
+    {
+        await ValidatePublicHttpsUriAsync(jobPostingUrl, cancellationToken);
+        var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return Array.Empty<Uri>();
+        }
+
+        var document = new HtmlDocument();
+        document.LoadHtml(html);
+
+        var companyTokens = Tokenize(companyName ?? string.Empty)
+            .Where(static token => token.Length >= 4)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var linkNodes = document.DocumentNode.SelectNodes("//a[@href]")?.ToArray() ?? Array.Empty<HtmlNode>();
+
+        var scoredCandidates = linkNodes
+            .Select(node => CreateCompanyContextCandidate(jobPostingUrl, node, companyTokens))
+            .Where(static candidate => candidate is not null)
+            .Cast<(Uri Uri, int Score)>()
+            .DistinctBy(static candidate => candidate.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenBy(static candidate => candidate.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToArray();
+
+        var discoveredUrls = new List<Uri>();
+        foreach (var candidate in scoredCandidates)
+        {
+            try
+            {
+                await ValidatePublicHttpsUriAsync(candidate.Uri, cancellationToken);
+                discoveredUrls.Add(candidate.Uri);
+            }
+            catch (InvalidOperationException)
+            {
+                // Skip local or private candidates discovered from public pages.
+            }
+
+            if (discoveredUrls.Count >= 3)
+            {
+                break;
+            }
+        }
+
+        return discoveredUrls;
     }
 
     public async Task<JobPostingAnalysis> AnalyzeTextAsync(
@@ -282,6 +368,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var roleTitle = ReadOptionalString(root, "roleTitle");
         var companyName = ReadOptionalString(root, "companyName");
         var summary = ReadOptionalString(root, "summary");
+        var applicationDeadline = ReadSupportedApplicationDeadline(root, jobText);
 
         return new JobPostingAnalysis
         {
@@ -291,6 +378,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 ? jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "Unknown"
                 : companyName,
             Summary = string.IsNullOrWhiteSpace(summary) ? Clip(jobText, 1_200) : Clip(summary, 1_200),
+            ApplicationDeadline = applicationDeadline,
             MustHaveThemes = signals.Where(static signal => signal.Importance == JobRequirementImportance.MustHave).Select(static signal => signal.Requirement).ToArray(),
             NiceToHaveThemes = signals.Where(static signal => signal.Importance == JobRequirementImportance.NiceToHave).Select(static signal => signal.Requirement).ToArray(),
             CulturalSignals = signals.Where(static signal => signal.Importance == JobRequirementImportance.Cultural).Select(static signal => signal.Requirement).ToArray(),
@@ -525,6 +613,90 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return $" Response excerpt: {trimmed}";
     }
 
+    private static (Uri Uri, int Score)? CreateCompanyContextCandidate(Uri jobPostingUrl, HtmlNode linkNode, HashSet<string> companyTokens)
+    {
+        var candidateUri = TryResolveCompanyContextUri(jobPostingUrl, linkNode.GetAttributeValue("href", string.Empty));
+        if (candidateUri is null
+            || string.Equals(candidateUri.AbsoluteUri, jobPostingUrl.AbsoluteUri, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var score = ScoreCompanyContextUri(jobPostingUrl, candidateUri, BuildLinkContext(linkNode), companyTokens);
+        return score <= 0 ? null : (candidateUri, score);
+    }
+
+    private static Uri? TryResolveCompanyContextUri(Uri baseUri, string href)
+    {
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return null;
+        }
+
+        var candidate = HtmlEntity.DeEntitize(href.Trim());
+        if (candidate.StartsWith("#", StringComparison.Ordinal)
+            || candidate.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+            || candidate.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+            || candidate.StartsWith("tel:", StringComparison.OrdinalIgnoreCase)
+            || !Uri.TryCreate(baseUri, candidate, out var resolved)
+            || !string.Equals(resolved.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return resolved;
+    }
+
+    private static string BuildLinkContext(HtmlNode linkNode)
+        => string.Join(
+            " ",
+            new[]
+            {
+                NormalizeRequirementText(linkNode.InnerText),
+                NormalizeRequirementText(linkNode.GetAttributeValue("title", string.Empty)),
+                NormalizeRequirementText(linkNode.GetAttributeValue("aria-label", string.Empty))
+            }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+
+    private static int ScoreCompanyContextUri(Uri jobPostingUrl, Uri candidateUri, string linkContext, HashSet<string> companyTokens)
+    {
+        var haystack = $"{candidateUri.Host} {candidateUri.AbsolutePath} {linkContext}";
+        if (CompanyContextIgnoreKeywords.Any(keyword => haystack.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            return 0;
+        }
+
+        var score = 0;
+
+        if (!candidateUri.Host.Equals(jobPostingUrl.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            score += 4;
+        }
+
+        if (CompanyContextHintKeywords.Any(keyword => haystack.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 3;
+        }
+
+        if (companyTokens.Count > 0 && companyTokens.Any(token => haystack.Contains(token, StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 3;
+        }
+
+        if (string.IsNullOrEmpty(candidateUri.Query))
+        {
+            score += 1;
+        }
+
+        if ((candidateUri.AbsolutePath == "/" || string.IsNullOrWhiteSpace(candidateUri.AbsolutePath))
+            && !candidateUri.Host.Equals(jobPostingUrl.Host, StringComparison.OrdinalIgnoreCase)
+            && companyTokens.Count > 0)
+        {
+            score += 1;
+        }
+
+        return score;
+    }
+
     private static JobContextSignal[] ReadSignals(JsonElement root, string propertyName, string defaultSourceLabel)
     {
         if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
@@ -740,6 +912,32 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
+    private static DateOnly? ReadSupportedApplicationDeadline(JsonElement root, string sourceText)
+        => ParseSupportedApplicationDeadline(
+            ReadOptionalString(root, "applicationDeadline"),
+            ReadOptionalString(root, "applicationDeadlineSourceSnippet"),
+            sourceText);
+
+    private static DateOnly? ParseSupportedApplicationDeadline(string? dateValue, string? sourceSnippet, string sourceText)
+    {
+        if (string.IsNullOrWhiteSpace(dateValue)
+            || string.IsNullOrWhiteSpace(sourceSnippet)
+            || !DateOnly.TryParseExact(dateValue, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var applicationDeadline))
+        {
+            return null;
+        }
+
+        return ContainsNormalizedSnippet(sourceText, sourceSnippet)
+            ? applicationDeadline
+            : null;
+    }
+
+    private static bool ContainsNormalizedSnippet(string sourceText, string snippet)
+        => NormalizeSourceText(sourceText).Contains(NormalizeSourceText(snippet), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeSourceText(string value)
+        => Regex.Replace(value, @"\s+", " ").Trim();
+
     private static string ResolveSourceLabel(string? sourceUrl, string defaultSourceLabel)
     {
         if (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri))
@@ -876,6 +1074,8 @@ Return JSON only with this exact shape:
   "roleTitle": "string",
   "companyName": "string",
   "summary": "2-4 concise sentences",
+    "applicationDeadline": "YYYY-MM-DD",
+    "applicationDeadlineSourceSnippet": "verbatim text containing the exact deadline date",
   "requirements": [
     {
       "category": "Must have|Nice to have|Culture",
@@ -897,6 +1097,10 @@ Rules:
 - Never emit conversational, navigation, or filler labels like "Links", "There is", "Of course", "Home", "Menu", or "Contact".
 - Every requirement entry must include a supporting sourceSnippet and a confidence from 1 to 100.
 - Keep summary under 550 characters.
+- Set applicationDeadline only when the source explicitly states an exact calendar deadline date.
+- Use ISO format YYYY-MM-DD for applicationDeadline.
+- If the source is ambiguous, relative, rolling, or missing an exact date, return an empty string for applicationDeadline and applicationDeadlineSourceSnippet.
+- When applicationDeadline is present, applicationDeadlineSourceSnippet must include the exact supporting wording from the source text.
 - Do not invent employers, technologies, or company values that are not in the page.
 """;
     }
@@ -1081,11 +1285,16 @@ Rules:
         var roleTitle = ExtractLooseJsonStringValue(content, "roleTitle");
         var companyName = ExtractLooseJsonStringValue(content, "companyName");
         var summary = ExtractLooseJsonStringValue(content, "summary");
+        var applicationDeadline = ParseSupportedApplicationDeadline(
+            ExtractLooseJsonStringValue(content, "applicationDeadline"),
+            ExtractLooseJsonStringValue(content, "applicationDeadlineSourceSnippet"),
+            jobText);
         var extractedSignals = JobSignalExtractor.Extract(jobText);
 
         var hasUsefulStructuredFields = !string.IsNullOrWhiteSpace(roleTitle)
             || !string.IsNullOrWhiteSpace(companyName)
-            || !string.IsNullOrWhiteSpace(summary);
+            || !string.IsNullOrWhiteSpace(summary)
+            || applicationDeadline is not null;
 
         if (!hasUsefulStructuredFields && extractedSignals.MustHaveThemes.Count == 0 && extractedSignals.NiceToHaveThemes.Count == 0 && extractedSignals.CulturalSignals.Count == 0)
         {
@@ -1104,6 +1313,7 @@ Rules:
                 ? jobPostingUrl?.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "Unknown"
                 : companyName,
             Summary = string.IsNullOrWhiteSpace(summary) ? Clip(jobText, 1_200) : Clip(summary, 1_200),
+            ApplicationDeadline = applicationDeadline,
             MustHaveThemes = extractedSignals.MustHaveThemes,
             NiceToHaveThemes = extractedSignals.NiceToHaveThemes,
             CulturalSignals = extractedSignals.CulturalSignals,

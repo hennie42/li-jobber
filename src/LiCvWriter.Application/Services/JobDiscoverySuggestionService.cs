@@ -17,10 +17,11 @@ public sealed class JobDiscoverySuggestionService(
         ApplicantDifferentiatorProfile? differentiatorProfile = null,
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
+        Action<JobDiscoveryProgressUpdate>? progress = null,
         bool enrichWithFit = true,
         CancellationToken cancellationToken = default)
     {
-        var suggestions = await discoveryService.DiscoverAsync(searchPlan, cancellationToken);
+        var suggestions = await discoveryService.DiscoverAsync(searchPlan, progress, cancellationToken);
         if (suggestions.Count == 0)
         {
             return Array.Empty<JobDiscoverySuggestionReview>();
@@ -35,8 +36,13 @@ public sealed class JobDiscoverySuggestionService(
 
         var reviews = new List<JobDiscoverySuggestionReview>(suggestions.Count);
 
-        foreach (var suggestion in suggestions)
+        for (var index = 0; index < suggestions.Count; index++)
         {
+            var suggestion = suggestions[index];
+            progress?.Invoke(new JobDiscoveryProgressUpdate(
+                $"Analyzing suggestion {index + 1} of {suggestions.Count}",
+                suggestion.Title));
+
             try
             {
                 var jobPosting = await jobResearchService.AnalyzeAsync(

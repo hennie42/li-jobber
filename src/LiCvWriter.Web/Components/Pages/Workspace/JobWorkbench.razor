@@ -38,7 +38,10 @@
         </div>
     </section>
 
-    <JobDiscoveryPanel />
+    <details class="card-panel stack-gap" open>
+        <summary><h3>Discovery</h3></summary>
+        <JobDiscoveryPanel />
+    </details>
 
     <section class="card-panel stack-gap">
         <div class="field-label">Batch action</div>
@@ -50,7 +53,7 @@
             <label><input type="checkbox" @bind="generateInterviewNotes" @bind:after="PersistDraftGenerationPreferences" /> Interview questions</label>
         </div>
         <div class="button-row">
-            <button class="primary-button" @onclick="RunAllRefreshThenDraftsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Start all")</button>
+            <button class="primary-button" @onclick="RunAllRefreshThenDraftsAsync" disabled="@(isBusy || isBatchRunning || !CanRunAnyBatchDraftGeneration())">@(isBatchRunning ? GetBatchActionLabel() : "Start selected")</button>
         </div>
         @if (isBatchRunning)
         {
@@ -76,7 +79,7 @@
         <div class="jobsets-grid">
             @foreach (var jobSet in Workspace.JobSets.OrderBy(j => j.SortOrder))
             {
-                <JobsetOverviewRow JobSet="jobSet" ReadinessMessage="@GetBatchReadinessMessage(jobSet)" />
+                <JobsetOverviewRow JobSet="jobSet" ReadinessMessage="@GetBatchReadinessMessage(jobSet)" BatchSelectionChanged="@(isSelected => HandleBatchSelectionChanged(jobSet.Id, isSelected))" />
             }
         </div>
     </section>
@@ -190,6 +193,17 @@ else
                         <p class="muted-text">@analysis.CompanyName</p>
                     </div>
                     <p>@analysis.Summary</p>
+
+                    <div>
+                        <label class="field-label" for="applicationDeadline">Application deadline</label>
+                        <input
+                            id="applicationDeadline"
+                            class="text-input"
+                            type="date"
+                            value="@GetApplicationDeadlineInputValue()"
+                            @onchange="HandleApplicationDeadlineChanged"
+                            disabled="@(isBusy || isBatchRunning)" />
+                    </div>
 
                     @if (analysis.Signals.Count > 0)
                     {
@@ -1016,12 +1030,6 @@ else if (CanRunFitReview)
             .Cast<Uri>()
             .ToArray();
 
-        if (companyContextUris.Length == 0)
-        {
-            errorMessage = "Add at least one absolute company URL.";
-            return false;
-        }
-
         return true;
     }
 
@@ -1328,6 +1336,49 @@ else if (CanRunFitReview)
             ContactLinkedIn = contactLinkedIn,
             ContactCity = contactCity
         });
+
+    private string GetApplicationDeadlineInputValue()
+        => analysis?.ApplicationDeadline?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private Task HandleApplicationDeadlineChanged(ChangeEventArgs args)
+    {
+        errorMessage = null;
+
+        if (analysis is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var value = args.Value?.ToString();
+        DateOnly? parsedValue = null;
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            if (!DateOnly.TryParseExact(value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedDate))
+            {
+                errorMessage = "The application deadline must use a valid calendar date.";
+                return Task.CompletedTask;
+            }
+
+            parsedValue = parsedDate;
+        }
+
+        try
+        {
+            Workspace.SetJobSetApplicationDeadline(JobSetId!, parsedValue);
+            SyncFromWorkspace();
+            Operations.Info(
+                "Job context updated.",
+                string.IsNullOrWhiteSpace(value)
+                    ? "Manual application deadline cleared. Future re-analysis can restore an extracted deadline."
+                    : "Manual application deadline saved. Future re-analysis will keep this override until cleared.");
+        }
+        catch (Exception exception)
+        {
+            errorMessage = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
 
     private Task RemoveJobPostingItemAsync(JobPostingEditableField field, int index)
     {
@@ -1663,19 +1714,20 @@ else if (CanRunFitReview)
 
         if (Workspace.CandidateProfile is null)
         {
-            errorMessage = "Load a LinkedIn profile before running all jobsets.";
+            errorMessage = "Load a LinkedIn profile before running selected job sets.";
             return;
         }
 
         var kinds = GetSelectedDocumentKinds();
         if (kinds.Count == 0)
         {
-            errorMessage = "Select at least one document type before running all jobsets.";
+            errorMessage = "Select at least one document type before running selected job sets.";
             return;
         }
 
-        var readyJobSets = JobSetBatchPlanner.SelectReadyJobSets(Workspace.JobSets, CanRunBatchDraftGeneration).ToArray();
-        var skippedJobSets = JobSetBatchPlanner.SelectSkippedJobSets(Workspace.JobSets, CanRunBatchDraftGeneration)
+        var selectedJobSets = Workspace.JobSets.Where(static jobSet => jobSet.IsSelectedForBatch).ToArray();
+        var readyJobSets = JobSetBatchPlanner.SelectReadyJobSets(selectedJobSets, CanRunBatchDraftGeneration).ToArray();
+        var skippedJobSets = JobSetBatchPlanner.SelectSkippedJobSets(selectedJobSets, CanRunBatchDraftGeneration)
             .Select(jobSet => $"Skipped {jobSet.Title}: {GetBatchReadinessMessage(jobSet)}")
             .ToArray();
 
@@ -1686,9 +1738,11 @@ else if (CanRunFitReview)
 
         if (readyJobSets.Length == 0)
         {
-            errorMessage = skippedJobSets.Length == 0
-                ? "No jobsets are ready to run."
-                : "No jobsets are ready to run. See the skipped jobsets listed above.";
+            errorMessage = selectedJobSets.Length == 0
+                ? "Select at least one job set to run."
+                : skippedJobSets.Length == 0
+                    ? "No selected job sets are ready to run."
+                    : "No selected job sets are ready to run. See the skipped job sets listed above.";
             return;
         }
 
@@ -1733,10 +1787,10 @@ else if (CanRunFitReview)
             }
 
             Operations.Success(
-                "Start all completed.",
+                "Start selected completed.",
                 skippedJobSets.Length == 0
-                    ? $"Completed analysis and generated drafts for {readyJobSets.Length} jobset(s)."
-                    : $"Completed analysis and generated drafts for {readyJobSets.Length} jobset(s). Skipped {skippedJobSets.Length} jobset(s).",
+                    ? $"Completed analysis and generated drafts for {readyJobSets.Length} selected job set(s)."
+                    : $"Completed analysis and generated drafts for {readyJobSets.Length} selected job set(s). Skipped {skippedJobSets.Length} selected job set(s).",
                 null);
         }
         catch (Exception exception)
@@ -2052,7 +2106,7 @@ else if (CanRunFitReview)
         => Workspace.IsLlmReady
             && Workspace.CandidateProfile is not null
             && GetSelectedDocumentKinds().Count > 0
-            && Workspace.JobSets.Any(CanRunBatchDraftGeneration);
+            && Workspace.JobSets.Any(jobSet => jobSet.IsSelectedForBatch && CanRunBatchDraftGeneration(jobSet));
 
     private bool CanRunBatchDraftGeneration(JobSetSessionState jobSet)
         => string.IsNullOrWhiteSpace(GetBatchReadinessMessage(jobSet));
@@ -2102,8 +2156,11 @@ else if (CanRunFitReview)
 
     private string GetBatchActionLabel()
         => batchTotalCount == 0
-            ? "Run all job sets"
+            ? "Run selected job sets"
             : $"Batch {Math.Min(batchCompletedCount + (isBusy ? 1 : 0), batchTotalCount)} of {batchTotalCount}";
+
+    private void HandleBatchSelectionChanged(string jobSetId, bool isSelected)
+        => Workspace.SetJobSetBatchSelection(jobSetId, isSelected);
 
     private string GetCurrentTaskStatusMessage()
     {

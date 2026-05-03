@@ -8,17 +8,16 @@
 @inject JobDiscoveryProfileLightService ProfileLightService
 @inject JobDiscoverySearchPlanService SearchPlanService
 @inject JobDiscoverySuggestionService SuggestionService
-@inject NavigationManager Navigation
+@inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
 
-<section class="card-panel stack-gap">
+<section class="stack-gap">
     <div class="hero-row">
         <div>
-            <h3>Discovery</h3>
-            <p class="muted-text">Build a configurable public search from the loaded profile before turning good matches into jobsets.</p>
+            <p class="muted-text">Build a configurable public search from the loaded profile before turning good matches into Job sets.</p>
         </div>
         <div class="button-row">
-                <button class="secondary-button" @onclick="DiscoverSuggestionsAsync" disabled="@(!currentSearchPlan.CanOpen || isDiscovering)">@(isDiscovering ? "Finding suggestions..." : "Find suggestions")</button>
+                <button class="secondary-button" @onclick="DiscoverSuggestionsAsync" disabled="@(!currentSearchPlan.CanOpen || isDiscovering)">@(isDiscovering ? "Updating suggestions..." : GetDiscoverButtonLabel())</button>
             @if (currentSearchPlan.CanOpen)
             {
                 <a class="primary-button" href="@currentSearchPlan.SearchUri!.AbsoluteUri" target="_blank" rel="noopener">Open search on @currentSearchPlan.ProviderDisplayName</a>
@@ -57,7 +56,7 @@
         @if (providers.Count > 1)
         {
             <label class="field-label" for="discoveryProvider">Provider</label>
-            <select id="discoveryProvider" class="text-input" @bind="selectedProviderId" @bind:after="RefreshSearchPlan">
+            <select id="discoveryProvider" class="text-input" @bind="selectedProviderId" @bind:after="HandleSearchCriteriaChanged">
                 @foreach (var provider in providers)
                 {
                     <option value="@provider.Id">@provider.DisplayName</option>
@@ -66,10 +65,10 @@
         }
 
         <label class="field-label" for="discoveryQuery">Search query</label>
-        <input id="discoveryQuery" class="text-input" @bind="queryText" @bind:event="oninput" @bind:after="RefreshSearchPlan" />
+        <input id="discoveryQuery" class="text-input" @bind="queryText" @bind:event="oninput" @bind:after="HandleSearchCriteriaChanged" />
 
         <label class="field-label" for="discoveryLocation">Preferred location</label>
-        <input id="discoveryLocation" class="text-input" @bind="locationText" @bind:event="oninput" @bind:after="RefreshSearchPlan" placeholder="Optional unless your provider uses a location parameter" />
+        <input id="discoveryLocation" class="text-input" @bind="locationText" @bind:event="oninput" @bind:after="HandleSearchCriteriaChanged" placeholder="Optional unless your provider uses a location parameter" />
 
         @if (profileLight.HasSignals)
         {
@@ -95,7 +94,7 @@
             <p class="muted-text">Load a profile on Start / Setup to derive a discovery query.</p>
         }
 
-        <p class="muted-text">This slice fetches public Jobindex-style search results into local suggestions. Accepting a suggestion creates a normal URL-based jobset prefilled with the job link.</p>
+        <p class="muted-text">This slice fetches public Jobindex-style search results into saved suggestions. Accepting a suggestion creates a normal URL-based Job set prefilled with the job link.</p>
 
         @if (suggestions.Count > 0)
         {
@@ -114,7 +113,7 @@
                                 {
                                     <div class="status-chip @GetRecommendationStatusClass(suggestion.JobFitAssessment.Recommendation)">@FormatRecommendation(suggestion.JobFitAssessment.Recommendation) @suggestion.JobFitAssessment.OverallScore/100</div>
                                 }
-                                <button class="primary-button" @onclick="() => CreateJobSetFromSuggestion(suggestion)">Accept as jobset</button>
+                                <button class="primary-button" @onclick="() => CreateJobSetFromSuggestion(suggestion)">Accept as Job set</button>
                                 <button class="secondary-button" @onclick="() => DismissSuggestion(suggestion)">Dismiss</button>
                                 <a class="link-button" href="@suggestion.Suggestion.DetailUrl.AbsoluteUri" target="_blank" rel="noopener">Open listing</a>
                             </div>
@@ -142,7 +141,7 @@
         }
         else if (hasLoadedSuggestions)
         {
-            <p class="muted-text">No suggestions were extracted from the current provider page. Refine the query or open the search directly to inspect the source page.</p>
+            <p class="muted-text">No visible suggestions are available for the current saved or fetched list. Refine the query, update suggestions, or open the search directly to inspect the source page.</p>
         }
     }
 </section>
@@ -160,6 +159,7 @@
     private string discoveryErrorMessage = string.Empty;
     private bool isDiscovering;
     private bool hasLoadedSuggestions;
+    private bool isSearchDirty;
 
     protected override void OnInitialized()
     {
@@ -197,13 +197,29 @@
 
         previousSuggestedQuery = profileLight.SearchQuery;
         previousSuggestedLocation = profileLight.PreferredLocation;
-        RefreshSearchPlan();
+        UpdateCurrentSearchPlan(restoreSavedSuggestions: !isSearchDirty);
     }
 
-    private void RefreshSearchPlan()
+    private void HandleSearchCriteriaChanged()
+    {
+        UpdateCurrentSearchPlan(restoreSavedSuggestions: false);
+    }
+
+    private void UpdateCurrentSearchPlan(bool restoreSavedSuggestions)
     {
         currentSearchPlan = SearchPlanService.Build(profileLight, selectedProviderId, queryText, locationText);
         discoveryErrorMessage = string.Empty;
+
+        if (restoreSavedSuggestions)
+        {
+            isSearchDirty = false;
+            LoadSavedSuggestionsForCurrentPlan();
+            return;
+        }
+
+        isSearchDirty = true;
+        suggestions = Array.Empty<JobDiscoverySuggestionReview>();
+        hasLoadedSuggestions = false;
     }
 
     private async Task DiscoverSuggestionsAsync()
@@ -221,14 +237,21 @@
 
         try
         {
-            suggestions = await SuggestionService.DiscoverAsync(
-                currentSearchPlan,
-                Workspace.CandidateProfile,
-                Workspace.ApplicantDifferentiatorProfile,
-                Workspace.SelectedLlmModel,
-                Workspace.SelectedThinkingLevel,
-                enrichWithFit: Workspace.IsLlmReady && Workspace.CandidateProfile is not null);
-            hasLoadedSuggestions = true;
+            var discoveredSuggestions = await Operations.RunAsync(
+                GetDiscoverButtonLabel(),
+                $"{currentSearchPlan.ProviderDisplayName}: {currentSearchPlan.Query}",
+                () => SuggestionService.DiscoverAsync(
+                    currentSearchPlan,
+                    Workspace.CandidateProfile,
+                    Workspace.ApplicantDifferentiatorProfile,
+                    Workspace.SelectedLlmModel,
+                    Workspace.SelectedThinkingLevel,
+                    update => Operations.UpdateCurrent(update.Message, update.Detail),
+                    enrichWithFit: Workspace.IsLlmReady && Workspace.CandidateProfile is not null));
+
+            Workspace.MergeSavedSuggestions(currentSearchPlan, discoveredSuggestions);
+            isSearchDirty = false;
+            LoadSavedSuggestionsForCurrentPlan();
         }
         catch (Exception exception)
         {
@@ -250,7 +273,7 @@
 
         if (newJobSet is null)
         {
-            discoveryErrorMessage = "The jobset could not be created from the selected suggestion.";
+            discoveryErrorMessage = "The Job set could not be created from the selected suggestion.";
             return;
         }
 
@@ -270,15 +293,32 @@
                 Workspace.SetJobSetEvidenceSelection(newJobSet.Id, suggestion.EvidenceSelection, preserveExistingSelections: false);
             }
         }
-
-        DismissSuggestion(suggestion);
-        Navigation.NavigateTo($"/workspace/job-workbench/{newJobSet.Id}");
     }
 
     private void DismissSuggestion(JobDiscoverySuggestionReview suggestion)
-        => suggestions = suggestions
-            .Where(item => !item.Suggestion.DetailUrl.Equals(suggestion.Suggestion.DetailUrl))
-            .ToArray();
+    {
+        Workspace.HideSuggestion(suggestion.Suggestion.DetailUrl);
+        isSearchDirty = false;
+        LoadSavedSuggestionsForCurrentPlan();
+    }
+
+    private void LoadSavedSuggestionsForCurrentPlan()
+    {
+        if (!currentSearchPlan.CanOpen)
+        {
+            suggestions = Array.Empty<JobDiscoverySuggestionReview>();
+            hasLoadedSuggestions = false;
+            return;
+        }
+
+        suggestions = Workspace.GetSavedSuggestions(currentSearchPlan.ProviderId, currentSearchPlan.Query, currentSearchPlan.PreferredLocation);
+        hasLoadedSuggestions = Workspace.HasSavedSuggestions(currentSearchPlan.ProviderId, currentSearchPlan.Query, currentSearchPlan.PreferredLocation);
+    }
+
+    private string GetDiscoverButtonLabel()
+        => !isSearchDirty && Workspace.HasSavedSuggestions(currentSearchPlan.ProviderId, currentSearchPlan.Query, currentSearchPlan.PreferredLocation)
+            ? "Update suggestions"
+            : "Find suggestions";
 
     private string ResolveSelectedProviderId()
     {

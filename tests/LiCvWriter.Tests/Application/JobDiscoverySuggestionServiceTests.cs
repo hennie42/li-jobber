@@ -77,6 +77,7 @@ public sealed class JobDiscoverySuggestionServiceTests
             new ApplicantDifferentiatorProfile { TargetNarrative = "Pragmatic AI architect" },
             selectedModel: "session-model",
             selectedThinkingLevel: "low",
+            progress: null,
             enrichWithFit: true);
 
         Assert.Equal(2, result.Count);
@@ -112,6 +113,7 @@ public sealed class JobDiscoverySuggestionServiceTests
             ApplicantDifferentiatorProfile.Empty,
             selectedModel: "session-model",
             selectedThinkingLevel: "low",
+            progress: null,
             enrichWithFit: true);
 
         var review = Assert.Single(result);
@@ -142,6 +144,7 @@ public sealed class JobDiscoverySuggestionServiceTests
             new JobDiscoverySearchPlan("jobindex", "Jobindex", "architect", "Copenhagen", new Uri("https://www.jobindex.dk/jobsoegning?q=architect")),
             candidateProfile: null,
             ApplicantDifferentiatorProfile.Empty,
+            progress: null,
             enrichWithFit: false);
 
         var review = Assert.Single(result);
@@ -159,7 +162,7 @@ public sealed class JobDiscoverySuggestionServiceTests
 
     private sealed class FakeJobDiscoveryService(IReadOnlyList<JobDiscoverySuggestion> suggestions) : IJobDiscoveryService
     {
-        public Task<IReadOnlyList<JobDiscoverySuggestion>> DiscoverAsync(JobDiscoverySearchPlan searchPlan, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<JobDiscoverySuggestion>> DiscoverAsync(JobDiscoverySearchPlan searchPlan, Action<JobDiscoveryProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
             => Task.FromResult(suggestions);
     }
 
@@ -170,6 +173,9 @@ public sealed class JobDiscoverySuggestionServiceTests
 
         public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<Uri>>(Array.Empty<Uri>());
 
         public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
@@ -184,6 +190,9 @@ public sealed class JobDiscoverySuggestionServiceTests
             => throw new InvalidOperationException("Parse failed.");
 
         public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)

@@ -31,6 +31,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private readonly object gate = new();
     private readonly WorkspaceRecoveryStore? recoveryStateStore = recoveryStore;
     private readonly List<JobSetSessionState> jobSets = LoadRecoveredJobSets(recoveryStore);
+    private readonly List<SavedSuggestionListState> savedSuggestionLists = LoadSavedSuggestionLists(recoveryStore);
+    private readonly HashSet<string> hiddenSuggestionUrls = LoadHiddenSuggestionUrls(recoveryStore);
     private string exportPath = Path.Combine(Environment.CurrentDirectory, "LI-export");
     private CandidateProfile? candidateProfile = LoadCandidateProfile(recoveryStore);
     private LinkedInExportImportResult? importResult;
@@ -90,6 +92,12 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public DraftGenerationPreferences DraftGenerationPreferences => Read(() => draftGenerationPreferences);
 
+    public bool HasSavedSuggestions(string providerId, string query, string preferredLocation)
+        => Read(() => FindSavedSuggestionListUnsafe(providerId, query, preferredLocation) is not null);
+
+    public IReadOnlyList<JobDiscoverySuggestionReview> GetSavedSuggestions(string providerId, string query, string preferredLocation)
+        => Read(() => FilterHiddenSuggestions(FindSavedSuggestionListUnsafe(providerId, query, preferredLocation)?.Suggestions ?? Array.Empty<JobDiscoverySuggestionReview>()));
+
     public bool IsLlmSessionConfigured => Read(() => isLlmSessionConfigured);
 
     public bool HasStartedLlmWork => Read(() => hasStartedLlmWork);
@@ -120,6 +128,64 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
+    public void MergeSavedSuggestions(JobDiscoverySearchPlan searchPlan, IReadOnlyList<JobDiscoverySuggestionReview> freshSuggestions)
+    {
+        ArgumentNullException.ThrowIfNull(searchPlan);
+        ArgumentNullException.ThrowIfNull(freshSuggestions);
+
+        var normalizedQuery = NormalizeSavedSuggestionKeyPart(searchPlan.Query);
+        var normalizedLocation = NormalizeSavedSuggestionKeyPart(searchPlan.PreferredLocation);
+
+        lock (gate)
+        {
+            var index = FindSavedSuggestionListIndexUnsafe(searchPlan.ProviderId, normalizedQuery, normalizedLocation);
+            var existingSuggestions = index >= 0
+                ? savedSuggestionLists[index].Suggestions
+                : Array.Empty<JobDiscoverySuggestionReview>();
+
+            var freshUrls = freshSuggestions
+                .Select(static suggestion => suggestion.Suggestion.DetailUrl.AbsoluteUri)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var mergedSuggestions = freshSuggestions
+                .Concat(existingSuggestions.Where(item => !freshUrls.Contains(item.Suggestion.DetailUrl.AbsoluteUri)))
+                .DistinctBy(static item => item.Suggestion.DetailUrl.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var savedList = new SavedSuggestionListState(
+                searchPlan.ProviderId,
+                searchPlan.ProviderDisplayName,
+                normalizedQuery,
+                normalizedLocation,
+                mergedSuggestions);
+
+            if (index >= 0)
+            {
+                savedSuggestionLists[index] = savedList;
+            }
+            else
+            {
+                savedSuggestionLists.Add(savedList);
+            }
+        }
+
+        NotifyChanged();
+    }
+
+    public void HideSuggestion(Uri detailUrl)
+    {
+        ArgumentNullException.ThrowIfNull(detailUrl);
+
+        var shouldNotify = false;
+        lock (gate)
+        {
+            shouldNotify = hiddenSuggestionUrls.Add(detailUrl.AbsoluteUri);
+        }
+
+        if (shouldNotify)
+        {
+            NotifyChanged();
+        }
+    }
     public ModelBenchmarkSession? LastBenchmarkSession => Read(() => lastBenchmarkSession);
 
     public void SetLastBenchmarkSession(ModelBenchmarkSession session)
@@ -263,6 +329,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         UpdateJobSet(jobSetId, jobSet => jobSet with { OutputLanguage = outputLanguage });
     }
 
+    public void SetJobSetBatchSelection(string jobSetId, bool isSelectedForBatch)
+    {
+        UpdateJobSet(jobSetId, jobSet => jobSet with { IsSelectedForBatch = isSelectedForBatch });
+    }
+
     public void SetJobSetEvidenceSelected(string jobSetId, string evidenceId, bool isSelected)
     {
         UpdateJobSet(jobSetId, jobSet =>
@@ -351,6 +422,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 throw new InvalidOperationException("At least one job set must remain in the workspace.");
             }
 
+            HideSuggestionUrlUnsafe(jobSets[index].JobUrl);
+
             jobSets.RemoveAt(index);
         }
 
@@ -411,9 +484,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     {
         UpdateJobSet(jobSetId, jobSet => jobSet with
         {
-            JobPosting = jobPosting,
+            JobPosting = ApplyManualApplicationDeadlineOverride(jobSet, jobPosting),
             JobUrl = jobPosting.SourceUrl?.ToString() ?? jobSet.JobUrl,
-            OutputFolderName = BuildOutputFolderName(jobSet.SortOrder, jobPosting),
+            OutputFolderName = BuildOutputFolderName(jobSet.SortOrder, ApplyManualApplicationDeadlineOverride(jobSet, jobPosting)),
             JobFitAssessment = JobFitAssessment.Empty,
             TechnologyGapAssessment = TechnologyGapAssessment.Empty,
             SelectedEvidenceIds = Array.Empty<string>(),
@@ -423,6 +496,20 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             GeneratedDocuments = Array.Empty<GeneratedDocument>(),
             Exports = Array.Empty<DocumentExportResult>(),
             ActiveSubtask = null
+        });
+    }
+
+    public void SetJobSetApplicationDeadline(string jobSetId, DateOnly? applicationDeadline)
+    {
+        UpdateJobSet(jobSetId, jobSet =>
+        {
+            var jobPosting = jobSet.JobPosting
+                ?? throw new InvalidOperationException("No analyzed job context is available for this job set.");
+
+            var updatedJobPosting = jobPosting with { ApplicationDeadline = applicationDeadline };
+            return BuildEditedJobPostingState(
+                jobSet with { ManualApplicationDeadlineOverride = applicationDeadline },
+                updatedJobPosting);
         });
     }
 
@@ -737,6 +824,42 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         return configuredMatch ?? availableModels.FirstOrDefault() ?? string.Empty;
     }
 
+    private static string NormalizeSavedSuggestionKeyPart(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private IReadOnlyList<JobDiscoverySuggestionReview> FilterHiddenSuggestions(IEnumerable<JobDiscoverySuggestionReview> suggestions)
+        => suggestions
+            .Where(item => !hiddenSuggestionUrls.Contains(item.Suggestion.DetailUrl.AbsoluteUri))
+            .ToArray();
+
+    private SavedSuggestionListState? FindSavedSuggestionListUnsafe(string providerId, string query, string preferredLocation)
+    {
+        var normalizedQuery = NormalizeSavedSuggestionKeyPart(query);
+        var normalizedLocation = NormalizeSavedSuggestionKeyPart(preferredLocation);
+        return savedSuggestionLists.FirstOrDefault(list =>
+            list.ProviderId.Equals(providerId, StringComparison.OrdinalIgnoreCase)
+            && list.Query.Equals(normalizedQuery, StringComparison.Ordinal)
+            && list.PreferredLocation.Equals(normalizedLocation, StringComparison.Ordinal));
+    }
+
+    private int FindSavedSuggestionListIndexUnsafe(string providerId, string query, string preferredLocation)
+    {
+        var normalizedQuery = NormalizeSavedSuggestionKeyPart(query);
+        var normalizedLocation = NormalizeSavedSuggestionKeyPart(preferredLocation);
+        return savedSuggestionLists.FindIndex(list =>
+            list.ProviderId.Equals(providerId, StringComparison.OrdinalIgnoreCase)
+            && list.Query.Equals(normalizedQuery, StringComparison.Ordinal)
+            && list.PreferredLocation.Equals(normalizedLocation, StringComparison.Ordinal));
+    }
+
+    private void HideSuggestionUrlUnsafe(string jobUrl)
+    {
+        if (Uri.TryCreate(jobUrl, UriKind.Absolute, out var detailUrl))
+        {
+            hiddenSuggestionUrls.Add(detailUrl.AbsoluteUri);
+        }
+    }
+
     private static IReadOnlyList<T> RemoveAt<T>(IReadOnlyList<T> values, int index, string label)
     {
         if (index < 0 || index >= values.Count)
@@ -818,6 +941,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     JobPostingText = jobSet.JobPostingText,
                     CompanyContextText = jobSet.CompanyContextText,
                     AdditionalInstructions = jobSet.AdditionalInstructions,
+                    IsSelectedForBatch = jobSet.IsSelectedForBatch,
+                    ManualApplicationDeadlineOverride = jobSet.ManualApplicationDeadlineOverride,
                     JobPosting = jobSet.JobPosting,
                     CompanyProfile = jobSet.CompanyProfile,
                     JobFitAssessment = jobSet.JobFitAssessment ?? JobFitAssessment.Empty,
@@ -897,6 +1022,23 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ContactLinkedIn = preferences?.ContactLinkedIn?.Trim() ?? string.Empty,
             ContactCity = preferences?.ContactCity?.Trim() ?? string.Empty
         };
+
+    private static List<SavedSuggestionListState> LoadSavedSuggestionLists(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.SavedSuggestionLists?
+            .Select(static list => new SavedSuggestionListState(
+                list.ProviderId,
+                list.ProviderDisplayName,
+                NormalizeSavedSuggestionKeyPart(list.Query),
+                NormalizeSavedSuggestionKeyPart(list.PreferredLocation),
+                list.Suggestions))
+            .ToList()
+            ?? [];
+
+    private static HashSet<string> LoadHiddenSuggestionUrls(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.HiddenSuggestionUrls?
+            .Where(static url => !string.IsNullOrWhiteSpace(url))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private static Dictionary<string, OllamaCapacityVerdict> LoadCapacityVerdicts(WorkspaceRecoveryStore? recoveryStore)
     {
@@ -1034,9 +1176,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.EvidenceSelection,
                 jobSet.GeneratedDocuments,
                 jobSet.AdditionalInstructions,
+                jobSet.IsSelectedForBatch,
                 jobSet.LastFitReviewFingerprint,
                 jobSet.LastFitReviewIncludedLlmEnhancement,
-                jobSet.InputLanguage)).ToArray(),
+                jobSet.InputLanguage,
+                jobSet.ManualApplicationDeadlineOverride)).ToArray(),
             applicantDifferentiatorProfile,
             candidateProfile,
             selectedLlmModel,
@@ -1045,11 +1189,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             linkedInImportDiagnostics,
             linkedInAuthorizationStatus,
             capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase),
-            lastBenchmarkSession);
+            lastBenchmarkSession,
+            hiddenSuggestionUrls.Count == 0 ? null : hiddenSuggestionUrls.ToArray(),
+            savedSuggestionLists.Count == 0 ? null : savedSuggestionLists.ToArray());
 
     private void NotifyChanged()
     {
         recoveryStateStore?.Save(CreateRecoverySnapshot());
         Changed?.Invoke();
     }
+
+    private static JobPostingAnalysis ApplyManualApplicationDeadlineOverride(JobSetSessionState jobSet, JobPostingAnalysis jobPosting)
+        => jobSet.ManualApplicationDeadlineOverride is { } manualDeadline
+            ? jobPosting with { ApplicationDeadline = manualDeadline }
+            : jobPosting;
 }

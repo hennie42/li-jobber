@@ -21,6 +21,11 @@ public interface IJobResearchService
         string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(
+        Uri jobPostingUrl,
+        string? companyName = null,
+        CancellationToken cancellationToken = default);
+
     Task<JobPostingAnalysis> AnalyzeTextAsync(
         string jobPostingText,
         string? selectedModel = null,

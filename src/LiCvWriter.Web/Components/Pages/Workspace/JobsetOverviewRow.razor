@@ -3,6 +3,10 @@
 
 <div class="overview-row">
     <div class="overview-row-topline">
+        <label class="checkbox-row" title="Select this job set for the batch run">
+            <input type="checkbox" checked="@JobSet.IsSelectedForBatch" @onchange="HandleBatchSelectionChanged" />
+            <span>Select</span>
+        </label>
         <div class="overview-row-heading">
             <a class="overview-row-title" href="@($"/workspace/job-workbench/{JobSet.Id}")">
                 <span class="@($"job-set-indicator job-set-indicator-{GetIndicatorState(JobSet.ProgressState)}")" aria-hidden="true"></span>
@@ -68,6 +72,7 @@
 @code {
     [Parameter, EditorRequired] public JobSetSessionState JobSet { get; set; } = default!;
     [Parameter] public string ReadinessMessage { get; set; } = string.Empty;
+    [Parameter] public EventCallback<bool> BatchSelectionChanged { get; set; }
 
     private static readonly JobSetSubtask[] Subtasks =
     [
@@ -121,6 +126,9 @@
         JobSetSubtask.DraftGeneration => "Drafts",
         _ => subtask.ToString()
     };
+
+    private Task HandleBatchSelectionChanged(ChangeEventArgs args)
+        => BatchSelectionChanged.InvokeAsync(args.Value is bool isSelected && isSelected);
 
     private static string FormatDocumentKind(DocumentKind kind) => kind switch
     {

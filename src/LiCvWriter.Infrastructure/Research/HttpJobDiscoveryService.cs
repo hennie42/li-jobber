@@ -17,6 +17,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
 
     public async Task<IReadOnlyList<JobDiscoverySuggestion>> DiscoverAsync(
         JobDiscoverySearchPlan searchPlan,
+        Action<JobDiscoveryProgressUpdate>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (!options.Enabled || !searchPlan.CanOpen || searchPlan.SearchUri is null)
@@ -28,6 +29,10 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
         {
             throw new InvalidOperationException($"The discovery provider '{searchPlan.ProviderId}' is not implemented yet.");
         }
+
+        progress?.Invoke(new JobDiscoveryProgressUpdate(
+            "Fetching Jobindex search page",
+            $"Loading {searchPlan.SearchUri.AbsoluteUri}"));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, searchPlan.SearchUri);
         request.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
@@ -44,7 +49,16 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
             return Array.Empty<JobDiscoverySuggestion>();
         }
 
-        return ParseJobindexResults(searchPlan, html);
+        progress?.Invoke(new JobDiscoveryProgressUpdate(
+            "Parsing Jobindex result cards",
+            "Extracting result cards from the Jobindex search response."));
+
+        var suggestions = ParseJobindexResults(searchPlan, html);
+        progress?.Invoke(new JobDiscoveryProgressUpdate(
+            "Jobindex suggestions ready",
+            $"Loaded {suggestions.Count} suggestion(s) from the current search response."));
+
+        return suggestions;
     }
 
     private IReadOnlyList<JobDiscoverySuggestion> ParseJobindexResults(JobDiscoverySearchPlan searchPlan, string html)

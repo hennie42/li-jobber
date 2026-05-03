@@ -17,8 +17,8 @@ public sealed class JobDiscoverySearchPlanServiceTests
                 {
                     Id = "jobindex",
                     DisplayName = "Jobindex",
-                    BaseUrl = "https://www.jobindex.dk",
-                    SearchPath = "/jobsoegning",
+                    BaseUrl = "https://jobindex.dk",
+                    SearchPath = "/jobsoegning/it/systemudvikling/storkoebenhavn",
                     QueryParameterName = "q",
                     AllowedHosts = ["jobindex.dk", "www.jobindex.dk"]
                 }
@@ -42,7 +42,7 @@ public sealed class JobDiscoverySearchPlanServiceTests
         Assert.Equal("jobindex", result.ProviderId);
         Assert.Equal("Jobindex", result.ProviderDisplayName);
         Assert.Equal("Lead Architect Azure Kubernetes", result.Query);
-        Assert.Equal("https://www.jobindex.dk/jobsoegning?q=Lead%20Architect%20Azure%20Kubernetes", result.SearchUri!.AbsoluteUri);
+        Assert.Equal("https://jobindex.dk/jobsoegning/it/systemudvikling/storkoebenhavn?q=Lead%20Architect%20Azure%20Kubernetes", result.SearchUri!.AbsoluteUri);
     }
 
     [Fact]
@@ -56,8 +56,8 @@ public sealed class JobDiscoverySearchPlanServiceTests
                 {
                     Id = "jobindex",
                     DisplayName = "Jobindex",
-                    BaseUrl = "https://www.jobindex.dk",
-                    SearchPath = "/jobsoegning",
+                    BaseUrl = "https://jobindex.dk",
+                    SearchPath = "/jobsoegning/it/systemudvikling/storkoebenhavn",
                     QueryParameterName = "q",
                     LocationParameterName = string.Empty,
                     AllowedHosts = ["jobindex.dk", "www.jobindex.dk"]

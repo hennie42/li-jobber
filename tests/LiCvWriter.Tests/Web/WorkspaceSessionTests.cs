@@ -236,6 +236,127 @@ public sealed class WorkspaceSessionTests
     }
 
     [Fact]
+    public void SetJobSetApplicationDeadline_PreservesManualOverrideAcrossFreshAnalysis()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            ApplicationDeadline = new DateOnly(2026, 5, 31)
+        });
+
+        session.SetJobSetApplicationDeadline(jobSetId, new DateOnly(2026, 6, 15));
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            ApplicationDeadline = new DateOnly(2026, 5, 31)
+        });
+
+        Assert.Equal(new DateOnly(2026, 6, 15), session.GetJobSet(jobSetId).JobPosting!.ApplicationDeadline);
+        Assert.Equal(new DateOnly(2026, 6, 15), session.GetJobSet(jobSetId).ManualApplicationDeadlineOverride);
+    }
+
+    [Fact]
+    public void SetJobSetApplicationDeadline_WhenCleared_AllowsFreshAnalysisDeadline()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            ApplicationDeadline = new DateOnly(2026, 5, 31)
+        });
+
+        session.SetJobSetApplicationDeadline(jobSetId, new DateOnly(2026, 6, 15));
+        session.SetJobSetApplicationDeadline(jobSetId, null);
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            ApplicationDeadline = new DateOnly(2026, 5, 31)
+        });
+
+        Assert.Equal(new DateOnly(2026, 5, 31), session.GetJobSet(jobSetId).JobPosting!.ApplicationDeadline);
+        Assert.Null(session.GetJobSet(jobSetId).ManualApplicationDeadlineOverride);
+    }
+
+    [Fact]
+    public void MergeSavedSuggestions_WhenSuggestionIsHidden_FiltersItFromVisibleResults()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+        var searchPlan = new JobDiscoverySearchPlan("jobindex", "Jobindex", "architect", "Copenhagen", new Uri("https://jobindex.dk/jobsoegning/it/systemudvikling/storkoebenhavn?q=architect"));
+        var suggestion = new JobDiscoverySuggestionReview(
+            new JobDiscoverySuggestion(
+                "jobindex",
+                "Jobindex",
+                "Lead AI Architect",
+                "Contoso",
+                "Copenhagen",
+                "Lead architecture and AI delivery.",
+                new Uri("https://jobs.example.test/lead-ai-architect"),
+                "Today",
+                searchPlan.SearchUri!),
+            null,
+            JobFitAssessment.Empty,
+            EvidenceSelectionResult.Empty);
+
+        session.MergeSavedSuggestions(searchPlan, [suggestion]);
+        session.HideSuggestion(suggestion.Suggestion.DetailUrl);
+
+        Assert.True(session.HasSavedSuggestions(searchPlan.ProviderId, searchPlan.Query, searchPlan.PreferredLocation));
+        Assert.Empty(session.GetSavedSuggestions(searchPlan.ProviderId, searchPlan.Query, searchPlan.PreferredLocation));
+    }
+
+    [Fact]
+    public void DeleteJobSet_HidesMatchingSavedSuggestion()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+        var searchPlan = new JobDiscoverySearchPlan("jobindex", "Jobindex", "architect", "Copenhagen", new Uri("https://jobindex.dk/jobsoegning/it/systemudvikling/storkoebenhavn?q=architect"));
+        var detailUrl = new Uri("https://jobs.example.test/lead-ai-architect");
+        var suggestion = new JobDiscoverySuggestionReview(
+            new JobDiscoverySuggestion(
+                "jobindex",
+                "Jobindex",
+                "Lead AI Architect",
+                "Contoso",
+                "Copenhagen",
+                "Lead architecture and AI delivery.",
+                detailUrl,
+                "Today",
+                searchPlan.SearchUri!),
+            null,
+            JobFitAssessment.Empty,
+            EvidenceSelectionResult.Empty);
+
+        session.MergeSavedSuggestions(searchPlan, [suggestion]);
+        session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+        {
+            RoleTitle = "Lead AI Architect",
+            CompanyName = "Contoso",
+            SourceUrl = detailUrl
+        });
+        session.AddJobSet();
+
+        session.DeleteJobSet(jobSetId);
+
+        Assert.Empty(session.GetSavedSuggestions(searchPlan.ProviderId, searchPlan.Query, searchPlan.PreferredLocation));
+    }
+
+    [Fact]
+    public void SetJobSetBatchSelection_UpdatesSelectionState()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        session.SetJobSetBatchSelection(jobSetId, isSelectedForBatch: true);
+
+        Assert.True(session.GetJobSet(jobSetId).IsSelectedForBatch);
+    }
+
+    [Fact]
     public void RemoveJobSetJobPostingItem_RemovesSignalAndClearsDependentOutputs()
     {
         var session = new WorkspaceSession(new OllamaOptions());

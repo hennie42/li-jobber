@@ -164,7 +164,8 @@ public sealed class WorkspaceRecoveryTests
             {
                 RoleTitle = "Lead AI Architect",
                 CompanyName = "Contoso",
-                Summary = "Drive AI adoption"
+                Summary = "Drive AI adoption",
+                ApplicationDeadline = new DateOnly(2026, 5, 31)
             });
             session.SetJobSetOutputLanguage(jobSetId, OutputLanguage.Danish);
             session.SetJobSetGeneratedDocuments(jobSetId, 
@@ -177,6 +178,7 @@ public sealed class WorkspaceRecoveryTests
             Assert.Equal(2, restoredSession.JobSets.Count);
             Assert.Equal(OutputLanguage.Danish, restoredSession.GetJobSet(jobSetId).OutputLanguage);
             Assert.Equal(JobSetProgressState.Done, restoredSession.GetJobSet(jobSetId).ProgressState);
+            Assert.Equal(new DateOnly(2026, 5, 31), restoredSession.GetJobSet(jobSetId).JobPosting!.ApplicationDeadline);
             Assert.Single(restoredSession.GetJobSet(jobSetId).Exports);
             Assert.Single(restoredSession.GetJobSet(jobSetId).GeneratedDocuments);
         }
@@ -204,6 +206,110 @@ public sealed class WorkspaceRecoveryTests
 
             Assert.Equal(JobSetProgressState.NotStarted, restoredSession.GetJobSet(jobSetId).ProgressState);
             Assert.Contains("Recovered after restart", restoredSession.GetJobSet(jobSetId).ProgressDetail, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresManualApplicationDeadlineOverrideAcrossReanalysis()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+            session.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+            {
+                RoleTitle = "Lead AI Architect",
+                CompanyName = "Contoso",
+                ApplicationDeadline = new DateOnly(2026, 5, 31)
+            });
+            session.SetJobSetApplicationDeadline(jobSetId, new DateOnly(2026, 6, 15));
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+            restoredSession.SetJobSetJobPosting(jobSetId, new JobPostingAnalysis
+            {
+                RoleTitle = "Lead AI Architect",
+                CompanyName = "Contoso",
+                ApplicationDeadline = new DateOnly(2026, 5, 31)
+            });
+
+            Assert.Equal(new DateOnly(2026, 6, 15), restoredSession.GetJobSet(jobSetId).JobPosting!.ApplicationDeadline);
+            Assert.Equal(new DateOnly(2026, 6, 15), restoredSession.GetJobSet(jobSetId).ManualApplicationDeadlineOverride);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresSavedSuggestionsAndHiddenUrls()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+            var searchPlan = new JobDiscoverySearchPlan("jobindex", "Jobindex", "architect", "Copenhagen", new Uri("https://jobindex.dk/jobsoegning/it/systemudvikling/storkoebenhavn?q=architect"));
+            var suggestion = new JobDiscoverySuggestionReview(
+                new JobDiscoverySuggestion(
+                    "jobindex",
+                    "Jobindex",
+                    "Lead AI Architect",
+                    "Contoso",
+                    "Copenhagen",
+                    "Lead architecture and AI delivery.",
+                    new Uri("https://jobs.example.test/lead-ai-architect"),
+                    "Today",
+                    searchPlan.SearchUri!),
+                null,
+                JobFitAssessment.Empty,
+                EvidenceSelectionResult.Empty);
+
+            session.MergeSavedSuggestions(searchPlan, [suggestion]);
+            session.HideSuggestion(suggestion.Suggestion.DetailUrl);
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            Assert.True(restoredSession.HasSavedSuggestions(searchPlan.ProviderId, searchPlan.Query, searchPlan.PreferredLocation));
+            Assert.Empty(restoredSession.GetSavedSuggestions(searchPlan.ProviderId, searchPlan.Query, searchPlan.PreferredLocation));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresBatchSelectionState()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+
+            session.SetJobSetBatchSelection(jobSetId, isSelectedForBatch: true);
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            Assert.True(restoredSession.GetJobSet(jobSetId).IsSelectedForBatch);
         }
         finally
         {
