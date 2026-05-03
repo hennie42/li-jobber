@@ -2,7 +2,7 @@
 
 This document is the maintainer, contributor, and evaluator reference for how LI CV Writer works. It covers architecture, data flows, session state, every major pipeline, and the design decisions behind deterministic and LLM-backed behavior.
 
-For the user-facing summary, see [README.md](../README.md).
+For the user-facing summary, see [the root README](../README.md). For the full docs map, see [docs/README.md](README.md).
 
 ---
 

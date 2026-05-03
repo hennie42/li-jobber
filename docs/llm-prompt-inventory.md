@@ -4,6 +4,8 @@ Date: 2026-04-29
 
 This inventory records every production prompt surface currently used by LiCvWriter. It is the baseline for prompt hardening, local evaluation, and future prompt versioning. The app is local-only by default, so all evaluation and prompt diagnostics should remain local unless the user explicitly opts into another model.
 
+For the user-facing summary, see [the root README](../README.md). For the docs map, see [docs/README.md](README.md).
+
 ## Quality Rubric
 
 | Dimension | What Good Looks Like |

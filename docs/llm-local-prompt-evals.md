@@ -4,6 +4,8 @@ Date: 2026-04-29
 
 LiCvWriter keeps prompt evaluation local by default. This scaffold adds deterministic golden fixtures for prompt coverage without calling a live model. Later phases can reuse the fixture catalog for local Ollama runs or local LLM-as-judge scoring.
 
+For the user-facing summary, see [the root README](../README.md). For the docs map, see [docs/README.md](README.md).
+
 ## Fixture Catalog
 
 The current fixture catalog lives in `tests/LiCvWriter.Tests/PromptEvals/PromptEvalFixtureCatalog.cs`.

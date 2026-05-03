@@ -4,6 +4,8 @@ Date: 2026-04-29
 
 This design evolves the current section-based CV generation into an outline-first workflow. The goal is better global coherence, stronger evidence grounding, and less repeated work, while keeping the deterministic renderer, visible-content-only export policy, and four-page CV policy intact.
 
+For the user-facing summary, see [the root README](../README.md). For the docs map, see [docs/README.md](README.md).
+
 ## Current Baseline
 
 `DraftGenerationService` already generates CV content in chunks:
