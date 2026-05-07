@@ -234,7 +234,9 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
     app.MapPost("/api/playwright/demo-seed", async Task<IResult> (
         WorkspaceSession workspace,
         ILlmClient llmClient,
+        JobFitWorkspaceRefreshService fitRefreshService,
         OllamaOptions options,
+        HttpContext httpContext,
         CancellationToken cancellationToken) =>
     {
         var availability = await llmClient.VerifyModelAvailabilityAsync(cancellationToken);
@@ -247,6 +249,11 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
         var selectedModel = SelectDemoModel(availability, options.Model);
         workspace.SetLlmSessionSettings(selectedModel, options.Think);
         SeedPlaywrightDemoWorkspace(workspace);
+
+        if (IsFullPlaywrightDemo(httpContext))
+        {
+            SeedPlaywrightFullDemoWorkspace(workspace, fitRefreshService, selectedModel);
+        }
 
         return Results.Ok(new PlaywrightDemoSeedResult(
             selectedModel,
@@ -304,42 +311,12 @@ static string SelectDemoModel(OllamaModelAvailability availability, string confi
     return configuredMatch ?? availability.Model ?? availability.AvailableModels[0];
 }
 
+static bool IsFullPlaywrightDemo(HttpContext httpContext)
+    => string.Equals(httpContext.Request.Query["scope"].ToString(), "full", StringComparison.OrdinalIgnoreCase);
+
 static void SeedPlaywrightDemoWorkspace(WorkspaceSession workspace)
 {
-    workspace.UpdateCandidateProfile(new CandidateProfile
-    {
-        Name = new PersonName("Alex", "Taylor"),
-        Headline = "Senior platform and product delivery leader",
-        Summary = "Leads cross-functional delivery, AI-enabled workflows, Azure modernization, and stakeholder alignment for complex product portfolios.",
-        Industry = "Software and consulting",
-        Location = "Copenhagen, Denmark",
-        PrimaryEmail = "alex.taylor@example.test",
-        Experience =
-        [
-            new ExperienceEntry(
-                "Blue Harbor Consulting",
-                "Principal Delivery Lead",
-                "Led multi-team modernization programs, introduced evidence-based planning, and improved executive reporting for regulated clients.",
-                "Copenhagen",
-                new DateRange(new PartialDate("2021", 2021)),
-                ["Reduced portfolio reporting cycle time by 40%.", "Coached product teams on outcome-based delivery and risk management."]),
-            new ExperienceEntry(
-                "Signal Forge Systems",
-                "Solution Architect",
-                "Designed Azure integration platforms and helped teams translate business goals into maintainable software systems.",
-                "Remote",
-                new DateRange(new PartialDate("2018", 2018), new PartialDate("2021", 2021)),
-                ["Shipped a reusable integration foundation across six product teams."])
-        ],
-        Skills =
-        [
-            new SkillTag("Azure", 1),
-            new SkillTag("Product strategy", 2),
-            new SkillTag("Stakeholder management", 3),
-            new SkillTag("AI-assisted workflows", 4),
-            new SkillTag("Agile delivery", 5)
-        ]
-    });
+    workspace.UpdateCandidateProfile(PlaywrightDemoSeedData.CandidateProfile);
 
     while (workspace.JobSets.Count < PlaywrightDemoSeedData.JobPostings.Length)
     {
@@ -376,10 +353,123 @@ static void SeedPlaywrightDemoWorkspace(WorkspaceSession workspace)
     });
 }
 
+static void SeedPlaywrightFullDemoWorkspace(WorkspaceSession workspace, JobFitWorkspaceRefreshService fitRefreshService, string selectedModel)
+{
+    workspace.SetApplicantDifferentiatorProfile(PlaywrightDemoSeedData.ApplicantDifferentiators);
+
+    var seededJobSets = workspace.JobSets.OrderBy(static jobSet => jobSet.SortOrder).Take(PlaywrightDemoSeedData.JobPostings.Length).ToArray();
+    for (var index = 0; index < seededJobSets.Length; index++)
+    {
+        var jobSet = seededJobSets[index];
+        var companyProfile = PlaywrightDemoSeedData.CompanyProfiles[index];
+        workspace.SetJobSetCompanyProfile(jobSet.Id, companyProfile);
+        fitRefreshService.RefreshJobSet(jobSet.Id, resetSelections: true);
+        workspace.SetJobSetTechnologyGapAssessment(
+            jobSet.Id,
+            TechnologyGapAnalyzer.Analyze(workspace.CandidateProfile, PlaywrightDemoSeedData.JobPostings[index], companyProfile));
+        workspace.SetJobSetGeneratedDocuments(
+            jobSet.Id,
+            PlaywrightDemoSeedData.BuildGeneratedDocuments(PlaywrightDemoSeedData.JobPostings[index], selectedModel),
+            PlaywrightDemoSeedData.BuildExportResults(PlaywrightDemoSeedData.JobPostings[index]));
+        workspace.SetJobSetBatchSelection(jobSet.Id, false);
+    }
+}
+
 public sealed record PlaywrightDemoSeedResult(string Model, IReadOnlyList<string> CompanyNames, IReadOnlyList<string> JobSetIds);
 
 public static class PlaywrightDemoSeedData
 {
+    public static readonly CandidateProfile CandidateProfile = new()
+    {
+        Name = new PersonName("Alex", "Taylor"),
+        Headline = "Senior platform and product delivery leader",
+        Summary = "Leads cross-functional delivery, AI-enabled workflows, Azure modernization, and stakeholder alignment for complex product portfolios.",
+        Industry = "Software and consulting",
+        Location = "Copenhagen, Denmark",
+        PublicProfileUrl = "https://www.linkedin.com/in/alex-taylor-demo",
+        PrimaryEmail = "alex.taylor@example.test",
+        Experience =
+        [
+            new ExperienceEntry(
+                "Blue Harbor Consulting",
+                "Principal Delivery Lead",
+                "Led multi-team modernization programs, introduced evidence-based planning, and improved executive reporting for regulated clients.",
+                "Copenhagen",
+                new DateRange(new PartialDate("2021", 2021)),
+                ["Reduced portfolio reporting cycle time by 40%.", "Coached product teams on outcome-based delivery and risk management."]),
+            new ExperienceEntry(
+                "Signal Forge Systems",
+                "Solution Architect",
+                "Designed Azure integration platforms and helped teams translate business goals into maintainable software systems.",
+                "Remote",
+                new DateRange(new PartialDate("2018", 2018), new PartialDate("2021", 2021)),
+                ["Shipped a reusable integration foundation across six product teams."])
+        ],
+        Education =
+        [
+            new EducationEntry(
+                "Copenhagen Business School",
+                "MSc in Business Administration and Information Systems",
+                "Focused on digital strategy, governance, and organizational change.",
+                "Product leadership forum",
+                new DateRange(new PartialDate("2014", 2014), new PartialDate("2016", 2016)))
+        ],
+        Skills =
+        [
+            new SkillTag("Azure", 1),
+            new SkillTag("Product strategy", 2),
+            new SkillTag("Stakeholder management", 3),
+            new SkillTag("AI-assisted workflows", 4),
+            new SkillTag("Agile delivery", 5),
+            new SkillTag("Prompt evaluation", 6),
+            new SkillTag("Executive communication", 7)
+        ],
+        Certifications =
+        [
+            new CertificationEntry(
+                "Microsoft Certified: Azure Solutions Architect Expert",
+                "Microsoft",
+                new Uri("https://learn.microsoft.com/certifications/azure-solutions-architect/"),
+                new DateRange(new PartialDate("2023", 2023)),
+                null)
+        ],
+        Projects =
+        [
+            new ProjectEntry(
+                "AI workflow adoption scorecard",
+                "Built a lightweight measurement model that helped leadership compare adoption, quality, and risk across internal AI workflow pilots.",
+                null,
+                new DateRange(new PartialDate("2024", 2024)))
+        ],
+        Recommendations =
+        [
+            new RecommendationEntry(
+                new PersonName("Jordan", "Lee"),
+                "Blue Harbor Consulting",
+                "Client Partner",
+                "Alex makes ambiguous delivery problems concrete and keeps senior stakeholders aligned without losing the teams doing the work.",
+                "PUBLIC",
+                new PartialDate("2025", 2025))
+        ],
+        ManualSignals = new Dictionary<string, string>
+        {
+            ["Delivery philosophy"] = "Evidence first, then narrative. Alex turns stakeholder concerns into visible delivery choices.",
+            ["Target roles"] = "Product delivery leadership, Azure transformation, AI workflow program ownership."
+        }
+    };
+
+    public static readonly ApplicantDifferentiatorProfile ApplicantDifferentiators = new()
+    {
+        WorkStyle = "Structured discovery, visible trade-offs, and practical delivery checkpoints.",
+        CommunicationStyle = "Calm executive summaries backed by enough detail for delivery teams to act.",
+        LeadershipStyle = "Creates direction, then gives teams room to solve with clear accountability.",
+        StakeholderStyle = "Turns conflicting expectations into explicit choices and decision logs.",
+        Motivators = "Meaningful product outcomes, responsible AI adoption, and measurable team learning.",
+        TargetNarrative = "A delivery leader who bridges product ambition, technical architecture, and adoption habits.",
+        Watchouts = "Avoid over-indexing on pure program management roles without product or technical influence.",
+        AboutApplicantBasis = "Use LinkedIn experience, delivery metrics, Azure architecture work, and AI workflow adoption examples."
+    };
+
     public static readonly JobPostingAnalysis[] JobPostings =
     [
         new()
@@ -387,9 +477,16 @@ public static class PlaywrightDemoSeedData
             RoleTitle = "Senior Product Delivery Lead",
             CompanyName = "Northwind Demo Labs",
             Summary = "Lead cross-functional product delivery for AI-enabled workflow products used by enterprise teams.",
+            SourceUrl = new Uri("https://jobs.example.test/northwind-product-delivery-lead"),
             MustHaveThemes = ["Product delivery leadership", "Stakeholder alignment", "AI-enabled workflow delivery"],
             NiceToHaveThemes = ["Azure platform experience", "Portfolio reporting"],
             CulturalSignals = ["Pragmatic collaboration", "Evidence-based decision making"],
+            Signals =
+            [
+                new JobContextSignal("Delivery", "Product delivery leadership", JobRequirementImportance.MustHave, "Job posting", "Lead cross-functional product delivery for AI-enabled workflow products.", 94, ["product delivery", "cross-functional delivery"]),
+                new JobContextSignal("Technology", "AI-enabled workflow delivery", JobRequirementImportance.MustHave, "Job posting", "Products include AI-enabled workflows used by enterprise teams.", 91, ["AI workflows", "AI-enabled workflows"]),
+                new JobContextSignal("Technology", "Azure platform experience", JobRequirementImportance.NiceToHave, "Job posting", "Azure platform experience is listed as a helpful background.", 80, ["Azure"])
+            ],
             InferredRequirements = ["Can translate ambiguous goals into executable plans"]
         },
         new()
@@ -397,9 +494,16 @@ public static class PlaywrightDemoSeedData
             RoleTitle = "Azure Transformation Manager",
             CompanyName = "Fabrikam Demo Works",
             Summary = "Own delivery governance and technical coordination for Azure modernization initiatives.",
+            SourceUrl = new Uri("https://jobs.example.test/fabrikam-azure-transformation-manager"),
             MustHaveThemes = ["Azure modernization", "Delivery governance", "Executive communication"],
             NiceToHaveThemes = ["Consulting background", "Risk management"],
             CulturalSignals = ["Clear communication", "Ownership mindset"],
+            Signals =
+            [
+                new JobContextSignal("Technology", "Azure modernization", JobRequirementImportance.MustHave, "Job posting", "Own delivery governance for Azure modernization initiatives.", 95, ["Azure", "cloud modernization"]),
+                new JobContextSignal("Leadership", "Executive communication", JobRequirementImportance.MustHave, "Job posting", "Coordinate between leadership, architecture, and delivery teams.", 87, ["executive communication", "stakeholder alignment"]),
+                new JobContextSignal("Delivery", "Risk management", JobRequirementImportance.NiceToHave, "Job posting", "Modernization portfolio needs active risk management.", 76, ["risk management"])
+            ],
             InferredRequirements = ["Can bridge architecture and delivery teams"]
         },
         new()
@@ -407,13 +511,105 @@ public static class PlaywrightDemoSeedData
             RoleTitle = "AI Workflow Program Lead",
             CompanyName = "Contoso Demo Group",
             Summary = "Coordinate adoption of AI-assisted internal workflows while managing change and measurable outcomes.",
+            SourceUrl = new Uri("https://jobs.example.test/contoso-ai-workflow-program-lead"),
             MustHaveThemes = ["AI-assisted workflows", "Change management", "Outcome measurement"],
             NiceToHaveThemes = ["Prompt evaluation", "Internal enablement"],
             CulturalSignals = ["Curiosity", "Responsible experimentation"],
+            Signals =
+            [
+                new JobContextSignal("Technology", "AI-assisted workflows", JobRequirementImportance.MustHave, "Job posting", "Coordinate adoption of AI-assisted internal workflows.", 96, ["AI workflows", "AI-assisted workflows"]),
+                new JobContextSignal("Delivery", "Outcome measurement", JobRequirementImportance.MustHave, "Job posting", "Manage measurable outcomes for new ways of working.", 88, ["measurement", "scorecard"]),
+                new JobContextSignal("Technology", "Prompt evaluation", JobRequirementImportance.NiceToHave, "Job posting", "Prompt evaluation is useful for internal enablement.", 82, ["prompt evaluation"])
+            ],
             InferredRequirements = ["Can create adoption paths for new ways of working"]
         }
     ];
 
-    public static readonly string[] CompanyNames = JobPostings.Select(static posting => posting.CompanyName).ToArray();
+    public static readonly CompanyResearchProfile[] CompanyProfiles =
+    [
+        new()
+        {
+            Name = "Northwind Demo Labs",
+            Summary = "Northwind Demo Labs builds workflow products for enterprise operations teams that need clear governance and practical automation.",
+            SourceUrls = [new Uri("https://companies.example.test/northwind-demo-labs")],
+            GuidingPrinciples = ["Make AI behavior visible", "Prefer measurable delivery outcomes"],
+            CulturalSignals = ["Pragmatic collaboration", "Evidence-based decision making"],
+            Differentiators = ["Combines workflow automation with adoption coaching", "Ships operational scorecards with product changes"],
+            Signals =
+            [
+                new JobContextSignal("Company", "Enterprise workflow adoption", JobRequirementImportance.MustHave, "Company profile", "Customers expect adoption planning with every workflow launch.", 86, ["workflow adoption", "adoption planning"])
+            ]
+        },
+        new()
+        {
+            Name = "Fabrikam Demo Works",
+            Summary = "Fabrikam Demo Works helps regulated teams modernize Azure platforms while keeping executive governance and delivery risk visible.",
+            SourceUrls = [new Uri("https://companies.example.test/fabrikam-demo-works")],
+            GuidingPrinciples = ["Governance belongs in the delivery rhythm", "Architecture choices must be explainable"],
+            CulturalSignals = ["Ownership mindset", "Clear communication"],
+            Differentiators = ["Modernization playbooks for multi-team portfolios", "Strong executive reporting cadence"],
+            Signals =
+            [
+                new JobContextSignal("Company", "Azure delivery governance", JobRequirementImportance.MustHave, "Company profile", "Modernization programs use shared Azure governance patterns.", 90, ["Azure governance", "delivery governance"])
+            ]
+        },
+        new()
+        {
+            Name = "Contoso Demo Group",
+            Summary = "Contoso Demo Group introduces AI-assisted internal tooling with a strong focus on responsible experimentation and measurable enablement.",
+            SourceUrls = [new Uri("https://companies.example.test/contoso-demo-group")],
+            GuidingPrinciples = ["Adoption before automation", "Measure quality and confidence together"],
+            CulturalSignals = ["Curiosity", "Responsible experimentation"],
+            Differentiators = ["Internal AI enablement community", "Prompt evaluation practice for operational teams"],
+            Signals =
+            [
+                new JobContextSignal("Company", "Responsible AI enablement", JobRequirementImportance.MustHave, "Company profile", "Teams need enablement paths for safe AI workflow adoption.", 92, ["responsible AI", "AI enablement"])
+            ]
+        }
+    ];
+
+    public static readonly string[] CompanyNames = JobPostings
+        .Select(static posting => posting.CompanyName)
+        .Concat(CandidateProfile.Experience.Select(static entry => entry.CompanyName))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    public static IReadOnlyList<GeneratedDocument> BuildGeneratedDocuments(JobPostingAnalysis posting, string selectedModel)
+    {
+        var generatedAt = DateTimeOffset.UtcNow;
+        return
+        [
+            new GeneratedDocument(
+                DocumentKind.ProfileSummary,
+                $"Targeted profile summary - {posting.RoleTitle}",
+                $"# Targeted profile summary\n\nAlex Taylor is positioned for **{posting.RoleTitle}** by combining product delivery leadership, Azure modernization, and measurable AI workflow adoption. The narrative emphasizes stakeholder alignment, evidence-based delivery, and practical change management for {posting.CompanyName}.",
+                $"Alex Taylor is positioned for {posting.RoleTitle} through product delivery, Azure modernization, and AI workflow adoption.",
+                generatedAt,
+                LlmDuration: TimeSpan.FromSeconds(22),
+                PromptTokens: 1_240,
+                CompletionTokens: 420,
+                Model: selectedModel),
+            new GeneratedDocument(
+                DocumentKind.InterviewNotes,
+                $"Interview prep - {posting.RoleTitle}",
+                $"# Interview prep\n\n- Lead with the delivery scorecard example.\n- Connect Azure architecture work to portfolio governance.\n- Explain how AI workflow adoption was measured and coached.\n- Ask how {posting.CompanyName} defines responsible experimentation.",
+                $"Interview prep for {posting.RoleTitle}.",
+                generatedAt,
+                LlmDuration: TimeSpan.FromSeconds(18),
+                PromptTokens: 980,
+                CompletionTokens: 310,
+                Model: selectedModel)
+        ];
+    }
+
+    public static IReadOnlyList<DocumentExportResult> BuildExportResults(JobPostingAnalysis posting)
+    {
+        var slug = string.Join('-', posting.RoleTitle.ToLowerInvariant().Split([' ', '/', '\\'], StringSplitOptions.RemoveEmptyEntries));
+        return
+        [
+            new DocumentExportResult(DocumentKind.ProfileSummary, Path.Combine("artifacts", "playwright", "full-app-demo-exports", $"{slug}-summary.docx")),
+            new DocumentExportResult(DocumentKind.InterviewNotes, Path.Combine("artifacts", "playwright", "full-app-demo-exports", $"{slug}-interview-notes.docx"))
+        ];
+    }
 }
 

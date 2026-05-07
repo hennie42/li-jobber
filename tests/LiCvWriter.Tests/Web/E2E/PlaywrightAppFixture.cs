@@ -85,10 +85,13 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
         return context;
     }
 
-    public async Task<PlaywrightDemoSeedResponse> SeedDemoAsync()
+    public async Task<PlaywrightDemoSeedResponse> SeedDemoAsync(string? scope = null)
     {
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-        using var response = await httpClient.PostAsync($"{BaseUrl}/api/playwright/demo-seed", null);
+        var seedUrl = string.IsNullOrWhiteSpace(scope)
+            ? $"{BaseUrl}/api/playwright/demo-seed"
+            : $"{BaseUrl}/api/playwright/demo-seed?scope={Uri.EscapeDataString(scope)}";
+        using var response = await httpClient.PostAsync(seedUrl, null);
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)

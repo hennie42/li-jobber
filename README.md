@@ -13,6 +13,12 @@ It runs on your machine, which is helpful because your career history has alread
 - generates a CV, cover letter, profile summary, recommendation brief, and interview questions
 - exports Markdown and Word files without sending your life story to a cloud service
 
+## See It In Action
+
+Watch the [full Playwright E2E demo](https://hennie42.github.io/li-jobber/playwright-demo.html) for a two-minute walkthrough of setup, profile review, discovery, job-set analysis, fit review, ranked evidence, draft generation, exports, and live batch activity.
+
+The player source lives at [docs/playwright-demo.html](docs/playwright-demo.html). GitHub Pages should be enabled from the `docs/` folder for browser playback from the online repo.
+
 ## Why It Exists
 
 Applying for jobs is repetitive.

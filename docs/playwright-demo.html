@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LI CV Writer Playwright Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #18202a;
+      --muted: #5d6875;
+      --line: #d9dee5;
+      --accent: #0f766e;
+      --accent-ink: #084b45;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 5vw, 3.25rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.25rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    a {
+      color: var(--accent-ink);
+      font-weight: 600;
+    }
+
+    .lead {
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .video-panel,
+    .content-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 16px 40px rgba(24, 32, 42, 0.08);
+    }
+
+    .video-panel {
+      overflow: hidden;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1440 / 1000;
+      background: #111820;
+    }
+
+    .video-caption {
+      padding: 14px 16px 16px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.62fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .content-panel {
+      padding: 18px;
+    }
+
+    ol,
+    ul {
+      margin: 0;
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 8px;
+    }
+
+    .link-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .button-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fdfefe;
+      color: var(--accent-ink);
+      text-decoration: none;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100% - 20px, 1120px);
+        padding-top: 18px;
+      }
+
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>LI CV Writer Playwright Demo</h1>
+      <p class="lead">A full-app E2E recording of the local workflow: setup, profile review, discovery, job-set analysis, fit review, evidence, draft generation, exports, and live batch activity.</p>
+    </header>
+
+    <section class="video-panel" aria-labelledby="demo-video-heading">
+      <h2 id="demo-video-heading" class="visually-hidden">Full app demo video</h2>
+      <video controls preload="metadata" poster="assets/playwright-job-workbench-demo/01-ready-jobsets.png" aria-describedby="demo-video-caption">
+        <source src="assets/playwright-job-workbench-demo/job-workbench-demo.webm" type="video/webm">
+        Your browser does not support WebM video playback. Use the direct WebM download link below.
+      </video>
+      <p id="demo-video-caption" class="video-caption">Company names are blurred by the Playwright masking helper before screenshots and video are captured. Review generated media before sharing it outside the workspace.</p>
+    </section>
+
+    <div class="content-grid">
+      <section class="content-panel" aria-labelledby="transcript-heading">
+        <h2 id="transcript-heading">Walkthrough Transcript</h2>
+        <ol>
+          <li>The recording opens on Start / Setup with LLM readiness, profile status, differentiators, and job-set count visible.</li>
+          <li>It reviews imported profile tabs for experience, education, skills, certifications, projects, recommendations, and notes.</li>
+          <li>It shows redirect routes that fold import, research, and generation back into the main setup and workbench flows.</li>
+          <li>It walks through the Job Workbench overview, discovery, batch action settings, and job-set rows.</li>
+          <li>It opens a job-set detail page for research, fit review, technology gap, ranked evidence, draft generation, generated markdown drafts, and exported files.</li>
+          <li>It returns to the overview, selects three job sets, clicks Start selected, and holds on live Status Monitor, Reasoning Monitor, and Activity feed updates.</li>
+        </ol>
+      </section>
+
+      <aside class="content-panel" aria-labelledby="links-heading">
+        <h2 id="links-heading">Demo Links</h2>
+        <p>The WebM is tracked in the repository so GitHub Pages can serve this page directly from the docs folder.</p>
+        <div class="link-row">
+          <a class="button-link" href="assets/playwright-job-workbench-demo/job-workbench-demo.webm">Open the WebM file</a>
+          <a class="button-link" href="playwright-job-workbench-demo.md">Read screenshot and validation notes</a>
+          <a class="button-link" href="README.md">Open the docs index</a>
+        </div>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>
