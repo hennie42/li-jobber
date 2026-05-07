@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
@@ -10,8 +9,6 @@ namespace LiCvWriter.Infrastructure.Research;
 
 public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryOptions options) : IJobDiscoveryService
 {
-    private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
-    private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7";
     private static readonly Regex EmbeddedHtmlPattern = new("\"html\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -34,16 +31,8 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
             "Fetching Jobindex search page",
             $"Loading {searchPlan.SearchUri.AbsoluteUri}"));
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, searchPlan.SearchUri);
-        request.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
-        request.Headers.TryAddWithoutValidation("Accept", HtmlAcceptHeader);
-        request.Headers.TryAddWithoutValidation("Accept-Language", AcceptLanguageHeader);
-        request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
-
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var html = await response.Content.ReadAsStringAsync(cancellationToken);
+        var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, searchPlan.SearchUri, AcceptLanguageHeader, cancellationToken);
+        var html = fetchResult.Content;
         if (string.IsNullOrWhiteSpace(html))
         {
             return Array.Empty<JobDiscoverySuggestion>();
@@ -53,7 +42,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
             "Parsing Jobindex result cards",
             "Extracting result cards from the Jobindex search response."));
 
-        var suggestions = ParseJobindexResults(searchPlan, html);
+        var suggestions = ParseJobindexResults(searchPlan, fetchResult.FinalUri, html);
         progress?.Invoke(new JobDiscoveryProgressUpdate(
             "Jobindex suggestions ready",
             $"Loaded {suggestions.Count} suggestion(s) from the current search response."));
@@ -61,7 +50,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
         return suggestions;
     }
 
-    private IReadOnlyList<JobDiscoverySuggestion> ParseJobindexResults(JobDiscoverySearchPlan searchPlan, string html)
+    private IReadOnlyList<JobDiscoverySuggestion> ParseJobindexResults(JobDiscoverySearchPlan searchPlan, Uri searchResultBaseUri, string html)
     {
         var resultNodes = LoadResultNodes(html);
         var suggestions = new List<JobDiscoverySuggestion>();
@@ -69,7 +58,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
 
         foreach (var resultNode in resultNodes)
         {
-            var suggestion = TryParseResult(resultNode, searchPlan);
+            var suggestion = TryParseResult(resultNode, searchPlan, searchResultBaseUri);
             if (suggestion is null)
             {
                 continue;
@@ -136,7 +125,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
         }
     }
 
-    private JobDiscoverySuggestion? TryParseResult(HtmlNode resultNode, JobDiscoverySearchPlan searchPlan)
+    private JobDiscoverySuggestion? TryParseResult(HtmlNode resultNode, JobDiscoverySearchPlan searchPlan, Uri searchResultBaseUri)
     {
         var paidInner = resultNode.SelectSingleNode(".//div[contains(concat(' ', normalize-space(@class), ' '), ' PaidJob-inner ')]");
         if (paidInner is null)
@@ -156,7 +145,7 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
             return null;
         }
 
-        var detailUri = ResolveDetailUri(searchPlan.SearchUri!, titleLink.GetAttributeValue("href", string.Empty), resultNode, paidInner);
+        var detailUri = ResolveDetailUri(searchResultBaseUri, titleLink.GetAttributeValue("href", string.Empty), resultNode, paidInner);
         if (detailUri is null)
         {
             return null;

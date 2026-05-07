@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -20,8 +19,6 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
     private const int MaxCompanyContextCharacters = 12_000;
     private const int ExtractionNumPredict = 4_096;
     private const int InferenceNumPredict = 2_048;
-    private const string BrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
-    private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
     private static readonly HashSet<string> GenericRequirementPhrases = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -86,9 +83,12 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default)
     {
-        await ValidatePublicHttpsUriAsync(jobPostingUrl, cancellationToken);
-        var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
-        var title = ExtractMatch(html, "<title[^>]*>(.*?)</title>") ?? jobPostingUrl.Host;
+        var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, jobPostingUrl, AcceptLanguageHeader, cancellationToken);
+        PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, fetchResult.Content);
+
+        var effectiveJobPostingUrl = fetchResult.FinalUri;
+        var html = fetchResult.Content;
+        var title = ExtractMatch(html, "<title[^>]*>(.*?)</title>") ?? effectiveJobPostingUrl.Host;
         var heading = ExtractMatch(html, "<h1[^>]*>(.*?)</h1>") ?? title;
         var text = ExtractSemanticContent(html);
         if (string.IsNullOrWhiteSpace(text))
@@ -102,7 +102,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             new LlmRequest(
                 resolvedModel,
                 BuildJobSystemPrompt(sourceLanguageHint),
-                [new LlmChatMessage("user", BuildJobUserPrompt(jobPostingUrl, title, heading, text))],
+                [new LlmChatMessage("user", BuildJobUserPrompt(effectiveJobPostingUrl, title, heading, text))],
                 UseChatEndpoint: ollamaOptions.UseChatEndpoint,
                 Stream: true,
                 Think: extractionThinking,
@@ -121,7 +121,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             }),
             cancellationToken);
 
-        var analysis = ParseJobPostingAnalysis(response.Content, jobPostingUrl, heading, text);
+                var analysis = ParseJobPostingAnalysis(response.Content, effectiveJobPostingUrl, heading, text);
 
         // Second pass: infer unstated requirements commonly expected for this role type.
         var inferred = await InferHiddenRequirementsAsync(analysis, resolvedModel, extractionThinking, progress, cancellationToken);
@@ -148,15 +148,19 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         }
 
         var sourceDocuments = new List<(Uri Url, string Text)>();
+        var resolvedSourceUrls = new List<Uri>(urls.Length);
 
         foreach (var url in urls)
         {
-            await ValidatePublicHttpsUriAsync(url, cancellationToken);
-            var html = await FetchHtmlAsync(url, cancellationToken);
+            var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, url, AcceptLanguageHeader, cancellationToken);
+            PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, fetchResult.Content);
+
+            var html = fetchResult.Content;
             var text = StripHtml(html);
             if (!string.IsNullOrWhiteSpace(text))
             {
-                sourceDocuments.Add((url, text));
+                sourceDocuments.Add((fetchResult.FinalUri, text));
+                resolvedSourceUrls.Add(fetchResult.FinalUri);
             }
         }
 
@@ -188,7 +192,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             }),
             cancellationToken);
 
-        return ParseCompanyResearchProfile(response.Content, urls, sourceDocuments);
+        return ParseCompanyResearchProfile(response.Content, resolvedSourceUrls, sourceDocuments);
     }
 
     public async Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(
@@ -196,8 +200,11 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         string? companyName = null,
         CancellationToken cancellationToken = default)
     {
-        await ValidatePublicHttpsUriAsync(jobPostingUrl, cancellationToken);
-        var html = await FetchHtmlAsync(jobPostingUrl, cancellationToken);
+        var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, jobPostingUrl, AcceptLanguageHeader, cancellationToken);
+        PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, fetchResult.Content);
+
+        var effectiveJobPostingUrl = fetchResult.FinalUri;
+        var html = fetchResult.Content;
         if (string.IsNullOrWhiteSpace(html))
         {
             return Array.Empty<Uri>();
@@ -213,7 +220,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         var linkNodes = document.DocumentNode.SelectNodes("//a[@href]")?.ToArray() ?? Array.Empty<HtmlNode>();
 
         var scoredCandidates = linkNodes
-            .Select(node => CreateCompanyContextCandidate(jobPostingUrl, node, companyTokens))
+            .Select(node => CreateCompanyContextCandidate(effectiveJobPostingUrl, node, companyTokens))
             .Where(static candidate => candidate is not null)
             .Cast<(Uri Uri, int Score)>()
             .DistinctBy(static candidate => candidate.Uri.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
@@ -227,7 +234,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         {
             try
             {
-                await ValidatePublicHttpsUriAsync(candidate.Uri, cancellationToken);
+                await PublicWebContentFetcher.ValidatePublicHttpsUriAsync(candidate.Uri, cancellationToken);
                 discoveredUrls.Add(candidate.Uri);
             }
             catch (InvalidOperationException)
@@ -472,145 +479,6 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
                 $"The parser response did not conform to the expected company analysis schema. Try again or check the session model. Response preview: {preview}",
                 schemaException);
         }
-    }
-
-    private async Task<string> FetchHtmlAsync(Uri sourceUrl, CancellationToken cancellationToken)
-    {
-        using var request = CreateHtmlRequest(sourceUrl);
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-        if (response.StatusCode == HttpStatusCode.Forbidden)
-        {
-            throw new InvalidOperationException(
-                $"The site blocked access to {sourceUrl} with 403 Forbidden. Some job and company pages reject automated requests even when the request looks like a browser.");
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var failureDetail = await ReadFailureDetailAsync(response, cancellationToken);
-            throw new InvalidOperationException(
-                $"Fetching {sourceUrl} failed with {(int)response.StatusCode} {response.ReasonPhrase}.{failureDetail}");
-        }
-
-        return await response.Content.ReadAsStringAsync(cancellationToken);
-    }
-
-    private static async Task ValidatePublicHttpsUriAsync(Uri sourceUrl, CancellationToken cancellationToken)
-    {
-        if (!sourceUrl.IsAbsoluteUri)
-        {
-            throw new InvalidOperationException($"Only absolute public HTTPS URLs are allowed: {sourceUrl}");
-        }
-
-        if (!string.Equals(sourceUrl.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Only public HTTPS URLs are allowed: {sourceUrl}");
-        }
-
-        if (string.IsNullOrWhiteSpace(sourceUrl.Host))
-        {
-            throw new InvalidOperationException($"The URL host is invalid: {sourceUrl}");
-        }
-
-        if (sourceUrl.IsLoopback || IsLocalHostName(sourceUrl.Host))
-        {
-            throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
-        }
-
-        if (IPAddress.TryParse(sourceUrl.Host, out var parsedAddress))
-        {
-            if (IsPrivateAddress(parsedAddress))
-            {
-                throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
-            }
-
-            return;
-        }
-
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await Dns.GetHostAddressesAsync(sourceUrl.DnsSafeHost, cancellationToken);
-        }
-        catch (SocketException exception)
-        {
-            _ = exception;
-            return;
-        }
-
-        if (addresses.Any(IsPrivateAddress))
-        {
-            throw new InvalidOperationException($"Local or private hosts are not allowed: {sourceUrl}");
-        }
-    }
-
-    private static bool IsLocalHostName(string host)
-        => host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsPrivateAddress(IPAddress address)
-    {
-        if (IPAddress.IsLoopback(address))
-        {
-            return true;
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            return address.IsIPv6LinkLocal
-                || address.IsIPv6SiteLocal
-                || address.IsIPv6Multicast
-                || address.Equals(IPAddress.IPv6Loopback)
-                || address.IsIPv6UniqueLocal;
-        }
-
-        var bytes = address.GetAddressBytes();
-        if (bytes.Length != 4)
-        {
-            return true;
-        }
-
-        return bytes[0] switch
-        {
-            0 => true,
-            10 => true,
-            127 => true,
-            169 when bytes[1] == 254 => true,
-            172 when bytes[1] >= 16 && bytes[1] <= 31 => true,
-            192 when bytes[1] == 168 => true,
-            _ => false
-        };
-    }
-
-    private static HttpRequestMessage CreateHtmlRequest(Uri sourceUrl)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, sourceUrl);
-        request.Headers.UserAgent.ParseAdd(BrowserUserAgent);
-        request.Headers.Accept.ParseAdd(HtmlAcceptHeader);
-        request.Headers.AcceptLanguage.ParseAdd(AcceptLanguageHeader);
-        request.Headers.AcceptEncoding.ParseAdd("gzip");
-        request.Headers.AcceptEncoding.ParseAdd("deflate");
-        request.Headers.AcceptEncoding.ParseAdd("br");
-        request.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
-        return request;
-    }
-
-    private static async Task<string> ReadFailureDetailAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return string.Empty;
-        }
-
-        var trimmed = Regex.Replace(body, @"\s+", " ").Trim();
-        if (trimmed.Length > 240)
-        {
-            trimmed = trimmed[..240].TrimEnd() + "...";
-        }
-
-        return $" Response excerpt: {trimmed}";
     }
 
     private static (Uri Uri, int Score)? CreateCompanyContextCandidate(Uri jobPostingUrl, HtmlNode linkNode, HashSet<string> companyTokens)

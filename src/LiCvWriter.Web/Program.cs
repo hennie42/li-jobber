@@ -86,6 +86,7 @@ builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(clie
 })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
+        AllowAutoRedirect = false,
         AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
     });
 
@@ -95,6 +96,7 @@ builder.Services.AddHttpClient<IJobDiscoveryService, HttpJobDiscoveryService>(cl
 })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
+        AllowAutoRedirect = false,
         AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
     });
 

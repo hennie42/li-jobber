@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Infrastructure.Research;
@@ -140,6 +141,94 @@ public sealed class HttpJobDiscoveryServiceTests
         Assert.Contains("ML systems", suggestion.Summary);
         Assert.Equal("01-05-2026", suggestion.PostedLabel);
     }
+
+      [Fact]
+      public async Task DiscoverAsync_WhenSearchPageRedirectsToPublicPage_FollowsRedirectAndParsesResults()
+      {
+        var requests = new List<string>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+          requests.Add(request.RequestUri!.AbsoluteUri);
+
+          return request.RequestUri.AbsoluteUri switch
+          {
+            "https://www.jobindex.dk/jobsoegning?q=software" => CreateRedirectResponse(HttpStatusCode.Redirect, "https://www.jobindex.dk/jobsoegning/redirected?q=software"),
+            "https://www.jobindex.dk/jobsoegning/redirected?q=software" => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+              Content = new StringContent(
+                """
+                <html>
+                  <body>
+                  <div class="jobsearch-result">
+                    <div class="PaidJob">
+                    <div class="PaidJob-inner">
+                      <a href="https://contoso.example/"><img alt="Contoso" /></a>
+                      <h4><a href="/jobannonce/h123/software-engineer">Software Engineer</a></h4>
+                      <div class="jobad-element-area"><span class="jix_robotjob--area">Copenhagen</span></div>
+                      <p>Build practical software systems.</p>
+                    </div>
+                    </div>
+                  </div>
+                  </body>
+                </html>
+                """,
+                Encoding.UTF8,
+                "text/html")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+          };
+        });
+
+        var service = new HttpJobDiscoveryService(new HttpClient(handler), new JobDiscoveryOptions { ShortlistLimit = 10 });
+
+        var result = await service.DiscoverAsync(new JobDiscoverySearchPlan(
+          "jobindex",
+          "Jobindex",
+          "software",
+          string.Empty,
+          new Uri("https://www.jobindex.dk/jobsoegning?q=software")));
+
+        var suggestion = Assert.Single(result);
+        Assert.Equal("https://www.jobindex.dk/jobannonce/h123/software-engineer", suggestion.DetailUrl.AbsoluteUri);
+        Assert.Equal(
+          [
+            "https://www.jobindex.dk/jobsoegning?q=software",
+            "https://www.jobindex.dk/jobsoegning/redirected?q=software"
+          ],
+          requests);
+      }
+
+      [Fact]
+      public async Task DiscoverAsync_WhenSearchPageRedirectsToPrivateHost_Throws()
+      {
+        var requests = new List<string>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+          requests.Add(request.RequestUri!.AbsoluteUri);
+          return CreateRedirectResponse(HttpStatusCode.Redirect, "https://localhost/results");
+        });
+
+        var service = new HttpJobDiscoveryService(new HttpClient(handler), new JobDiscoveryOptions { ShortlistLimit = 10 });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DiscoverAsync(new JobDiscoverySearchPlan(
+          "jobindex",
+          "Jobindex",
+          "software",
+          string.Empty,
+          new Uri("https://www.jobindex.dk/jobsoegning?q=software"))));
+
+        Assert.Contains("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["https://www.jobindex.dk/jobsoegning?q=software"], requests);
+      }
+
+      private static HttpResponseMessage CreateRedirectResponse(HttpStatusCode statusCode, string location)
+      {
+        var response = new HttpResponseMessage(statusCode);
+        response.Headers.Location = Uri.TryCreate(location, UriKind.Absolute, out var absoluteUri)
+          ? absoluteUri
+          : new Uri(location, UriKind.Relative);
+        return response;
+      }
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {

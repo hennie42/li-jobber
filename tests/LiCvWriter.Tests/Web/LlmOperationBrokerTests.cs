@@ -326,6 +326,52 @@ public sealed class LlmOperationBrokerTests
     }
 
     [Fact]
+    public async Task StartJobContextAnalysis_WhenCompanyContextRefreshFails_CompletesWithWarningAndKeepsExistingCompanyProfile()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, CompanyContextFailingJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+        workspace.SetJobSetCompanyProfile(jobSetId, new CompanyResearchProfile
+        {
+            Summary = "Existing company summary",
+            SourceUrls = [new Uri("https://example.test/company")]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        var updatedJobSet = workspace.GetJobSet(jobSetId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Job context updated with company warning", finalSnapshot.Message);
+        Assert.Contains("Existing company context was kept", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Company context could not be refreshed", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Lead Architect", updatedJobSet.JobPosting!.RoleTitle);
+        Assert.Equal("Existing company summary", updatedJobSet.CompanyProfile!.Summary);
+        Assert.Equal(JobSetProgressState.NotStarted, updatedJobSet.ProgressState);
+    }
+
+    [Fact]
     public async Task StartJobContextAnalysis_SameJobSetAlreadyRunning_RejectsSecondOperation()
     {
         var options = new OllamaOptions { Model = "configured-model", Think = "medium", MaxOperationSeconds = 0 };
@@ -1284,6 +1330,31 @@ public sealed class LlmOperationBrokerTests
                 MustHaveThemes = ["Azure"],
                 SourceUrl = sourceUrl
             };
+    }
+
+    private sealed class CompanyContextFailingJobResearchService : IJobResearchService
+    {
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new JobPostingAnalysis
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                MustHaveThemes = ["Azure"],
+                SourceUrl = jobPostingUrl
+            });
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("The company page blocked access.");
+
+        public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<Uri>>([new Uri("https://example.test/company")]);
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("The company page blocked access.");
     }
 
     private sealed class FakeTechnologyGapLlmClient : ILlmClient

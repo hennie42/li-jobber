@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
@@ -327,6 +328,94 @@ public sealed class HttpJobResearchServiceTests
             service.AnalyzeAsync(new Uri("https://localhost/job")));
 
         Assert.Contains("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
+      [Fact]
+      public async Task AnalyzeAsync_WhenPublicUrlRedirectsToPublicHtmlPage_FollowsRedirectAndUsesFinalUrl()
+      {
+        var requests = new List<string>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+
+            return request.RequestUri.AbsoluteUri switch
+            {
+                "https://jobs.example.test/start" => CreateRedirectResponse(HttpStatusCode.Redirect, "https://jobs.example.test/final"),
+                "https://jobs.example.test/final" => CreateHtmlResponse(
+                    """
+                    <html>
+                      <head><title>Lead AI Architect</title></head>
+                      <body><h1>Lead AI Architect</h1><p>Must have Azure experience.</p></body>
+                    </html>
+                    """),
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+            };
+        });
+
+        var llmClient = new FakeLlmClient(
+            """
+            {
+              "roleTitle": "Lead AI Architect",
+              "companyName": "Contoso",
+              "summary": "Lead Azure delivery.",
+              "requirements": [
+                {
+                  "category": "Must have",
+                  "requirement": "Azure",
+                  "sourceSnippet": "Must have Azure experience.",
+                  "confidence": 95,
+                  "sourceUrl": "https://jobs.example.test/final"
+                }
+              ]
+            }
+            """);
+        var service = new HttpJobResearchService(new HttpClient(handler), llmClient, new OllamaOptions());
+
+        var result = await service.AnalyzeAsync(new Uri("https://jobs.example.test/start"));
+
+        Assert.Equal("https://jobs.example.test/final", result.SourceUrl!.AbsoluteUri);
+        Assert.Equal(["https://jobs.example.test/start", "https://jobs.example.test/final"], requests);
+        Assert.Contains("Source URL: https://jobs.example.test/final", llmClient.AllRequests[0].Messages[0].Content);
+      }
+
+      [Fact]
+      public async Task AnalyzeAsync_WhenPublicUrlRedirectsToPrivateHost_Throws()
+      {
+        var requests = new List<string>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            return CreateRedirectResponse(HttpStatusCode.Redirect, "https://localhost/job");
+        });
+
+        var service = new HttpJobResearchService(
+            new HttpClient(handler),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync(new Uri("https://jobs.example.test/start")));
+
+        Assert.Contains("private", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["https://jobs.example.test/start"], requests);
+      }
+
+      [Fact]
+      public async Task AnalyzeAsync_WhenResponseIsNotHtml_ThrowsHelpfulError()
+      {
+        var service = new HttpJobResearchService(
+            new HttpClient(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"message\":\"json\"}", Encoding.UTF8, "application/json")
+            })),
+            new FakeLlmClient("{}"),
+            new OllamaOptions());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync(new Uri("https://jobs.example.test/lead-ai-architect")));
+
+        Assert.Contains("content type", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HTML", exception.Message, StringComparison.OrdinalIgnoreCase);
       }
 
       [Fact]
@@ -831,8 +920,17 @@ public sealed class HttpJobResearchServiceTests
       private static HttpResponseMessage CreateHtmlResponse(string html)
         => new(HttpStatusCode.OK)
         {
-          Content = new StringContent(html)
+          Content = new StringContent(html, Encoding.UTF8, "text/html")
         };
+
+      private static HttpResponseMessage CreateRedirectResponse(HttpStatusCode statusCode, string location)
+      {
+        var response = new HttpResponseMessage(statusCode);
+        response.Headers.Location = Uri.TryCreate(location, UriKind.Absolute, out var absoluteUri)
+            ? absoluteUri
+            : new Uri(location, UriKind.Relative);
+        return response;
+      }
 
       private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
     {

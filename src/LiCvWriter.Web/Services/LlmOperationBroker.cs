@@ -665,6 +665,8 @@ public sealed class LlmOperationBroker(
 
             JobPostingAnalysis analysis;
             CompanyResearchProfile? companyProfile = null;
+            string? companyContextWarning = null;
+            var hadExistingCompanyProfile = input.JobSet.CompanyProfile is not null;
 
             if (input.JobSet.InputMode == JobSetInputMode.PasteText)
             {
@@ -680,15 +682,26 @@ public sealed class LlmOperationBroker(
 
                 if (!string.IsNullOrWhiteSpace(input.CompanyContextText))
                 {
-                    companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
-                        input.CompanyContextText,
-                        input.SelectedModel,
-                        input.SelectedThinkingLevel,
-                        update => HandleProgress(state, input.JobSet.Id, update),
-                        input.JobSet.InputLanguage.ToPromptHint(),
-                        state.Cancellation.Token);
+                    try
+                    {
+                        companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
+                            input.CompanyContextText,
+                            input.SelectedModel,
+                            input.SelectedThinkingLevel,
+                            update => HandleProgress(state, input.JobSet.Id, update),
+                            input.JobSet.InputLanguage.ToPromptHint(),
+                            state.Cancellation.Token);
 
-                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                        workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                    }
+                    catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        companyContextWarning = $"Company context could not be refreshed from pasted text: {exception.Message}";
+                    }
                 }
             }
             else
@@ -706,39 +719,62 @@ public sealed class LlmOperationBroker(
                 var companyUrls = input.CompanyUrls;
                 if (companyUrls.Count == 0)
                 {
-                    companyUrls = await jobResearchService.DiscoverCompanyContextUrlsAsync(
-                        input.JobUri!,
-                        analysis.CompanyName,
-                        state.Cancellation.Token);
-
-                    if (companyUrls.Count > 0)
+                    try
                     {
-                        workspace.UpdateJobSetInputs(
-                            input.JobSet.Id,
-                            input.JobSet.JobUrl,
-                            string.Join(Environment.NewLine, companyUrls.Select(static uri => uri.AbsoluteUri)),
-                            input.JobSet.JobPostingText,
-                            input.JobSet.CompanyContextText);
+                        companyUrls = await jobResearchService.DiscoverCompanyContextUrlsAsync(
+                            input.JobUri!,
+                            analysis.CompanyName,
+                            state.Cancellation.Token);
+
+                        if (companyUrls.Count > 0)
+                        {
+                            workspace.UpdateJobSetInputs(
+                                input.JobSet.Id,
+                                input.JobSet.JobUrl,
+                                string.Join(Environment.NewLine, companyUrls.Select(static uri => uri.AbsoluteUri)),
+                                input.JobSet.JobPostingText,
+                                input.JobSet.CompanyContextText);
+                        }
+                    }
+                    catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        companyContextWarning = $"Automatic company URL discovery failed: {exception.Message}";
+                        companyUrls = Array.Empty<Uri>();
                     }
                 }
 
                 if (companyUrls.Count > 0)
                 {
-                    companyProfile = await jobResearchService.BuildCompanyProfileAsync(
-                        companyUrls,
-                        input.SelectedModel,
-                        input.SelectedThinkingLevel,
-                        update => HandleProgress(state, input.JobSet.Id, update),
-                        input.JobSet.InputLanguage.ToPromptHint(),
-                        state.Cancellation.Token);
+                    try
+                    {
+                        companyProfile = await jobResearchService.BuildCompanyProfileAsync(
+                            companyUrls,
+                            input.SelectedModel,
+                            input.SelectedThinkingLevel,
+                            update => HandleProgress(state, input.JobSet.Id, update),
+                            input.JobSet.InputLanguage.ToPromptHint(),
+                            state.Cancellation.Token);
 
-                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                        workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                    }
+                    catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        companyContextWarning = AppendWarning(
+                            companyContextWarning,
+                            $"Company context could not be refreshed: {exception.Message}");
+                    }
                 }
             }
 
-            var detail = companyProfile is null
-                ? "The job tab now has the latest target role context. Fit review and generation are still idle until you run them."
-                : "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them.";
+            var detail = BuildJobContextCompletionDetail(companyProfile is not null, companyContextWarning, hadExistingCompanyProfile);
 
             workspace.ResetJobSetProgress(input.JobSet.Id, detail);
 
@@ -746,13 +782,13 @@ public sealed class LlmOperationBroker(
             {
                 Status = "completed",
                 UpdatedAt = timeProvider.GetUtcNow(),
-                Message = "Job and company context updated",
+                Message = companyContextWarning is null ? "Job and company context updated" : "Job context updated with company warning",
                 Detail = detail,
                 Completed = true
             };
 
             Publish(state, "completed", completedSnapshot);
-            operations.Success("Job and company context updated.", detail);
+            operations.Success(companyContextWarning is null ? "Job and company context updated." : "Job context updated with company warning.", detail);
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
@@ -814,6 +850,29 @@ public sealed class LlmOperationBroker(
                 activeOperationsByJobSet.Remove(input.JobSet.Id);
             }
         }
+    }
+
+    private static string AppendWarning(string? existingWarning, string nextWarning)
+        => string.IsNullOrWhiteSpace(existingWarning)
+            ? nextWarning
+            : $"{existingWarning} {nextWarning}";
+
+    private static string BuildJobContextCompletionDetail(bool hasFreshCompanyProfile, string? companyContextWarning, bool hadExistingCompanyProfile)
+    {
+        var detail = hasFreshCompanyProfile
+            ? "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them."
+            : "The job tab now has the latest target role context. Fit review and generation are still idle until you run them.";
+
+        if (string.IsNullOrWhiteSpace(companyContextWarning))
+        {
+            return detail;
+        }
+
+        var retentionDetail = hadExistingCompanyProfile
+            ? "Existing company context was kept."
+            : "No company context is available yet.";
+
+        return $"{detail} {retentionDetail} Warning: {companyContextWarning}";
     }
 
     private async Task RunTechnologyGapAnalysisAsync(LlmOperationState state, TechnologyGapOperationInput input)
