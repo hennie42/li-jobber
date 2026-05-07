@@ -1,9 +1,12 @@
 using System.Net;
 using System.Text.Json;
 using LiCvWriter.Application.Abstractions;
+using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
+using LiCvWriter.Core.Documents;
 using LiCvWriter.Core.Jobs;
+using LiCvWriter.Core.Profiles;
 using LiCvWriter.Infrastructure.Csv;
 using LiCvWriter.Infrastructure.Documents;
 using LiCvWriter.Infrastructure.LinkedIn;
@@ -226,6 +229,32 @@ app.MapGet("/api/llm/operations/{operationId}/events", async Task<IResult> (stri
     return Results.Empty;
 });
 
+if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwright:EnableDemoSeed"))
+{
+    app.MapPost("/api/playwright/demo-seed", async Task<IResult> (
+        WorkspaceSession workspace,
+        ILlmClient llmClient,
+        OllamaOptions options,
+        CancellationToken cancellationToken) =>
+    {
+        var availability = await llmClient.VerifyModelAvailabilityAsync(cancellationToken);
+        if (!availability.Installed || availability.AvailableModels.Count == 0)
+        {
+            return Results.BadRequest("Ollama is reachable, but no installed model is available for the Playwright demo seed.");
+        }
+
+        workspace.SetOllamaAvailability(availability);
+        var selectedModel = SelectDemoModel(availability, options.Model);
+        workspace.SetLlmSessionSettings(selectedModel, options.Think);
+        SeedPlaywrightDemoWorkspace(workspace);
+
+        return Results.Ok(new PlaywrightDemoSeedResult(
+            selectedModel,
+            PlaywrightDemoSeedData.CompanyNames,
+            workspace.JobSets.OrderBy(static jobSet => jobSet.SortOrder).Take(3).Select(static jobSet => jobSet.Id).ToArray()));
+    });
+}
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddInteractiveWebAssemblyRenderMode();
@@ -267,5 +296,124 @@ static void TryEnableStaticWebAssets(WebApplicationBuilder builder)
 
     builder.Configuration[Microsoft.AspNetCore.Hosting.WebHostDefaults.StaticWebAssetsKey] = manifestPath;
     Microsoft.AspNetCore.Hosting.StaticWebAssets.StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
+}
+
+static string SelectDemoModel(OllamaModelAvailability availability, string configuredModel)
+{
+    var configuredMatch = availability.AvailableModels.FirstOrDefault(model => model.Equals(configuredModel, StringComparison.OrdinalIgnoreCase));
+    return configuredMatch ?? availability.Model ?? availability.AvailableModels[0];
+}
+
+static void SeedPlaywrightDemoWorkspace(WorkspaceSession workspace)
+{
+    workspace.UpdateCandidateProfile(new CandidateProfile
+    {
+        Name = new PersonName("Alex", "Taylor"),
+        Headline = "Senior platform and product delivery leader",
+        Summary = "Leads cross-functional delivery, AI-enabled workflows, Azure modernization, and stakeholder alignment for complex product portfolios.",
+        Industry = "Software and consulting",
+        Location = "Copenhagen, Denmark",
+        PrimaryEmail = "alex.taylor@example.test",
+        Experience =
+        [
+            new ExperienceEntry(
+                "Blue Harbor Consulting",
+                "Principal Delivery Lead",
+                "Led multi-team modernization programs, introduced evidence-based planning, and improved executive reporting for regulated clients.",
+                "Copenhagen",
+                new DateRange(new PartialDate("2021", 2021)),
+                ["Reduced portfolio reporting cycle time by 40%.", "Coached product teams on outcome-based delivery and risk management."]),
+            new ExperienceEntry(
+                "Signal Forge Systems",
+                "Solution Architect",
+                "Designed Azure integration platforms and helped teams translate business goals into maintainable software systems.",
+                "Remote",
+                new DateRange(new PartialDate("2018", 2018), new PartialDate("2021", 2021)),
+                ["Shipped a reusable integration foundation across six product teams."])
+        ],
+        Skills =
+        [
+            new SkillTag("Azure", 1),
+            new SkillTag("Product strategy", 2),
+            new SkillTag("Stakeholder management", 3),
+            new SkillTag("AI-assisted workflows", 4),
+            new SkillTag("Agile delivery", 5)
+        ]
+    });
+
+    while (workspace.JobSets.Count < PlaywrightDemoSeedData.JobPostings.Length)
+    {
+        workspace.AddJobSet();
+    }
+
+    foreach (var extraJobSet in workspace.JobSets.OrderBy(static jobSet => jobSet.SortOrder).Skip(PlaywrightDemoSeedData.JobPostings.Length).ToArray())
+    {
+        workspace.DeleteJobSet(extraJobSet.Id);
+    }
+
+    var seededJobSets = workspace.JobSets.OrderBy(static jobSet => jobSet.SortOrder).Take(PlaywrightDemoSeedData.JobPostings.Length).ToArray();
+    for (var index = 0; index < seededJobSets.Length; index++)
+    {
+        var jobSet = seededJobSets[index];
+        workspace.UpdateJobSetInputs(jobSet.Id, string.Empty, string.Empty, string.Empty, string.Empty);
+        workspace.SetJobSetJobPosting(jobSet.Id, PlaywrightDemoSeedData.JobPostings[index]);
+        workspace.SetJobSetAdditionalInstructions(jobSet.Id, "Keep the response concise and focus on delivery leadership evidence.");
+        workspace.SetJobSetOutputLanguage(jobSet.Id, OutputLanguage.English);
+        workspace.SetJobSetBatchSelection(jobSet.Id, false);
+        workspace.ResetJobSetProgress(jobSet.Id);
+    }
+
+    workspace.SetDraftGenerationPreferences(new DraftGenerationPreferences
+    {
+        GenerateCv = false,
+        GenerateCoverLetter = false,
+        GenerateSummary = true,
+        GenerateRecommendations = false,
+        GenerateInterviewNotes = false,
+        ContactEmail = "alex.taylor@example.test",
+        ContactLinkedIn = "https://www.linkedin.com/in/alex-taylor-demo",
+        ContactCity = "Copenhagen"
+    });
+}
+
+public sealed record PlaywrightDemoSeedResult(string Model, IReadOnlyList<string> CompanyNames, IReadOnlyList<string> JobSetIds);
+
+public static class PlaywrightDemoSeedData
+{
+    public static readonly JobPostingAnalysis[] JobPostings =
+    [
+        new()
+        {
+            RoleTitle = "Senior Product Delivery Lead",
+            CompanyName = "Northwind Demo Labs",
+            Summary = "Lead cross-functional product delivery for AI-enabled workflow products used by enterprise teams.",
+            MustHaveThemes = ["Product delivery leadership", "Stakeholder alignment", "AI-enabled workflow delivery"],
+            NiceToHaveThemes = ["Azure platform experience", "Portfolio reporting"],
+            CulturalSignals = ["Pragmatic collaboration", "Evidence-based decision making"],
+            InferredRequirements = ["Can translate ambiguous goals into executable plans"]
+        },
+        new()
+        {
+            RoleTitle = "Azure Transformation Manager",
+            CompanyName = "Fabrikam Demo Works",
+            Summary = "Own delivery governance and technical coordination for Azure modernization initiatives.",
+            MustHaveThemes = ["Azure modernization", "Delivery governance", "Executive communication"],
+            NiceToHaveThemes = ["Consulting background", "Risk management"],
+            CulturalSignals = ["Clear communication", "Ownership mindset"],
+            InferredRequirements = ["Can bridge architecture and delivery teams"]
+        },
+        new()
+        {
+            RoleTitle = "AI Workflow Program Lead",
+            CompanyName = "Contoso Demo Group",
+            Summary = "Coordinate adoption of AI-assisted internal workflows while managing change and measurable outcomes.",
+            MustHaveThemes = ["AI-assisted workflows", "Change management", "Outcome measurement"],
+            NiceToHaveThemes = ["Prompt evaluation", "Internal enablement"],
+            CulturalSignals = ["Curiosity", "Responsible experimentation"],
+            InferredRequirements = ["Can create adoption paths for new ways of working"]
+        }
+    ];
+
+    public static readonly string[] CompanyNames = JobPostings.Select(static posting => posting.CompanyName).ToArray();
 }
 
