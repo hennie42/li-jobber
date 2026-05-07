@@ -34,38 +34,20 @@ public sealed class JobDiscoverySuggestionService(
                 .ToArray();
         }
 
-        var reviews = new List<JobDiscoverySuggestionReview>(suggestions.Count);
+        var reviewTasks = suggestions
+            .Select((suggestion, index) => ReviewSuggestionAsync(
+                suggestion,
+                index,
+                suggestions.Count,
+                candidateProfile,
+                differentiatorProfile,
+                selectedModel,
+                selectedThinkingLevel,
+                progress,
+                cancellationToken))
+            .ToArray();
 
-        for (var index = 0; index < suggestions.Count; index++)
-        {
-            var suggestion = suggestions[index];
-            progress?.Invoke(new JobDiscoveryProgressUpdate(
-                $"Analyzing suggestion {index + 1} of {suggestions.Count}",
-                suggestion.Title));
-
-            try
-            {
-                var jobPosting = await jobResearchService.AnalyzeAsync(
-                    suggestion.DetailUrl,
-                    selectedModel,
-                    selectedThinkingLevel,
-                    cancellationToken: cancellationToken);
-                var fitAssessment = jobFitAnalysisService.Analyze(candidateProfile, jobPosting, companyProfile: null, differentiatorProfile);
-                var evidenceSelection = fitAssessment.HasSignals
-                    ? evidenceSelectionService.Build(candidateProfile, jobPosting, companyProfile: null, fitAssessment, differentiatorProfile)
-                    : EvidenceSelectionResult.Empty;
-
-                reviews.Add(new JobDiscoverySuggestionReview(
-                    suggestion,
-                    jobPosting,
-                    fitAssessment,
-                    evidenceSelection));
-            }
-            catch (Exception exception)
-            {
-                reviews.Add(JobDiscoverySuggestionReview.FromRaw(suggestion, exception.Message));
-            }
-        }
+        var reviews = await Task.WhenAll(reviewTasks);
 
         return reviews
             .OrderByDescending(static review => review.HasFitAssessment)
@@ -73,6 +55,45 @@ public sealed class JobDiscoverySuggestionService(
             .ThenByDescending(static review => review.JobFitAssessment.OverallScore)
             .ThenBy(static review => review.Suggestion.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private async Task<JobDiscoverySuggestionReview> ReviewSuggestionAsync(
+        JobDiscoverySuggestion suggestion,
+        int index,
+        int suggestionCount,
+        CandidateProfile candidateProfile,
+        ApplicantDifferentiatorProfile? differentiatorProfile,
+        string? selectedModel,
+        string? selectedThinkingLevel,
+        Action<JobDiscoveryProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        progress?.Invoke(new JobDiscoveryProgressUpdate(
+            $"Analyzing suggestion {index + 1} of {suggestionCount}",
+            suggestion.Title));
+
+        try
+        {
+            var jobPosting = await jobResearchService.AnalyzeAsync(
+                suggestion.DetailUrl,
+                selectedModel,
+                selectedThinkingLevel,
+                cancellationToken: cancellationToken);
+            var fitAssessment = jobFitAnalysisService.Analyze(candidateProfile, jobPosting, companyProfile: null, differentiatorProfile);
+            var evidenceSelection = fitAssessment.HasSignals
+                ? evidenceSelectionService.Build(candidateProfile, jobPosting, companyProfile: null, fitAssessment, differentiatorProfile)
+                : EvidenceSelectionResult.Empty;
+
+            return new JobDiscoverySuggestionReview(
+                suggestion,
+                jobPosting,
+                fitAssessment,
+                evidenceSelection);
+        }
+        catch (Exception exception)
+        {
+            return JobDiscoverySuggestionReview.FromRaw(suggestion, exception.Message);
+        }
     }
 
     private static int GetRecommendationRank(JobFitRecommendation recommendation)

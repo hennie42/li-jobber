@@ -13,7 +13,7 @@ public interface IJobResearchService
         string? sourceLanguageHint = null,
         CancellationToken cancellationToken = default);
 
-    Task<CompanyResearchProfile> BuildCompanyProfileAsync(
+    Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(
         IEnumerable<Uri> sourceUrls,
         string? selectedModel = null,
         string? selectedThinkingLevel = null,

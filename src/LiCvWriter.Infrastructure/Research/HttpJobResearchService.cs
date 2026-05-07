@@ -133,7 +133,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
         return analysis;
     }
 
-    public async Task<CompanyResearchProfile> BuildCompanyProfileAsync(
+    public async Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(
         IEnumerable<Uri> sourceUrls,
         string? selectedModel = null,
         string? selectedThinkingLevel = null,
@@ -149,24 +149,51 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
 
         var sourceDocuments = new List<(Uri Url, string Text)>();
         var resolvedSourceUrls = new List<Uri>(urls.Length);
+        var skippedSources = new List<string>();
 
         foreach (var url in urls)
         {
-            var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, url, AcceptLanguageHeader, cancellationToken);
-            PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, fetchResult.Content);
-
-            var html = fetchResult.Content;
-            var text = StripHtml(html);
-            if (!string.IsNullOrWhiteSpace(text))
+            try
             {
-                sourceDocuments.Add((fetchResult.FinalUri, text));
-                resolvedSourceUrls.Add(fetchResult.FinalUri);
+                var fetchResult = await PublicWebContentFetcher.FetchAsync(httpClient, url, AcceptLanguageHeader, cancellationToken);
+                PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, fetchResult.Content);
+
+                var html = fetchResult.Content;
+                var text = StripHtml(html);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    sourceDocuments.Add((fetchResult.FinalUri, text));
+                    resolvedSourceUrls.Add(fetchResult.FinalUri);
+                    continue;
+                }
+
+                skippedSources.Add($"{url}: page did not contain enough readable text.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                skippedSources.Add($"{url}: {exception.Message}");
             }
         }
 
         if (sourceDocuments.Count == 0)
         {
-            throw new InvalidOperationException("The provided company pages did not contain enough readable text to parse.");
+            var failureSummary = skippedSources.Count == 0
+                ? "The provided company pages did not contain enough readable text to parse."
+                : $"The provided company pages could not be fetched or did not contain enough readable text to parse. {BuildSkippedSourceSummary(skippedSources)}";
+            throw new InvalidOperationException(failureSummary);
+        }
+
+        if (skippedSources.Count > 0)
+        {
+            progress?.Invoke(new LlmProgressUpdate(
+                "Preparing company context",
+                $"Using {sourceDocuments.Count} readable company source page(s); skipped {skippedSources.Count}. {BuildSkippedSourceSummary(skippedSources)}",
+                ResolveModel(selectedModel),
+                Completed: false));
         }
 
         var response = await llmClient.GenerateAsync(
@@ -192,7 +219,25 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
             }),
             cancellationToken);
 
-        return ParseCompanyResearchProfile(response.Content, resolvedSourceUrls, sourceDocuments);
+        return new CompanyProfileBuildResult(
+            ParseCompanyResearchProfile(response.Content, resolvedSourceUrls, sourceDocuments),
+            urls.Length,
+            sourceDocuments.Count,
+            skippedSources.ToArray());
+    }
+
+    private static string BuildSkippedSourceSummary(IReadOnlyList<string> skippedSources)
+    {
+        if (skippedSources.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var summarizedSources = skippedSources.Take(2).ToArray();
+        var summary = string.Join(" ", summarizedSources);
+        return skippedSources.Count > summarizedSources.Length
+            ? $"Skipped source details: {summary} Additional skipped sources: {skippedSources.Count - summarizedSources.Length}."
+            : $"Skipped source details: {summary}";
     }
 
     public async Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(

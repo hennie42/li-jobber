@@ -281,6 +281,8 @@ public sealed class LlmOperationBrokerTests
         Assert.Equal(1, jobResearchService.CompanyUrlCalls);
         Assert.Equal("https://contoso.example/about", Assert.Single(jobResearchService.LastCompanyUrls).AbsoluteUri);
         Assert.Equal("https://contoso.example/about", workspace.GetJobSet(jobSetId).CompanyUrlsText.Trim());
+        Assert.Empty(finalSnapshot.WarningItems);
+        Assert.Empty(workspace.GetJobSet(jobSetId).LatestIngestionWarnings);
     }
 
     [Fact]
@@ -366,9 +368,106 @@ public sealed class LlmOperationBrokerTests
         Assert.Equal("Job context updated with company warning", finalSnapshot.Message);
         Assert.Contains("Existing company context was kept", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Company context could not be refreshed", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        var warning = Assert.Single(finalSnapshot.WarningItems);
+        Assert.Equal("CompanyContextRefreshFailed", warning.Code);
+        Assert.Equal("company-context-refresh", warning.Scope);
         Assert.Equal("Lead Architect", updatedJobSet.JobPosting!.RoleTitle);
         Assert.Equal("Existing company summary", updatedJobSet.CompanyProfile!.Summary);
         Assert.Equal(JobSetProgressState.NotStarted, updatedJobSet.ProgressState);
+        var persistedWarning = Assert.Single(updatedJobSet.LatestIngestionWarnings);
+        Assert.Equal(warning.Code, persistedWarning.Code);
+        Assert.Equal(warning.Scope, persistedWarning.Scope);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_WhenSomeCompanyUrlsAreSkipped_CompletesWithTypedWarning()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, PartialCompanyContextJobResearchService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company-one" + Environment.NewLine + "https://example.test/company-two",
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        var warning = Assert.Single(finalSnapshot.WarningItems);
+        var updatedJobSet = workspace.GetJobSet(jobSetId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Job context updated with company warning", finalSnapshot.Message);
+        Assert.Equal("SomeCompanyUrlsSkipped", warning.Code);
+        Assert.Equal("company-context-refresh", warning.Scope);
+        Assert.Equal(2, warning.AttemptedCount);
+        Assert.Equal(1, warning.SuccessfulCount);
+        Assert.Equal(1, warning.SkippedCount);
+        Assert.Contains("skipped 1", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Partial company summary", updatedJobSet.CompanyProfile!.Summary);
+        var persistedWarning = Assert.Single(updatedJobSet.LatestIngestionWarnings);
+        Assert.Equal(warning.Code, persistedWarning.Code);
+    }
+
+    [Fact]
+    public async Task StartJobContextAnalysis_WhenNoCompanyUrlsDiscovered_CompletesWithPersistedWarning()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium" };
+        var jobResearchService = new CapturingJobResearchService();
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddSingleton<IJobResearchService>(jobResearchService);
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            string.Empty,
+            string.Empty,
+            string.Empty);
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartJobContextAnalysis(new StartJobContextOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        var warning = Assert.Single(finalSnapshot.WarningItems);
+        var updatedJobSet = workspace.GetJobSet(jobSetId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("Job context updated with company warning", finalSnapshot.Message);
+        Assert.Equal("NoCompanyUrlsDiscovered", warning.Code);
+        Assert.Equal("company-url-discovery", warning.Scope);
+        Assert.Contains("No public company URLs were discovered", warning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(updatedJobSet.CompanyProfile);
+        var persistedWarning = Assert.Single(updatedJobSet.LatestIngestionWarnings);
+        Assert.Equal(warning.Code, persistedWarning.Code);
+        Assert.Equal(warning.Scope, persistedWarning.Scope);
     }
 
     [Fact]
@@ -779,6 +878,86 @@ public sealed class LlmOperationBrokerTests
         Assert.True(workspace.GetJobSet(jobSetId).JobFitAssessment.IsLlmEnhanced);
         Assert.True(workspace.GetJobSet(jobSetId).EvidenceSelection.HasSignals);
         Assert.Contains("Azure", workspace.GetJobSet(jobSetId).TechnologyGapAssessment.DetectedTechnologies);
+    }
+
+    [Fact]
+    public async Task StartRefreshAllAnalysis_WhenCompanyContextRefreshFails_CompletesWithWarningAndKeepsExistingCompanyProfile()
+    {
+        var options = new OllamaOptions { Model = "configured-model", Think = "medium", UseChatEndpoint = true, KeepAlive = "5m", Temperature = 0.1 };
+        var services = new ServiceCollection();
+        services.AddSingleton(options);
+        services.AddSingleton(new WorkspaceSession(options));
+        services.AddSingleton<OperationStatusService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CandidateEvidenceService>();
+        services.AddSingleton<JobFitAnalysisService>();
+        services.AddSingleton(provider => new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>()));
+        services.AddSingleton<LlmOperationBroker>();
+        services.AddScoped<IJobResearchService, CompanyContextFailingJobResearchService>();
+        services.AddScoped<JobFitWorkspaceRefreshService>();
+        services.AddScoped<ILlmClient, FakeCompositeLlmClient>();
+        services.AddScoped<LlmFitEnhancementService>();
+        services.AddScoped<LlmTechnologyGapAnalysisService>();
+
+        await using var serviceProvider = services.BuildServiceProvider();
+        var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
+
+        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+            "0.19.0",
+            "configured-model",
+            true,
+            ["configured-model"]));
+        workspace.SetLlmSessionSettings("configured-model", "medium");
+        workspace.SetImportResult(
+            string.Empty,
+            new LinkedInExportImportResult(
+                new CandidateProfile
+                {
+                    Name = new PersonName("Alex", "Taylor"),
+                    Summary = "Senior architect",
+                    Experience =
+                    [
+                        new ExperienceEntry(
+                            "Contoso",
+                            "Lead Architect",
+                            "Led Azure platform delivery and modernization programs for enterprise clients.",
+                            null,
+                            new DateRange(new PartialDate("2023", 2023)))
+                    ]
+                },
+                new LinkedInExportInspection(string.Empty, Array.Empty<string>(), Array.Empty<string>()),
+                Array.Empty<string>(),
+                "LinkedIn API"));
+        workspace.UpdateJobSetInputs(jobSetId,
+            "https://example.test/job",
+            "https://example.test/company",
+            string.Empty,
+            string.Empty);
+        workspace.SetJobSetCompanyProfile(jobSetId, new CompanyResearchProfile
+        {
+            Summary = "Existing company summary",
+            SourceUrls = [new Uri("https://example.test/company")]
+        });
+
+        var broker = serviceProvider.GetRequiredService<LlmOperationBroker>();
+        var startResult = broker.StartRefreshAllAnalysis(new StartRefreshAllOperationRequest(jobSetId));
+        var finalSnapshot = await WaitForTerminalSnapshotAsync(broker, startResult.OperationId);
+        var updatedJobSet = workspace.GetJobSet(jobSetId);
+
+        Assert.Equal("completed", finalSnapshot.Status);
+        Assert.Equal("All analysis refreshed with company warning", finalSnapshot.Message);
+        Assert.Contains("Existing company context was kept", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Company context could not be refreshed", finalSnapshot.Detail, StringComparison.OrdinalIgnoreCase);
+        var warning = Assert.Single(finalSnapshot.WarningItems);
+        Assert.Equal("CompanyContextRefreshFailed", warning.Code);
+        Assert.Equal("company-context-refresh", warning.Scope);
+        Assert.Equal("Lead Architect", updatedJobSet.JobPosting!.RoleTitle);
+        Assert.Equal("Existing company summary", updatedJobSet.CompanyProfile!.Summary);
+        Assert.True(updatedJobSet.JobFitAssessment.HasSignals);
+        Assert.True(updatedJobSet.EvidenceSelection.HasSignals);
+        Assert.Contains("Azure", updatedJobSet.TechnologyGapAssessment.DetectedTechnologies);
+        var persistedWarning = Assert.Single(updatedJobSet.LatestIngestionWarnings);
+        Assert.Equal(warning.Code, persistedWarning.Code);
     }
 
     [Fact]
@@ -1211,12 +1390,19 @@ public sealed class LlmOperationBrokerTests
             });
         }
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(new CompanyResearchProfile
-            {
-                Summary = "Contoso summary",
-                SourceUrls = sourceUrls.ToArray()
-            });
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            var urls = sourceUrls.ToArray();
+            return Task.FromResult(new CompanyProfileBuildResult(
+                new CompanyResearchProfile
+                {
+                    Summary = "Contoso summary",
+                    SourceUrls = urls
+                },
+                urls.Length,
+                urls.Length,
+                Array.Empty<string>()));
+        }
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<Uri>>([new Uri("https://example.test/company")]);
@@ -1251,10 +1437,15 @@ public sealed class LlmOperationBrokerTests
             };
         }
 
-        public async Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public async Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
         {
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-            return new CompanyResearchProfile { Summary = "Slow company summary", SourceUrls = sourceUrls.ToArray() };
+            var urls = sourceUrls.ToArray();
+            return new CompanyProfileBuildResult(
+                new CompanyResearchProfile { Summary = "Slow company summary", SourceUrls = urls },
+                urls.Length,
+                urls.Length,
+                Array.Empty<string>());
         }
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
@@ -1264,7 +1455,7 @@ public sealed class LlmOperationBrokerTests
             => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
 
         public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
-            => BuildCompanyProfileAsync(Array.Empty<Uri>(), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
+            => Task.FromResult(new CompanyResearchProfile { Summary = "Slow company summary" });
     }
 
     private sealed class CapturingJobResearchService : IJobResearchService
@@ -1287,15 +1478,19 @@ public sealed class LlmOperationBrokerTests
             return Task.FromResult(BuildJobPosting(jobPostingUrl));
         }
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
         {
             CompanyUrlCalls++;
             LastCompanyUrls = sourceUrls.ToArray();
-            return Task.FromResult(new CompanyResearchProfile
-            {
-                Summary = "URL company summary",
-                SourceUrls = LastCompanyUrls
-            });
+            return Task.FromResult(new CompanyProfileBuildResult(
+                new CompanyResearchProfile
+                {
+                    Summary = "URL company summary",
+                    SourceUrls = LastCompanyUrls
+                },
+                LastCompanyUrls.Count,
+                LastCompanyUrls.Count,
+                Array.Empty<string>()));
         }
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
@@ -1344,7 +1539,7 @@ public sealed class LlmOperationBrokerTests
                 SourceUrl = jobPostingUrl
             });
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("The company page blocked access.");
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
@@ -1410,8 +1605,15 @@ public sealed class LlmOperationBrokerTests
             });
         }
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(new CompanyResearchProfile { Summary = "Contoso summary", SourceUrls = sourceUrls.ToArray() });
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            var urls = sourceUrls.ToArray();
+            return Task.FromResult(new CompanyProfileBuildResult(
+                new CompanyResearchProfile { Summary = "Contoso summary", SourceUrls = urls },
+                urls.Length,
+                urls.Length,
+                Array.Empty<string>()));
+        }
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<Uri>>([new Uri("https://example.test/company")]);
@@ -1428,7 +1630,7 @@ public sealed class LlmOperationBrokerTests
         public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Persistent failure on every attempt.");
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Persistent failure on every attempt.");
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
@@ -1439,5 +1641,41 @@ public sealed class LlmOperationBrokerTests
 
         public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Persistent failure on every attempt.");
+    }
+
+    private sealed class PartialCompanyContextJobResearchService : IJobResearchService
+    {
+        public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new JobPostingAnalysis
+            {
+                RoleTitle = "Lead Architect",
+                CompanyName = "Contoso",
+                Summary = "Build resilient systems",
+                MustHaveThemes = ["Azure"],
+                SourceUrl = jobPostingUrl
+            });
+
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            var urls = sourceUrls.ToArray();
+            return Task.FromResult(new CompanyProfileBuildResult(
+                new CompanyResearchProfile
+                {
+                    Summary = "Partial company summary",
+                    SourceUrls = [urls[0]]
+                },
+                urls.Length,
+                1,
+                ["https://example.test/company-two: The page blocked access."]));
+        }
+
+        public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<Uri>>(Array.Empty<Uri>());
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => AnalyzeAsync(new Uri("https://example.test/job"), selectedModel, selectedThinkingLevel, progress, sourceLanguageHint, cancellationToken);
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new CompanyResearchProfile { Summary = companyContextText });
     }
 }

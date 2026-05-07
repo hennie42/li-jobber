@@ -65,6 +65,8 @@ public sealed record JobSetSessionState
 
     public CompanyResearchProfile? CompanyProfile { get; init; }
 
+    public IReadOnlyList<OperationWarning> LatestIngestionWarnings { get; init; } = Array.Empty<OperationWarning>();
+
     public JobFitAssessment JobFitAssessment { get; init; } = JobFitAssessment.Empty;
 
     public TechnologyGapAssessment TechnologyGapAssessment { get; init; } = TechnologyGapAssessment.Empty;

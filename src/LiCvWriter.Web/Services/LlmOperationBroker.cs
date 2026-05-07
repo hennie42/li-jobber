@@ -658,6 +658,8 @@ public sealed class LlmOperationBroker(
 
     private async Task RunJobContextAnalysisAsync(LlmOperationState state, JobContextOperationInput input)
     {
+        var companyContextWarnings = new List<OperationWarning>();
+
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
@@ -665,7 +667,6 @@ public sealed class LlmOperationBroker(
 
             JobPostingAnalysis analysis;
             CompanyResearchProfile? companyProfile = null;
-            string? companyContextWarning = null;
             var hadExistingCompanyProfile = input.JobSet.CompanyProfile is not null;
 
             if (input.JobSet.InputMode == JobSetInputMode.PasteText)
@@ -700,7 +701,10 @@ public sealed class LlmOperationBroker(
                     }
                     catch (Exception exception)
                     {
-                        companyContextWarning = $"Company context could not be refreshed from pasted text: {exception.Message}";
+                        companyContextWarnings.Add(CreateWarning(
+                            "CompanyContextRefreshFailed",
+                            "company-context-refresh",
+                            $"Company context could not be refreshed from pasted text: {exception.Message}"));
                     }
                 }
             }
@@ -719,6 +723,8 @@ public sealed class LlmOperationBroker(
                 var companyUrls = input.CompanyUrls;
                 if (companyUrls.Count == 0)
                 {
+                    var companyUrlDiscoveryFailed = false;
+
                     try
                     {
                         companyUrls = await jobResearchService.DiscoverCompanyContextUrlsAsync(
@@ -742,8 +748,20 @@ public sealed class LlmOperationBroker(
                     }
                     catch (Exception exception)
                     {
-                        companyContextWarning = $"Automatic company URL discovery failed: {exception.Message}";
+                        companyUrlDiscoveryFailed = true;
+                        companyContextWarnings.Add(CreateWarning(
+                            "CompanyUrlDiscoveryFailed",
+                            "company-url-discovery",
+                            $"Automatic company URL discovery failed: {exception.Message}"));
                         companyUrls = Array.Empty<Uri>();
+                    }
+
+                    if (!companyUrlDiscoveryFailed && companyUrls.Count == 0)
+                    {
+                        companyContextWarnings.Add(CreateWarning(
+                            "NoCompanyUrlsDiscovered",
+                            "company-url-discovery",
+                            "No public company URLs were discovered from the job posting."));
                     }
                 }
 
@@ -751,7 +769,7 @@ public sealed class LlmOperationBroker(
                 {
                     try
                     {
-                        companyProfile = await jobResearchService.BuildCompanyProfileAsync(
+                        var companyProfileResult = await jobResearchService.BuildCompanyProfileAsync(
                             companyUrls,
                             input.SelectedModel,
                             input.SelectedThinkingLevel,
@@ -759,7 +777,19 @@ public sealed class LlmOperationBroker(
                             input.JobSet.InputLanguage.ToPromptHint(),
                             state.Cancellation.Token);
 
+                        companyProfile = companyProfileResult.Profile;
                         workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+
+                        if (companyProfileResult.HasSkippedSources)
+                        {
+                            companyContextWarnings.Add(CreateWarning(
+                                "SomeCompanyUrlsSkipped",
+                                "company-context-refresh",
+                                $"Company context used {companyProfileResult.SuccessfulSourceCount} readable source page(s) and skipped {companyProfileResult.SkippedSourceCount}. {BuildSkippedSourceSummary(companyProfileResult.SkippedSourceDetails)}",
+                                companyProfileResult.AttemptedSourceCount,
+                                companyProfileResult.SuccessfulSourceCount,
+                                companyProfileResult.SkippedSourceCount));
+                        }
                     }
                     catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
                     {
@@ -767,14 +797,15 @@ public sealed class LlmOperationBroker(
                     }
                     catch (Exception exception)
                     {
-                        companyContextWarning = AppendWarning(
-                            companyContextWarning,
-                            $"Company context could not be refreshed: {exception.Message}");
+                        companyContextWarnings.Add(CreateWarning(
+                            "CompanyContextRefreshFailed",
+                            "company-context-refresh",
+                            $"Company context could not be refreshed: {exception.Message}"));
                     }
                 }
             }
 
-            var detail = BuildJobContextCompletionDetail(companyProfile is not null, companyContextWarning, hadExistingCompanyProfile);
+            var detail = BuildJobContextCompletionDetail(companyProfile is not null, companyContextWarnings, hadExistingCompanyProfile);
 
             workspace.ResetJobSetProgress(input.JobSet.Id, detail);
 
@@ -782,13 +813,15 @@ public sealed class LlmOperationBroker(
             {
                 Status = "completed",
                 UpdatedAt = timeProvider.GetUtcNow(),
-                Message = companyContextWarning is null ? "Job and company context updated" : "Job context updated with company warning",
+                Message = companyContextWarnings.Count == 0 ? "Job and company context updated" : "Job context updated with company warning",
                 Detail = detail,
-                Completed = true
+                Completed = true,
+                Warnings = companyContextWarnings.Count == 0 ? null : companyContextWarnings.ToArray()
             };
 
+            workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, completedSnapshot.WarningItems);
             Publish(state, "completed", completedSnapshot);
-            operations.Success(companyContextWarning is null ? "Job and company context updated." : "Job context updated with company warning.", detail);
+            operations.Success(companyContextWarnings.Count == 0 ? "Job and company context updated." : "Job context updated with company warning.", detail);
         }
         catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
         {
@@ -803,9 +836,11 @@ public sealed class LlmOperationBroker(
                     UpdatedAt = timeProvider.GetUtcNow(),
                     Message = "Job and company context timed out",
                     Detail = detail,
-                    Error = detail
+                    Error = detail,
+                    Warnings = companyContextWarnings.Count == 0 ? null : companyContextWarnings.ToArray()
                 };
 
+                workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, timedOutSnapshot.WarningItems);
                 Publish(state, "failed", timedOutSnapshot);
                 operations.Error("Job and company context timed out.", detail);
                 return;
@@ -819,9 +854,11 @@ public sealed class LlmOperationBroker(
                 UpdatedAt = timeProvider.GetUtcNow(),
                 Message = "Job and company context cancelled",
                 Detail = $"Analysis was cancelled for {input.JobSet.Title}.",
-                Cancelled = true
+                Cancelled = true,
+                Warnings = companyContextWarnings.Count == 0 ? null : companyContextWarnings.ToArray()
             };
 
+            workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, cancelledSnapshot.WarningItems);
             Publish(state, "cancelled", cancelledSnapshot);
             operations.Info("Job and company context cancelled.", cancelledSnapshot.Detail);
         }
@@ -835,9 +872,11 @@ public sealed class LlmOperationBroker(
                 UpdatedAt = timeProvider.GetUtcNow(),
                 Message = "Job and company context failed",
                 Detail = exception.Message,
-                Error = exception.Message
+                Error = exception.Message,
+                Warnings = companyContextWarnings.Count == 0 ? null : companyContextWarnings.ToArray()
             };
 
+            workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, failedSnapshot.WarningItems);
             Publish(state, "failed", failedSnapshot);
             operations.Error("Job and company context failed.", exception.Message);
         }
@@ -852,18 +891,13 @@ public sealed class LlmOperationBroker(
         }
     }
 
-    private static string AppendWarning(string? existingWarning, string nextWarning)
-        => string.IsNullOrWhiteSpace(existingWarning)
-            ? nextWarning
-            : $"{existingWarning} {nextWarning}";
-
-    private static string BuildJobContextCompletionDetail(bool hasFreshCompanyProfile, string? companyContextWarning, bool hadExistingCompanyProfile)
+    private static string BuildJobContextCompletionDetail(bool hasFreshCompanyProfile, IReadOnlyList<OperationWarning> warnings, bool hadExistingCompanyProfile)
     {
         var detail = hasFreshCompanyProfile
             ? "The job tab now has the latest target role context and company context. Fit review and generation are still idle until you run them."
             : "The job tab now has the latest target role context. Fit review and generation are still idle until you run them.";
 
-        if (string.IsNullOrWhiteSpace(companyContextWarning))
+        if (warnings.Count == 0)
         {
             return detail;
         }
@@ -872,7 +906,7 @@ public sealed class LlmOperationBroker(
             ? "Existing company context was kept."
             : "No company context is available yet.";
 
-        return $"{detail} {retentionDetail} Warning: {companyContextWarning}";
+        return $"{detail} {retentionDetail} Warning: {BuildWarningSummary(warnings)}";
     }
 
     private async Task RunTechnologyGapAnalysisAsync(LlmOperationState state, TechnologyGapOperationInput input)
@@ -1135,8 +1169,10 @@ public sealed class LlmOperationBroker(
                     Message = "Refresh all analysis timed out",
                     Detail = detail,
                     Error = detail,
+                    Warnings = state.GetSnapshot().Warnings,
                 };
 
+                workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, timedOutSnapshot.WarningItems);
                 Publish(state, "failed", timedOutSnapshot);
                 operations.Error("Refresh all analysis timed out.", detail);
                 return;
@@ -1151,9 +1187,11 @@ public sealed class LlmOperationBroker(
                 Message = "Refresh all analysis cancelled",
                 Detail = $"Refresh all analysis was cancelled for {input.JobSet.Title}.",
                 Cancelled = true,
+                Warnings = state.GetSnapshot().Warnings,
                 Sequence = state.GetSnapshot().Sequence + 1
             };
 
+            workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, cancelledSnapshot.WarningItems);
             Publish(state, "cancelled", cancelledSnapshot);
             operations.Info("Refresh all analysis cancelled.", cancelledSnapshot.Detail);
         }
@@ -1168,9 +1206,11 @@ public sealed class LlmOperationBroker(
                 Message = "Refresh all analysis failed",
                 Detail = exception.Message,
                 Error = exception.Message,
+                Warnings = state.GetSnapshot().Warnings,
                 Sequence = state.GetSnapshot().Sequence + 1
             };
 
+            workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, failedSnapshot.WarningItems);
             Publish(state, "failed", failedSnapshot);
             operations.Error("Refresh all analysis failed.", exception.Message);
         }
@@ -1192,6 +1232,7 @@ public sealed class LlmOperationBroker(
         var fitRefreshService = scope.ServiceProvider.GetRequiredService<JobFitWorkspaceRefreshService>();
         var fitEnhancementService = scope.ServiceProvider.GetRequiredService<LlmFitEnhancementService>();
         var gapAnalysisService = scope.ServiceProvider.GetRequiredService<LlmTechnologyGapAnalysisService>();
+        var companyContextWarnings = new List<OperationWarning>();
 
         PublishStage(
             state,
@@ -1217,15 +1258,29 @@ public sealed class LlmOperationBroker(
 
             if (!string.IsNullOrWhiteSpace(input.CompanyContextText))
             {
-                var companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
-                    input.CompanyContextText,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
+                try
+                {
+                    var companyProfile = await jobResearchService.BuildCompanyProfileFromTextAsync(
+                        input.CompanyContextText,
+                        input.SelectedModel,
+                        input.SelectedThinkingLevel,
+                        update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
+                        state.Cancellation.Token);
 
-                workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                }
+                catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    companyContextWarnings.Add(CreateWarning(
+                        "CompanyContextRefreshFailed",
+                        "company-context-refresh",
+                        $"Company context could not be refreshed from pasted text: {exception.Message}"));
+                }
             }
         }
         else
@@ -1242,15 +1297,41 @@ public sealed class LlmOperationBroker(
 
             if (input.CompanyUrls.Count > 0)
             {
-                var companyProfile = await jobResearchService.BuildCompanyProfileAsync(
-                    input.CompanyUrls,
-                    input.SelectedModel,
-                    input.SelectedThinkingLevel,
-                    update => HandleProgress(state, input.JobSet.Id, update),
-                    input.JobSet.InputLanguage.ToPromptHint(),
-                    state.Cancellation.Token);
+                try
+                {
+                    var companyProfileResult = await jobResearchService.BuildCompanyProfileAsync(
+                        input.CompanyUrls,
+                        input.SelectedModel,
+                        input.SelectedThinkingLevel,
+                        update => HandleProgress(state, input.JobSet.Id, update),
+                        input.JobSet.InputLanguage.ToPromptHint(),
+                        state.Cancellation.Token);
 
-                workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+                    var companyProfile = companyProfileResult.Profile;
+                    workspace.SetJobSetCompanyProfile(input.JobSet.Id, companyProfile);
+
+                    if (companyProfileResult.HasSkippedSources)
+                    {
+                        companyContextWarnings.Add(CreateWarning(
+                            "SomeCompanyUrlsSkipped",
+                            "company-context-refresh",
+                            $"Company context used {companyProfileResult.SuccessfulSourceCount} readable source page(s) and skipped {companyProfileResult.SkippedSourceCount}. {BuildSkippedSourceSummary(companyProfileResult.SkippedSourceDetails)}",
+                            companyProfileResult.AttemptedSourceCount,
+                            companyProfileResult.SuccessfulSourceCount,
+                            companyProfileResult.SkippedSourceCount));
+                    }
+                }
+                catch (OperationCanceledException) when (state.Cancellation.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    companyContextWarnings.Add(CreateWarning(
+                        "CompanyContextRefreshFailed",
+                        "company-context-refresh",
+                        $"Company context could not be refreshed: {exception.Message}"));
+                }
             }
         }
 
@@ -1305,24 +1386,76 @@ public sealed class LlmOperationBroker(
         }
         else
         {
-            workspace.ResetJobSetProgress(input.JobSet.Id, "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps.");
+            workspace.ResetJobSetProgress(
+                input.JobSet.Id,
+                BuildRefreshAllCompletionDetail(
+                    hasCandidateProfile: false,
+                    hasAvailableCompanyProfile: GetJobSetOrThrow(input.JobSet.Id).CompanyProfile is not null,
+                    companyContextWarnings));
         }
 
-        var completedDetail = input.CandidateProfile is null
-            ? "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps."
-            : "Job, company, fit review, technology gap and evidence are current for this tab.";
+        var completedDetail = BuildRefreshAllCompletionDetail(
+            input.CandidateProfile is not null,
+            GetJobSetOrThrow(input.JobSet.Id).CompanyProfile is not null,
+            companyContextWarnings);
         var completedSnapshot = state.GetSnapshot() with
         {
             Status = "completed",
             UpdatedAt = timeProvider.GetUtcNow(),
-            Message = "All analysis refreshed",
+            Message = companyContextWarnings.Count == 0 ? "All analysis refreshed" : "All analysis refreshed with company warning",
             Detail = completedDetail,
             Completed = true,
+            Warnings = companyContextWarnings.Count == 0 ? null : companyContextWarnings.ToArray(),
             Sequence = state.GetSnapshot().Sequence + 1
         };
 
+        workspace.SetJobSetLatestIngestionWarnings(input.JobSet.Id, completedSnapshot.WarningItems);
         Publish(state, "completed", completedSnapshot);
-        operations.Success("All analysis refreshed.", completedDetail);
+        operations.Success(companyContextWarnings.Count == 0 ? "All analysis refreshed." : "All analysis refreshed with company warning.", completedDetail);
+    }
+
+    private static string BuildRefreshAllCompletionDetail(bool hasCandidateProfile, bool hasAvailableCompanyProfile, IReadOnlyList<OperationWarning> warnings)
+    {
+        var detail = hasCandidateProfile
+            ? "Job, company, fit review, technology gap and evidence are current for this tab."
+            : "Job and company context are current. Load a profile to refresh fit review, evidence ranking, and technology gaps.";
+
+        if (warnings.Count == 0)
+        {
+            return detail;
+        }
+
+        var retentionDetail = hasAvailableCompanyProfile
+            ? "Existing company context was kept."
+            : "The refresh continued without company context.";
+
+        return $"{detail} {retentionDetail} Warning: {BuildWarningSummary(warnings)}";
+    }
+
+    private static OperationWarning CreateWarning(
+        string code,
+        string scope,
+        string message,
+        int? attemptedCount = null,
+        int? successfulCount = null,
+        int? skippedCount = null)
+        => new(code, scope, message, attemptedCount, successfulCount, skippedCount);
+
+    private static string BuildWarningSummary(IReadOnlyList<OperationWarning> warnings)
+        => string.Join(" ", warnings.Select(static warning => warning.Message));
+
+    private static string BuildSkippedSourceSummary(IReadOnlyList<string> skippedSourceDetails)
+    {
+        if (skippedSourceDetails.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var summarizedSources = skippedSourceDetails.Take(2).ToArray();
+        var summary = string.Join(" ", summarizedSources);
+        return skippedSourceDetails.Count > summarizedSources.Length
+            ? $"Skipped source details: {summary} Additional skipped sources: {skippedSourceDetails.Count - summarizedSources.Length}."
+            : $"Skipped source details: {summary}";
     }
 
     private async Task<JobFitAssessment> RefreshFitReviewCoreAsync(
@@ -1728,9 +1861,20 @@ public sealed record LlmOperationSnapshot(
     string? ResponseContent = null,
     string? ThinkingPreview = null,
     string? ThinkingContent = null,
-    long Sequence = 0)
+    long Sequence = 0,
+    IReadOnlyList<OperationWarning>? Warnings = null)
 {
     public bool IsTerminal => Status is "completed" or "failed" or "cancelled";
+
+    public IReadOnlyList<OperationWarning> WarningItems => Warnings ?? Array.Empty<OperationWarning>();
 }
+
+public sealed record OperationWarning(
+    string Code,
+    string Scope,
+    string Message,
+    int? AttemptedCount = null,
+    int? SuccessfulCount = null,
+    int? SkippedCount = null);
 
 public sealed record LlmOperationEvent(string EventType, LlmOperationSnapshot Snapshot);

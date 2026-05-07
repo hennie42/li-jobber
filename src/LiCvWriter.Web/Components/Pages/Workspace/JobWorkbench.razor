@@ -1117,18 +1117,40 @@ else if (CanRunFitReview)
             }
 
             Workspace.MarkJobSetRunning(JobSetId!, "Company context analysis is running for this tab.", JobSetSubtask.JobContext);
-            companyProfile = await Operations.RunAsync(
+            var companyProfileResult = await Operations.RunAsync(
                 BuildCompanyContextMessage,
                 $"{urls.Length} source URLs via {Workspace.SelectedLlmModel}",
                 () => JobResearchService.BuildCompanyProfileAsync(urls, Workspace.SelectedLlmModel, Workspace.SelectedThinkingLevel, ReportLlmProgress));
 
+            companyProfile = companyProfileResult.Profile;
+
+            var warnings = companyProfileResult.HasSkippedSources
+                ?
+                [
+                    new OperationWarning(
+                        "SomeCompanyUrlsSkipped",
+                        "company-context-refresh",
+                        BuildCompanyContextSkipWarningMessage(companyProfileResult),
+                        companyProfileResult.AttemptedSourceCount,
+                        companyProfileResult.SuccessfulSourceCount,
+                        companyProfileResult.SkippedSourceCount)
+                ]
+                : Array.Empty<OperationWarning>();
+
             Workspace.SetJobSetCompanyProfile(JobSetId!, companyProfile);
-            Workspace.ResetJobSetProgress(JobSetId!, "Job context ready. Fit review and generation idle.");
+            Workspace.SetJobSetLatestIngestionWarnings(JobSetId!, warnings);
+            Workspace.ResetJobSetProgress(JobSetId!, companyProfileResult.HasSkippedSources
+                ? "Job context ready with company warning. Fit review and generation idle."
+                : "Job context ready. Fit review and generation idle.");
             SyncFromWorkspace();
 
             if (emitSuccess)
             {
-                Operations.Success("Company context updated.", "The job tab now includes the latest company context. Fit review and generation are still idle until you run them.");
+                Operations.Success(
+                    companyProfileResult.HasSkippedSources ? "Company context updated with warning." : "Company context updated.",
+                    companyProfileResult.HasSkippedSources
+                        ? $"The job tab now includes the latest company context. {BuildCompanyContextSkipWarningMessage(companyProfileResult)}"
+                        : "The job tab now includes the latest company context. Fit review and generation are still idle until you run them.");
             }
 
             return true;
@@ -1149,6 +1171,16 @@ else if (CanRunFitReview)
                 currentOperation = BusyOperation.None;
             }
         }
+    }
+
+    private static string BuildCompanyContextSkipWarningMessage(CompanyProfileBuildResult companyProfileResult)
+    {
+        var details = companyProfileResult.SkippedSourceDetails.Take(2).ToArray();
+        var detailSummary = string.Join(" ", details);
+
+        return companyProfileResult.SkippedSourceDetails.Count > details.Length
+            ? $"Used {companyProfileResult.SuccessfulSourceCount} readable source page(s) and skipped {companyProfileResult.SkippedSourceCount}. {detailSummary} Additional skipped sources: {companyProfileResult.SkippedSourceDetails.Count - details.Length}."
+            : $"Used {companyProfileResult.SuccessfulSourceCount} readable source page(s) and skipped {companyProfileResult.SkippedSourceCount}. {detailSummary}";
     }
 
     private async Task<bool> ExecuteJobTextAnalysisAsync(

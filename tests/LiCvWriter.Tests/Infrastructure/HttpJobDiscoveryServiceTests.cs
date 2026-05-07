@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
@@ -7,8 +8,15 @@ using LiCvWriter.Infrastructure.Research;
 
 namespace LiCvWriter.Tests.Infrastructure;
 
-public sealed class HttpJobDiscoveryServiceTests
+public sealed class HttpJobDiscoveryServiceTests : IDisposable
 {
+  private readonly IDisposable hostAddressesResolverScope = PublicWebContentFetcher.PushHostAddressesResolverForTesting(ResolveHostAddressesAsync);
+
+  public void Dispose()
+  {
+    hostAddressesResolverScope.Dispose();
+  }
+
     [Fact]
     public async Task DiscoverAsync_WithJobindexMarkup_ReturnsSuggestionsFromResultCards()
     {
@@ -142,6 +150,105 @@ public sealed class HttpJobDiscoveryServiceTests
         Assert.Equal("01-05-2026", suggestion.PostedLabel);
     }
 
+    [Fact]
+    public async Task DiscoverAsync_WithMixedDomAndEmbeddedHtml_ReturnsSuggestionsFromBothPools()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                <html>
+                  <body>
+                    <div class="jobsearch-result">
+                      <div class="PaidJob">
+                        <div class="PaidJob-inner">
+                          <a href="https://contoso.example/"><img alt="Contoso" /></a>
+                          <h4><a href="https://www.jobindex.dk/jobannonce/h101/solution-architect">Solution Architect</a></h4>
+                          <div class="jobad-element-area"><span class="jix_robotjob--area">Aarhus</span></div>
+                          <p>Lead solution architecture for enterprise platforms.</p>
+                        </div>
+                        <div class="jix-toolbar__pubdate"><time datetime="2026-05-03">03-05-2026</time></div>
+                      </div>
+                    </div>
+                    <script type="application/json">
+                    {
+                      "results": [
+                        {
+                          "html": "<div class=\"jobsearch-result\"><div class=\"PaidJob\"><div class=\"PaidJob-inner\"><a href=\"https://fabrikam.example/\"><img alt=\"Fabrikam\" /></a><h4><a href=\"/jobannonce/h202/platform-engineer\">Platform Engineer</a></h4><div class=\"jobad-element-area\"><span class=\"jix_robotjob--area\">Odense</span></div><p>Build platform tooling and cloud automation.</p></div><div class=\"jix-toolbar__pubdate\"><time datetime=\"2026-05-04\">04-05-2026</time></div></div></div>"
+                        }
+                      ]
+                    }
+                    </script>
+                  </body>
+                </html>
+                """,
+                Encoding.UTF8,
+                "text/html")
+        });
+
+        var service = new HttpJobDiscoveryService(new HttpClient(handler), new JobDiscoveryOptions { ShortlistLimit = 10 });
+
+        var result = await service.DiscoverAsync(new JobDiscoverySearchPlan(
+            "jobindex",
+            "Jobindex",
+            "architect",
+            string.Empty,
+            new Uri("https://www.jobindex.dk/jobsoegning?q=architect")));
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, suggestion => suggestion.Title == "Solution Architect" && suggestion.DetailUrl.AbsoluteUri == "https://www.jobindex.dk/jobannonce/h101/solution-architect");
+        Assert.Contains(result, suggestion => suggestion.Title == "Platform Engineer" && suggestion.DetailUrl.AbsoluteUri == "https://www.jobindex.dk/jobannonce/h202/platform-engineer");
+    }
+
+    [Fact]
+    public async Task DiscoverAsync_WithDuplicateUrlAcrossDomAndEmbedded_DeduplicatesSuggestions()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                <html>
+                  <body>
+                    <div class="jobsearch-result">
+                      <div class="PaidJob">
+                        <div class="PaidJob-inner">
+                          <a href="https://contoso.example/"><img alt="Contoso" /></a>
+                          <h4><a href="https://www.jobindex.dk/jobannonce/h303/cloud-architect">Cloud Architect</a></h4>
+                          <div class="jobad-element-area"><span class="jix_robotjob--area">Copenhagen</span></div>
+                          <p>Architect secure cloud solutions.</p>
+                        </div>
+                      </div>
+                    </div>
+                    <script type="application/json">
+                    {
+                      "results": [
+                        {
+                          "html": "<div class=\"jobsearch-result\"><div class=\"PaidJob\"><div class=\"PaidJob-inner\"><a href=\"https://contoso.example/\"><img alt=\"Contoso\" /></a><h4><a href=\"https://www.jobindex.dk/jobannonce/h303/cloud-architect\">Cloud Architect</a></h4><div class=\"jobad-element-area\"><span class=\"jix_robotjob--area\">Copenhagen</span></div><p>Architect secure cloud solutions.</p></div></div></div>"
+                        }
+                      ]
+                    }
+                    </script>
+                  </body>
+                </html>
+                """,
+                Encoding.UTF8,
+                "text/html")
+        });
+
+        var service = new HttpJobDiscoveryService(new HttpClient(handler), new JobDiscoveryOptions { ShortlistLimit = 10 });
+
+        var result = await service.DiscoverAsync(new JobDiscoverySearchPlan(
+            "jobindex",
+            "Jobindex",
+            "cloud architect",
+            string.Empty,
+            new Uri("https://www.jobindex.dk/jobsoegning?q=cloud")));
+
+        var suggestion = Assert.Single(result);
+        Assert.Equal("Cloud Architect", suggestion.Title);
+        Assert.Equal("https://www.jobindex.dk/jobannonce/h303/cloud-architect", suggestion.DetailUrl.AbsoluteUri);
+    }
+
       [Fact]
       public async Task DiscoverAsync_WhenSearchPageRedirectsToPublicPage_FollowsRedirectAndParsesResults()
       {
@@ -221,6 +328,27 @@ public sealed class HttpJobDiscoveryServiceTests
         Assert.Equal(["https://www.jobindex.dk/jobsoegning?q=software"], requests);
       }
 
+      [Fact]
+      public async Task DiscoverAsync_WhenResponseIsNotHtml_ThrowsHelpfulError()
+      {
+        var service = new HttpJobDiscoveryService(
+          new HttpClient(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+          {
+            Content = new StringContent("{\"message\":\"json\"}", Encoding.UTF8, "application/json")
+          })),
+          new JobDiscoveryOptions { ShortlistLimit = 10 });
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.DiscoverAsync(new JobDiscoverySearchPlan(
+          "jobindex",
+          "Jobindex",
+          "software",
+          string.Empty,
+          new Uri("https://www.jobindex.dk/jobsoegning?q=software"))));
+
+        Assert.Contains("content type", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("HTML", exception.Message, StringComparison.OrdinalIgnoreCase);
+      }
+
       private static HttpResponseMessage CreateRedirectResponse(HttpStatusCode statusCode, string location)
       {
         var response = new HttpResponseMessage(statusCode);
@@ -234,5 +362,17 @@ public sealed class HttpJobDiscoveryServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(responder(request));
+    }
+
+    private static Task<IPAddress[]> ResolveHostAddressesAsync(string host, CancellationToken cancellationToken)
+    {
+      _ = cancellationToken;
+
+      if (host.EndsWith(".invalid", StringComparison.OrdinalIgnoreCase))
+      {
+        throw new SocketException((int)SocketError.HostNotFound);
+      }
+
+      return Task.FromResult<IPAddress[]>([IPAddress.Parse("93.184.216.34")]);
     }
 }

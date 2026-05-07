@@ -18,6 +18,18 @@ internal static class PublicWebContentFetcher
     private const string HtmlAcceptHeader = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
     private const int MaxRedirectCount = 5;
     private const int MaxResponseBytes = 1_000_000;
+    private static readonly Func<string, CancellationToken, Task<IPAddress[]>> DefaultHostAddressesResolver =
+        static (host, cancellationToken) => Dns.GetHostAddressesAsync(host, cancellationToken);
+    private static readonly AsyncLocal<Func<string, CancellationToken, Task<IPAddress[]>>?> HostAddressesResolverOverride = new();
+
+    internal static IDisposable PushHostAddressesResolverForTesting(Func<string, CancellationToken, Task<IPAddress[]>> hostAddressesResolver)
+    {
+        ArgumentNullException.ThrowIfNull(hostAddressesResolver);
+
+        var previousResolver = HostAddressesResolverOverride.Value;
+        HostAddressesResolverOverride.Value = hostAddressesResolver;
+        return new HostAddressesResolverScope(previousResolver);
+    }
 
     internal static async Task<WebFetchResult> FetchAsync(
         HttpClient httpClient,
@@ -100,11 +112,11 @@ internal static class PublicWebContentFetcher
         IPAddress[] addresses;
         try
         {
-            addresses = await Dns.GetHostAddressesAsync(sourceUrl.DnsSafeHost, cancellationToken);
+            addresses = await ResolveHostAddressesAsync(sourceUrl.DnsSafeHost, cancellationToken);
         }
         catch (SocketException)
         {
-            return;
+            throw new InvalidOperationException($"The URL host could not be resolved: {sourceUrl}");
         }
 
         if (addresses.Any(IsPrivateAddress))
@@ -126,6 +138,9 @@ internal static class PublicWebContentFetcher
         throw new InvalidOperationException(
             $"Fetching {sourceUrl} returned unsupported content type '{mediaType ?? "unknown"}'. Only HTML pages are supported for this operation.");
     }
+
+    private static Task<IPAddress[]> ResolveHostAddressesAsync(string host, CancellationToken cancellationToken)
+        => (HostAddressesResolverOverride.Value ?? DefaultHostAddressesResolver)(host, cancellationToken);
 
     private static bool TryResolveRedirectUri(Uri currentUri, HttpResponseMessage response, out Uri redirectedUri)
     {
@@ -261,6 +276,14 @@ internal static class PublicWebContentFetcher
         => host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
             || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
             || host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase);
+
+    private sealed class HostAddressesResolverScope(Func<string, CancellationToken, Task<IPAddress[]>>? previousResolver) : IDisposable
+    {
+        public void Dispose()
+        {
+            HostAddressesResolverOverride.Value = previousResolver;
+        }
+    }
 
     private static bool IsPrivateAddress(IPAddress address)
     {

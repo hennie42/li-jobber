@@ -123,6 +123,60 @@ public sealed class JobDiscoverySuggestionServiceTests
     }
 
     [Fact]
+    public async Task DiscoverAsync_WithFitEnrichment_AnalyzesSuggestionsConcurrently()
+    {
+        var discoveryService = new FakeJobDiscoveryService(
+        [
+            new JobDiscoverySuggestion(
+                "jobindex",
+                "Jobindex",
+                "Lead AI Architect",
+                "Contoso",
+                "Copenhagen",
+                "Lead architecture and AI delivery.",
+                new Uri("https://jobs.example.test/lead-ai-architect"),
+                "Today",
+                new Uri("https://www.jobindex.dk/jobsoegning?q=architect")),
+            new JobDiscoverySuggestion(
+                "jobindex",
+                "Jobindex",
+                "Platform Engineer",
+                "Fabrikam",
+                "Odense",
+                "Build platform tooling.",
+                new Uri("https://jobs.example.test/platform-engineer"),
+                "Today",
+                new Uri("https://www.jobindex.dk/jobsoegning?q=architect"))
+        ]);
+        var researchService = new ConcurrentTrackingJobResearchService();
+        var service = CreateService(discoveryService, researchService);
+
+        var candidate = new CandidateProfile
+        {
+            Headline = "Lead architect for Azure consulting delivery",
+            Summary = "Client-facing architect with Azure platform delivery.",
+            Skills = [new SkillTag("Azure", 1), new SkillTag("Architecture", 2)]
+        };
+
+        var discoverTask = service.DiscoverAsync(
+            new JobDiscoverySearchPlan("jobindex", "Jobindex", "architect", "Copenhagen", new Uri("https://www.jobindex.dk/jobsoegning?q=architect")),
+            candidate,
+            ApplicantDifferentiatorProfile.Empty,
+            selectedModel: "session-model",
+            selectedThinkingLevel: "low",
+            progress: null,
+            enrichWithFit: true);
+
+        await researchService.WaitForConcurrencyAsync();
+        researchService.Release();
+
+        var result = await discoverTask;
+
+        Assert.Equal(2, result.Count);
+        Assert.True(researchService.MaxConcurrentCalls >= 2);
+    }
+
+    [Fact]
     public async Task DiscoverAsync_WithoutFitEnrichment_ReturnsRawSuggestions()
     {
         var discoveryService = new FakeJobDiscoveryService(
@@ -171,7 +225,7 @@ public sealed class JobDiscoverySuggestionServiceTests
         public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => Task.FromResult(results[jobPostingUrl.AbsoluteUri]);
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
@@ -189,7 +243,61 @@ public sealed class JobDiscoverySuggestionServiceTests
         public Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("Parse failed.");
 
-        public Task<CompanyResearchProfile> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<JobPostingAnalysis> AnalyzeTextAsync(string jobPostingText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<CompanyResearchProfile> BuildCompanyProfileFromTextAsync(string companyContextText, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    private sealed class ConcurrentTrackingJobResearchService : IJobResearchService
+    {
+        private readonly TaskCompletionSource concurrencyReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource releaseGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int activeCalls;
+
+        public int MaxConcurrentCalls { get; private set; }
+
+        public async Task<JobPostingAnalysis> AnalyzeAsync(Uri jobPostingUrl, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
+        {
+            var currentCalls = Interlocked.Increment(ref activeCalls);
+            MaxConcurrentCalls = Math.Max(MaxConcurrentCalls, currentCalls);
+            if (currentCalls >= 2)
+            {
+                concurrencyReached.TrySetResult();
+            }
+
+            try
+            {
+                using var _ = cancellationToken.Register(static state => ((TaskCompletionSource)state!).TrySetCanceled(), releaseGate);
+                await releaseGate.Task;
+
+                return new JobPostingAnalysis
+                {
+                    SourceUrl = jobPostingUrl,
+                    RoleTitle = jobPostingUrl.AbsoluteUri.Contains("platform", StringComparison.OrdinalIgnoreCase) ? "Platform Engineer" : "Lead AI Architect",
+                    CompanyName = jobPostingUrl.AbsoluteUri.Contains("platform", StringComparison.OrdinalIgnoreCase) ? "Fabrikam" : "Contoso",
+                    Summary = "Cloud and architecture delivery.",
+                    MustHaveThemes = ["Azure", "Architecture"]
+                };
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeCalls);
+            }
+        }
+
+        public Task WaitForConcurrencyAsync() => concurrencyReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        public void Release() => releaseGate.TrySetResult();
+
+        public Task<CompanyProfileBuildResult> BuildCompanyProfileAsync(IEnumerable<Uri> sourceUrls, string? selectedModel = null, string? selectedThinkingLevel = null, Action<LlmProgressUpdate>? progress = null, string? sourceLanguageHint = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<IReadOnlyList<Uri>> DiscoverCompanyContextUrlsAsync(Uri jobPostingUrl, string? companyName = null, CancellationToken cancellationToken = default)

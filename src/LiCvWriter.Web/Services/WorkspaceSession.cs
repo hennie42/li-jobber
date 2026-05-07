@@ -250,6 +250,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 InputLanguage = inputLanguage,
                 JobPosting = null,
                 CompanyProfile = null,
+                LatestIngestionWarnings = Array.Empty<OperationWarning>(),
                 JobFitAssessment = JobFitAssessment.Empty,
                 TechnologyGapAssessment = TechnologyGapAssessment.Empty,
                 SelectedEvidenceIds = Array.Empty<string>(),
@@ -281,6 +282,16 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ProgressState = JobSetProgressState.Failed,
             ProgressDetail = detail,
             ActiveSubtask = null
+        });
+    }
+
+    public void SetJobSetLatestIngestionWarnings(string jobSetId, IReadOnlyList<OperationWarning> warnings)
+    {
+        ArgumentNullException.ThrowIfNull(warnings);
+
+        UpdateJobSet(jobSetId, jobSet => jobSet with
+        {
+            LatestIngestionWarnings = warnings.ToArray()
         });
     }
 
@@ -945,6 +956,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                     ManualApplicationDeadlineOverride = jobSet.ManualApplicationDeadlineOverride,
                     JobPosting = jobSet.JobPosting,
                     CompanyProfile = jobSet.CompanyProfile,
+                    LatestIngestionWarnings = jobSet.LatestIngestionWarnings ?? Array.Empty<OperationWarning>(),
                     JobFitAssessment = jobSet.JobFitAssessment ?? JobFitAssessment.Empty,
                     Exports = jobSet.Exports,
                     GeneratedDocuments = jobSet.GeneratedDocuments ?? Array.Empty<GeneratedDocument>(),
@@ -1180,7 +1192,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.LastFitReviewFingerprint,
                 jobSet.LastFitReviewIncludedLlmEnhancement,
                 jobSet.InputLanguage,
-                jobSet.ManualApplicationDeadlineOverride)).ToArray(),
+                jobSet.ManualApplicationDeadlineOverride,
+                jobSet.LatestIngestionWarnings.Count == 0 ? null : jobSet.LatestIngestionWarnings.ToArray())).ToArray(),
             applicantDifferentiatorProfile,
             candidateProfile,
             selectedLlmModel,

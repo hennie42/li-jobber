@@ -38,6 +38,8 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
             return Array.Empty<JobDiscoverySuggestion>();
         }
 
+        PublicWebContentFetcher.EnsureHtmlLikeResponse(fetchResult.FinalUri, fetchResult.MediaType, html);
+
         progress?.Invoke(new JobDiscoveryProgressUpdate(
             "Parsing Jobindex result cards",
             "Extracting result cards from the Jobindex search response."));
@@ -85,14 +87,13 @@ public sealed class HttpJobDiscoveryService(HttpClient httpClient, JobDiscoveryO
         var document = new HtmlDocument();
         document.LoadHtml(html);
 
-        var resultNodes = document.DocumentNode.SelectNodes("//div[contains(concat(' ', normalize-space(@class), ' '), ' jobsearch-result ')]")?.ToArray()
+        var domResultNodes = document.DocumentNode.SelectNodes("//div[contains(concat(' ', normalize-space(@class), ' '), ' jobsearch-result ')]")?.ToArray()
             ?? [];
-        if (resultNodes.Length > 0)
-        {
-            return resultNodes;
-        }
+        var embeddedResultNodes = ExtractEmbeddedResultNodes(html);
 
-        return ExtractEmbeddedResultNodes(html);
+        return domResultNodes
+            .Concat(embeddedResultNodes)
+            .ToArray();
     }
 
     private static HtmlNode[] ExtractEmbeddedResultNodes(string html)

@@ -74,4 +74,5 @@ public sealed record JobSetRecoveryState(
     string? LastFitReviewFingerprint = null,
     bool LastFitReviewIncludedLlmEnhancement = false,
     JobSetSourceLanguage InputLanguage = JobSetSourceLanguage.Auto,
-    DateOnly? ManualApplicationDeadlineOverride = null);
+    DateOnly? ManualApplicationDeadlineOverride = null,
+    IReadOnlyList<OperationWarning>? LatestIngestionWarnings = null);
