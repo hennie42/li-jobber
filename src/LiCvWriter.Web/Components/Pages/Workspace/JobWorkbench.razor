@@ -5,8 +5,11 @@
 @using System.Net.Http.Json
 @using System.Text.Json
 @using LiCvWriter.Application.Models
+@using LiCvWriter.Application.Services
 @using LiCvWriter.Core.Profiles
 @inject ILlmClient LlmClient
+@inject JobDiscoveryProfileLightService DiscoveryProfileLightService
+@inject JobDiscoverySearchPlanService DiscoverySearchPlanService
 @inject JobFitWorkspaceRefreshService JobFitWorkspaceRefreshService
 @inject IJobResearchService JobResearchService
 @inject LlmTechnologyGapAnalysisService GapAnalysisService
@@ -38,7 +41,7 @@
         </div>
     </section>
 
-    <details class="card-panel stack-gap" open>
+    <details class="card-panel stack-gap" open="@ShouldDiscoverySectionStartOpen()">
         <summary><h3>Discovery</h3></summary>
         <JobDiscoveryPanel />
     </details>
@@ -919,6 +922,13 @@ else if (CanRunFitReview)
         operationStartedAt = null;
         uiRefreshTimer?.Dispose();
         uiRefreshTimer = null;
+    }
+
+    private bool ShouldDiscoverySectionStartOpen()
+    {
+        var profileLight = DiscoveryProfileLightService.Build(Workspace.CandidateProfile, Workspace.ApplicantDifferentiatorProfile);
+        var searchPlan = DiscoverySearchPlanService.Build(profileLight);
+        return !searchPlan.CanOpen;
     }
 
     private string GetOperationElapsed()
