@@ -51,7 +51,9 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
         }
         catch (Exception exception)
         {
-            return OllamaCapacityVerdict.Unknown(model, $"Warm-up call failed: {exception.Message}");
+            return exception is FoundryRuntimeException foundryException
+                ? OllamaCapacityVerdict.Unknown(model, foundryException.Message, foundryException.Notes)
+                : OllamaCapacityVerdict.Unknown(model, $"Warm-up call failed: {exception.Message}");
         }
 
         LlmModelAvailability availability;

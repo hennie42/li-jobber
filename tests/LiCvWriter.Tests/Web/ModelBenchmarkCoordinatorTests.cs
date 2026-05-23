@@ -121,6 +121,40 @@ public sealed class ModelBenchmarkCoordinatorTests
     }
 
     [Fact]
+    public async Task StartAsync_WhenLaterModelsAreStillRunning_PublishesRankedPartialResults()
+    {
+        var releaseSlowModel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var llmClient = new SelectivelyGatedLlmClient(
+            releaseSlowModel.Task,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "slow" },
+            BuildPerfectResponses("fast"),
+            BuildPerfectResponses("slow", evalSeconds: 10.0));
+        var (coordinator, _) = BuildCoordinator(llmClient);
+        var partialResultsPublished = new TaskCompletionSource<ModelBenchmarkSession>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { IsRunning: true, Results.Count: > 0 } current
+                && current.Results.All(static result => result.Rank > 0))
+            {
+                partialResultsPublished.TrySetResult(current);
+            }
+        };
+
+        var runTask = coordinator.StartAsync(["fast", "slow"]);
+        var partialSession = await partialResultsPublished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Single(partialSession.Results);
+        Assert.Equal("fast", partialSession.Results[0].Model);
+        Assert.Equal(1, partialSession.Results[0].Rank);
+        Assert.Equal(1, partialSession.CompletedCount);
+        Assert.Equal("slow", partialSession.CurrentModel);
+
+        releaseSlowModel.SetResult();
+        await runTask;
+    }
+
+    [Fact]
     public async Task StartAsync_WhileAnotherRunActive_Throws()
     {
         var releaseFirst = new TaskCompletionSource();
@@ -478,6 +512,55 @@ public sealed class ModelBenchmarkCoordinatorTests
                 LoadDuration: TimeSpan.Zero,
                 PromptEvalDuration: TimeSpan.FromSeconds(0.1),
                 EvalDuration: TimeSpan.FromSeconds(1.0));
+        }
+
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+    }
+
+    private sealed class SelectivelyGatedLlmClient(
+        Task gate,
+        HashSet<string> gatedModels,
+        params LlmResponse[][] perModelResponses) : ILlmClient
+    {
+        private readonly Dictionary<string, Queue<LlmResponse>> queues = perModelResponses
+            .Where(static batch => batch.Length > 0)
+            .ToDictionary(
+                batch => batch[0].Model,
+                batch => new Queue<LlmResponse>(batch),
+                StringComparer.OrdinalIgnoreCase);
+
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
+                Version: "0.0.0",
+                Model: string.Empty,
+                Installed: true,
+                AvailableModels: Array.Empty<string>(),
+                RunningModels: queues.Keys
+                    .Select(static name => new LlmRunningModel(name, name, null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000))
+                    .ToArray()));
+
+        public async Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (gatedModels.Contains(request.Model))
+            {
+                await gate.WaitAsync(cancellationToken);
+            }
+
+            if (!queues.TryGetValue(request.Model, out var queue) || queue.Count == 0)
+            {
+                throw new InvalidOperationException($"No scripted response for model '{request.Model}'.");
+            }
+
+            var response = queue.Dequeue();
+            if (response.Content == "__THROW__")
+            {
+                throw new InvalidOperationException("scripted failure");
+            }
+
+            return response;
         }
 
         public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)

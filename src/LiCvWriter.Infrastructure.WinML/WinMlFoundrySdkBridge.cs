@@ -1,11 +1,13 @@
 using System.Collections;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using Betalgo.Ranul.OpenAI.ObjectModels.RequestModels;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
 using LiCvWriter.Infrastructure.Foundry;
 using Microsoft.AI.Foundry.Local;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -174,36 +176,45 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         CancellationToken cancellationToken = default)
     {
         var modelAlias = ResolveModelAlias(request.Model);
-        var availability = await VerifyModelAvailabilityAsync(cancellationToken);
-        if (!availability.AvailableModels.Any(model => model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)))
+        try
         {
-            throw new InvalidOperationException($"The Foundry model '{modelAlias}' is not downloaded. Download it from Start / Setup before using it.");
+            await EnsureModelAvailabilityAsync(modelAlias, cancellationToken);
+            return await ExecuteGenerateAsync(modelAlias, request, progress, cancellationToken);
         }
-
-        var manager = await managerAccessor.GetManagerAsync(cancellationToken);
-        var catalog = await manager.GetCatalogAsync();
-        var model = await catalog.GetModelAsync(modelAlias)
-            ?? throw new InvalidOperationException($"The Foundry model '{modelAlias}' was not found in the local catalog.");
-
-        if (options.AutoLoadSelectedModel)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await model.LoadAsync();
+            throw;
         }
-
-        var chatClient = await model.GetChatClientAsync();
-        FoundryOpenAiResponseMapper.ConfigureChatClient(chatClient, request);
-        var messages = BuildMessages(request);
-        var stopwatch = Stopwatch.StartNew();
-
-        if (request.Stream || progress is not null)
+        catch (Exception exception) when (FoundryRuntimeFailureClassifier.IsRetriableModelLoadFailure(exception))
         {
-            return await CompleteStreamingAsync(chatClient, modelAlias, messages, progress, stopwatch, cancellationToken);
+            var recoveryNotes = await TryResetFoundryRuntimeAsync(cancellationToken);
+            try
+            {
+                return await ExecuteGenerateAsync(modelAlias, request, progress, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception retryException)
+            {
+                if (TryNormalizeFoundryRuntimeException(retryException, retryAttempted: true, recoveryNotes) is { } normalizedRetryException)
+                {
+                    throw normalizedRetryException;
+                }
+
+                throw;
+            }
         }
+        catch (Exception exception)
+        {
+            if (TryNormalizeFoundryRuntimeException(exception, retryAttempted: false, additionalNotes: null) is { } normalizedException)
+            {
+                throw normalizedException;
+            }
 
-        var response = await chatClient.CompleteChatAsync(messages);
-        stopwatch.Stop();
-
-        return FoundryOpenAiResponseMapper.MapChatCompletion(modelAlias, response, stopwatch.Elapsed);
+            throw;
+        }
     }
 
     public void Dispose()
@@ -383,6 +394,75 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         return messages.ToArray();
     }
 
+    private async Task EnsureModelAvailabilityAsync(string modelAlias, CancellationToken cancellationToken)
+    {
+        var availability = await VerifyModelAvailabilityAsync(cancellationToken);
+        if (!availability.AvailableModels.Any(model => model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"The Foundry model '{modelAlias}' is not downloaded. Download it from Start / Setup before using it.");
+        }
+    }
+
+    private async Task<LlmResponse> ExecuteGenerateAsync(
+        string modelAlias,
+        LlmRequest request,
+        Action<LlmProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        var manager = await managerAccessor.GetManagerAsync(cancellationToken);
+        var catalog = await manager.GetCatalogAsync();
+        var model = await catalog.GetModelAsync(modelAlias)
+            ?? throw new InvalidOperationException($"The Foundry model '{modelAlias}' was not found in the local catalog.");
+
+        if (options.AutoLoadSelectedModel)
+        {
+            await model.LoadAsync();
+        }
+
+        var chatClient = await model.GetChatClientAsync();
+        FoundryOpenAiResponseMapper.ConfigureChatClient(chatClient, request);
+        var messages = BuildMessages(request);
+        var stopwatch = Stopwatch.StartNew();
+
+        if (request.Stream || progress is not null)
+        {
+            return await CompleteStreamingAsync(chatClient, modelAlias, messages, progress, stopwatch, cancellationToken);
+        }
+
+        var response = await chatClient.CompleteChatAsync(messages);
+        stopwatch.Stop();
+
+        return FoundryOpenAiResponseMapper.MapChatCompletion(modelAlias, response, stopwatch.Elapsed);
+    }
+
+    private async Task<IReadOnlyList<string>> TryResetFoundryRuntimeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await managerAccessor.ResetAsync(cancellationToken);
+            return Array.Empty<string>();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return [$"The in-process Foundry runtime reset attempt also failed: {exception.Message}"];
+        }
+    }
+
+    private FoundryRuntimeException? TryNormalizeFoundryRuntimeException(
+        Exception exception,
+        bool retryAttempted,
+        IReadOnlyList<string>? additionalNotes)
+        => FoundryRuntimeFailureClassifier.TryCreateException(
+            exception,
+            retryAttempted,
+            managerAccessor.GetResolvedModelCacheDirectory(),
+            managerAccessor.GetResolvedLogsDirectory(),
+            additionalNotes);
+
     private static async Task<LlmResponse> CompleteStreamingAsync(
         OpenAIChatClient chatClient,
         string modelAlias,
@@ -440,6 +520,12 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         private static readonly System.Text.RegularExpressions.Regex InvalidAppNameCharacters = new("[^\\p{L}\\p{Nd} _-]+", System.Text.RegularExpressions.RegexOptions.Compiled);
         private readonly SemaphoreSlim initializationGate = new(1, 1);
 
+        public string GetResolvedModelCacheDirectory()
+            => ResolveModelCacheDirectory(options);
+
+        public string GetResolvedLogsDirectory()
+            => ResolveLogsDirectory(options);
+
         public async Task<FoundryLocalManager> GetManagerAsync(CancellationToken cancellationToken = default)
         {
             if (FoundryLocalManager.IsInitialized)
@@ -463,6 +549,22 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
                 }
 
                 return FoundryLocalManager.Instance;
+            }
+            finally
+            {
+                initializationGate.Release();
+            }
+        }
+
+        public async Task ResetAsync(CancellationToken cancellationToken = default)
+        {
+            await initializationGate.WaitAsync(cancellationToken);
+            try
+            {
+                if (FoundryLocalManager.IsInitialized)
+                {
+                    FoundryLocalManager.Instance.Dispose();
+                }
             }
             finally
             {
@@ -497,6 +599,30 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
 
         private static string? NormalizeOptionalPath(string? path)
             => string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
+        private static string ResolveAppDataDirectory(FoundryOptions options)
+        {
+            var configuredPath = NormalizeOptionalPath(options.AppDataDir);
+            if (configuredPath is not null)
+            {
+                return configuredPath;
+            }
+
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.Combine(userProfile, $".{NormalizeAppName(options.AppName)}");
+        }
+
+        private static string ResolveModelCacheDirectory(FoundryOptions options)
+        {
+            var configuredPath = NormalizeOptionalPath(options.ModelCacheDir);
+            return configuredPath ?? Path.Combine(ResolveAppDataDirectory(options), "cache", "models");
+        }
+
+        private static string ResolveLogsDirectory(FoundryOptions options)
+        {
+            var configuredPath = NormalizeOptionalPath(options.LogsDir);
+            return configuredPath ?? Path.Combine(ResolveAppDataDirectory(options), "logs");
+        }
 
         private static string NormalizeAppName(string? appName)
         {

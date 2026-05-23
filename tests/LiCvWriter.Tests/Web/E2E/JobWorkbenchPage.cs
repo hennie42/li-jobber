@@ -27,9 +27,7 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
 
     public ILocator ReasoningMonitor => page.Locator(".sidebar-crt-screen").First;
 
-    public ILocator ActivityFeed => page.Locator(".activity-feed");
-
-    public ILocator ActivityEntries => page.Locator(".activity-entry");
+    public ILocator ActivityMonitor => page.Locator(".sidebar-crt-screen-activity").First;
 
     public ILocator RunningRows => page.Locator(".overview-row .status-chip.status-pending");
 
@@ -42,6 +40,7 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
             Timeout = 60_000,
             WaitUntil = WaitUntilState.Commit
         });
+        await page.WaitForTimeoutAsync(2_000);
         await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Job Workbench" })).ToBeVisibleAsync();
         await Expect(JobRows).ToHaveCountAsync(3);
         await Expect(JobRowTitles).ToHaveCountAsync(3);
@@ -50,24 +49,81 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
 
     public async Task SelectFirstJobSetsAsync(int count)
     {
-        var checkboxes = page.Locator(".overview-row input[type='checkbox']");
-        await Expect(checkboxes).ToHaveCountAsync(3);
+        await Expect(JobRowTitles).ToHaveCountAsync(3);
+        var titles = (await JobRowTitles.AllInnerTextsAsync())
+            .Select(static title => title.Trim())
+            .Take(count)
+            .ToArray();
 
         for (var index = 0; index < count; index++)
         {
-            await checkboxes.Nth(index).CheckAsync();
+            await SelectJobSetAsync(titles[index]);
+            await WaitForSelectedCountAsync(index + 1);
         }
-
-        await Expect(SelectedJobCheckboxes).ToHaveCountAsync(count);
     }
 
     public async Task SelectJobSetAsync(int index)
     {
-        var checkboxes = page.Locator(".overview-row input[type='checkbox']");
-        await Expect(checkboxes).ToHaveCountAsync(3);
+        await Expect(JobRowTitles).ToHaveCountAsync(3);
+        var title = (await JobRowTitles.Nth(index).InnerTextAsync()).Trim();
+        await SelectJobSetAsync(title);
+    }
 
-        await JobRows.Nth(index).ScrollIntoViewIfNeededAsync();
-        await checkboxes.Nth(index).CheckAsync();
+    private async Task SelectJobSetAsync(string title)
+    {
+        var row = JobRows.Filter(new LocatorFilterOptions
+        {
+            Has = page.GetByRole(AriaRole.Link, new() { Name = title })
+        });
+        var selectionLabel = row.Locator("label.checkbox-row");
+        var checkbox = row.Locator("input[type='checkbox']");
+
+        await Expect(row).ToHaveCountAsync(1);
+        await Expect(selectionLabel).ToBeVisibleAsync();
+        await selectionLabel.ClickAsync();
+        await Expect(checkbox).ToBeCheckedAsync();
+    }
+
+    private async Task WaitForSelectedCountAsync(int expectedCount)
+    {
+        // Blazor Server can briefly show the browser's local checkbox state before
+        // the server event round-trip settles and re-renders the row list.
+        try
+        {
+            await page.WaitForFunctionAsync(
+                """
+                expectedCount => {
+                    const stateKey = "__liCvBatchSelectionState";
+                    const state = window[stateKey] ??= { count: -1, stableAt: performance.now() };
+                    const count = document.querySelectorAll(".overview-row input[type='checkbox']:checked").length;
+
+                    if (state.count !== count) {
+                        state.count = count;
+                        state.stableAt = performance.now();
+                    }
+
+                    return count === expectedCount && (performance.now() - state.stableAt) >= 250;
+                }
+                """,
+                expectedCount,
+                new PageWaitForFunctionOptions
+                {
+                    Timeout = 30_000
+                });
+        }
+        catch (TimeoutException exception)
+        {
+            var rowStates = await page.EvaluateAsync<string>(
+                """
+                () => JSON.stringify([...document.querySelectorAll('.overview-row')].map((row, index) => ({
+                    index,
+                    title: row.querySelector('.overview-row-title')?.textContent?.trim() ?? '',
+                    checked: row.querySelector("input[type='checkbox']")?.checked ?? false
+                })))
+                """);
+
+            throw new TimeoutException($"Timed out waiting for {expectedCount} selected job sets. Current row states: {rowStates}", exception);
+        }
     }
 
     public async Task HoverJobSetAsync(int index)
@@ -95,10 +151,10 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
         await ReasoningMonitor.HoverAsync();
     }
 
-    public async Task FocusActivityFeedAsync()
+    public async Task FocusActivityMonitorAsync()
     {
-        await ActivityFeed.ScrollIntoViewIfNeededAsync();
-        await ActivityFeed.HoverAsync();
+        await ActivityMonitor.ScrollIntoViewIfNeededAsync();
+        await ActivityMonitor.HoverAsync();
     }
 
     public async Task ScrollWorkbenchToTopAsync()
@@ -123,17 +179,9 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
             Timeout = 30_000
         });
 
-        await Expect(ActivityFeed).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        await Expect(ActivityMonitor).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
         {
             Timeout = 180_000
-        });
-    }
-
-    public async Task WaitForActivityEntryAsync()
-    {
-        await Expect(ActivityEntries.First).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
-        {
-            Timeout = 420_000
         });
     }
 }

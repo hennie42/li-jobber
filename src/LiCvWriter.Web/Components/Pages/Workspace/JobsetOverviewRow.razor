@@ -128,7 +128,16 @@
     };
 
     private Task HandleBatchSelectionChanged(ChangeEventArgs args)
-        => BatchSelectionChanged.InvokeAsync(args.Value is bool isSelected && isSelected);
+        => BatchSelectionChanged.InvokeAsync(NormalizeCheckboxValue(args.Value));
+
+    private static bool NormalizeCheckboxValue(object? value)
+        => value switch
+        {
+            bool isSelected => isSelected,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            string text when string.Equals(text, "on", StringComparison.OrdinalIgnoreCase) => true,
+            _ => false
+        };
 
     private static string FormatDocumentKind(DocumentKind kind) => kind switch
     {

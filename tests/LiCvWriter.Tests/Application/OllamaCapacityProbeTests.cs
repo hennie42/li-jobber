@@ -1,3 +1,4 @@
+using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
@@ -122,6 +123,24 @@ public sealed class OllamaCapacityProbeTests
         Assert.Contains(verdict.Notes, n => n.Contains("Cold load took", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task ProbeAsync_FoundryRuntimeFailure_ReturnsUnknownWithClassifiedHeadline()
+    {
+        var foundryException = new FoundryRuntimeException(
+            FoundryRuntimeFailureKind.TensorRtEngineLoad,
+            "Foundry TensorRT engine load failed after a runtime reset retry.",
+            retryAttempted: true,
+            [@"If this keeps recurring, stop the app and reset the affected Foundry model variant under 'C:\Users\henri\.LI-CV-Writer\cache\models'."]);
+
+        var probe = new OllamaCapacityProbe(new ThrowingWarmupLlmClient(foundryException), DefaultOptions);
+
+        var verdict = await probe.ProbeAsync("m:latest");
+
+        Assert.Equal(OllamaCapacityFit.Unknown, verdict.Fit);
+        Assert.Equal(foundryException.Message, verdict.Headline);
+        Assert.Contains(verdict.Notes, static note => note.Contains(@"C:\Users\henri\.LI-CV-Writer\cache\models", StringComparison.Ordinal));
+    }
+
     private static LlmResponse CreateWarmup(long? evalTokens, double? evalSeconds, double? loadSeconds = null)
         => new(
             Model: "m:latest",
@@ -137,4 +156,16 @@ public sealed class OllamaCapacityProbeTests
 
     private static LlmModelInfo ModelInfo(string parameters, string quant, long contextLength)
         => new(Name: "m:latest", FileSizeBytes: 4_000_000_000, ParameterSize: parameters, QuantizationLevel: quant, Family: "llama", ContextLength: contextLength);
+
+    private sealed class ThrowingWarmupLlmClient(Exception exception) : ILlmClient
+    {
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(string.Empty, string.Empty, true, Array.Empty<string>(), Array.Empty<LlmRunningModel>()));
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromException<LlmResponse>(exception);
+
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+    }
 }

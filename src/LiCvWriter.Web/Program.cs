@@ -272,6 +272,7 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
         }
 
         workspace.SetOllamaAvailability(availability);
+        workspace.SetLlmProviderSelection(LlmProviderKind.Ollama);
         var selectedModel = SelectDemoModel(availability, options.Model);
         workspace.SetLlmSessionSettings(selectedModel, options.Think);
         SeedPlaywrightDemoWorkspace(workspace);

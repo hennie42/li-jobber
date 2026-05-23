@@ -26,32 +26,22 @@
                         </div>
                     </div>
                 </div>
+                <div class="field-label sidebar-monitor-label-secondary">Activity Monitor</div>
+                <div class="crt-monitor sidebar-crt-monitor sidebar-crt-monitor-activity">
+                    <div class="crt-monitor-bezel sidebar-crt-bezel">
+                        <div class="crt-monitor-header">
+                            <span class="crt-monitor-led" aria-hidden="true"></span>
+                            <div class="crt-monitor-badge">@GetSidebarActivityMonitorBadgeText()</div>
+                        </div>
+                        <pre class="crt-monitor-screen sidebar-crt-screen sidebar-crt-screen-activity @(HasSidebarActivityText() ? null : "crt-monitor-screen-placeholder")" @ref="activityMonitorScreen">@GetSidebarActivityMonitorText()</pre>
+                        <div class="crt-monitor-footer">
+                            <span class="crt-monitor-model-label">@GetSidebarActivityMonitorFooterText()</span>
+                            <span class="crt-monitor-vent" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                </div>
             </section>
         </div>
-
-        <section class="sidebar-panel">
-            <div class="field-label">Activity</div>
-            <div class="activity-feed">
-                @if (GetFinishedActivityEntries() is { Count: > 0 } entries)
-                {
-                    @foreach (var entry in entries)
-                    {
-                        <article class="activity-entry activity-@entry.Level">
-                            <div class="activity-message">@entry.Message</div>
-                            @if (!string.IsNullOrWhiteSpace(entry.Detail))
-                            {
-                                <div class="activity-detail">@entry.Detail</div>
-                            }
-                            <div class="activity-time">@entry.Timestamp.ToString("HH:mm:ss")@(entry.Duration is { } d ? $" ({d.Minutes}:{d.Seconds:D2})" : "")</div>
-                        </article>
-                    }
-                }
-                else
-                {
-                    <div class="sidebar-text">Finished activities will appear here.</div>
-                }
-            </div>
-        </section>
     </aside>
 
     <main class="shell-content">
@@ -62,8 +52,12 @@
 </div>
 
 @code {
+    private const string DefaultSidebarActivityDetail = "Detailed progress stays in the main page panels while this monitor keeps live model traces visible.";
+
     private ElementReference reasoningMonitorScreen;
+    private ElementReference activityMonitorScreen;
     private string? lastScrolledThinkingText;
+    private string? lastScrolledActivityText;
 
     protected override void OnInitialized()
     {
@@ -77,39 +71,38 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var currentThinkingText = GetSidebarThinkingRawText();
-        if (string.IsNullOrWhiteSpace(currentThinkingText))
+        lastScrolledThinkingText = await TryScrollMonitorAsync(GetSidebarThinkingRawText(), lastScrolledThinkingText, reasoningMonitorScreen);
+        lastScrolledActivityText = await TryScrollMonitorAsync(GetSidebarActivityRawText(), lastScrolledActivityText, activityMonitorScreen);
+    }
+
+    private async Task<string?> TryScrollMonitorAsync(string? currentText, string? lastScrolledText, ElementReference monitorScreen)
+    {
+        if (string.IsNullOrWhiteSpace(currentText))
         {
-            lastScrolledThinkingText = null;
-            return;
+            return null;
         }
 
-        if (string.Equals(currentThinkingText, lastScrolledThinkingText, StringComparison.Ordinal))
+        if (string.Equals(currentText, lastScrolledText, StringComparison.Ordinal))
         {
-            return;
+            return lastScrolledText;
         }
-
-        lastScrolledThinkingText = currentThinkingText;
 
         try
         {
-            await JS.InvokeVoidAsync("liCvWriterUi.scrollElementToBottom", reasoningMonitorScreen);
+            await JS.InvokeVoidAsync("liCvWriterUi.scrollElementToBottom", monitorScreen);
+            return currentText;
         }
         catch (JSDisconnectedException)
         {
             // Ignore disconnects during live updates.
+            return lastScrolledText;
         }
         catch (TaskCanceledException)
         {
             // Circuit may already be torn down.
+            return lastScrolledText;
         }
     }
-
-    private IReadOnlyList<OperationStatusEntry> GetFinishedActivityEntries()
-        => Operations.Entries
-            .Where(static entry => !string.Equals(entry.Level, "busy", StringComparison.OrdinalIgnoreCase))
-            .Take(6)
-            .ToArray();
 
     private string? GetSidebarThinkingRawText()
     {
@@ -129,6 +122,93 @@
         => GetSidebarThinkingRawText()
             ?? "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.";
 
+    private string? GetSidebarActivityRawText()
+    {
+        if (Operations.ActiveLlmTelemetry is { } telemetry)
+        {
+            return BuildSidebarActivityText(
+                GetSidebarActivityChipText(),
+                telemetry.Message,
+                string.IsNullOrWhiteSpace(telemetry.Detail) ? DefaultSidebarActivityDetail : telemetry.Detail,
+                GetSidebarActivityTimestampText(),
+                $"MODEL : {telemetry.Model}",
+                telemetry.Elapsed is { } elapsed ? $"ELAPSE: {FormatSidebarDuration(elapsed)}" : null,
+                telemetry.HasTokenUsage ? $"TOKENS: P {(telemetry.PromptTokens?.ToString() ?? "-")} / C {(telemetry.CompletionTokens?.ToString() ?? "-")}" : null);
+        }
+
+        if (Operations.IsBusy)
+        {
+            return BuildSidebarActivityText(
+                GetSidebarActivityChipText(),
+                Operations.CurrentMessage,
+                GetSidebarActivityDetail(),
+                GetSidebarActivityTimestampText(),
+                null,
+                null,
+                null);
+        }
+
+        if (GetLatestSidebarActivityEntry() is { } latestEntry)
+        {
+            return BuildSidebarActivityText(
+                GetSidebarActivityChipText(),
+                latestEntry.Message,
+                string.IsNullOrWhiteSpace(latestEntry.Detail) ? DefaultSidebarActivityDetail : latestEntry.Detail,
+                GetSidebarActivityTimestampText(),
+                null,
+                latestEntry.Duration is { } duration ? $"SPAN  : {FormatSidebarDuration(duration)}" : null,
+                null);
+        }
+
+        return null;
+    }
+
+    private static string BuildSidebarActivityText(
+        string state,
+        string message,
+        string detail,
+        string? timestampText,
+        string? modelLine,
+        string? durationLine,
+        string? tokenLine)
+    {
+        List<string> lines =
+        [
+            $"STATE : {state}",
+            $"STEP  : {message}",
+            $"DETAIL: {detail}"
+        ];
+
+        if (!string.IsNullOrWhiteSpace(timestampText))
+        {
+            lines.Add($"STAMP : {timestampText}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(modelLine))
+        {
+            lines.Add(modelLine);
+        }
+
+        if (!string.IsNullOrWhiteSpace(durationLine))
+        {
+            lines.Add(durationLine);
+        }
+
+        if (!string.IsNullOrWhiteSpace(tokenLine))
+        {
+            lines.Add(tokenLine);
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private bool HasSidebarActivityText()
+        => !string.IsNullOrWhiteSpace(GetSidebarActivityRawText());
+
+    private string GetSidebarActivityMonitorText()
+        => GetSidebarActivityRawText()
+            ?? "No recent activity yet. Start a benchmark, job run, or streamed LLM task to light up this monitor.";
+
     private string GetSidebarMonitorBadgeText()
     {
         if (!HasSidebarThinkingText())
@@ -141,6 +221,90 @@
             ? "Live feed"
             : "Last capture";
     }
+
+    private string GetSidebarActivityMonitorBadgeText()
+        => GetSidebarActivityChipText();
+
+    private string GetSidebarActivityChipText()
+    {
+        if (Operations.ActiveLlmTelemetry is not null)
+        {
+            return "Live model";
+        }
+
+        if (Operations.IsBusy)
+        {
+            return "Working";
+        }
+
+        return GetLatestSidebarActivityEntry()?.Level switch
+        {
+            "success" => "Latest step",
+            "error" => "Attention",
+            _ => "Standby"
+        };
+    }
+
+    private string GetSidebarActivityMessage()
+    {
+        if (Operations.ActiveLlmTelemetry is not null || Operations.IsBusy)
+        {
+            return Operations.CurrentMessage;
+        }
+
+        return GetLatestSidebarActivityEntry()?.Message ?? "No recent activity yet.";
+    }
+
+    private string GetSidebarActivityDetail()
+    {
+        if (Operations.ActiveLlmTelemetry is not null || Operations.IsBusy)
+        {
+            return string.IsNullOrWhiteSpace(Operations.CurrentDetail)
+                ? DefaultSidebarActivityDetail
+                : Operations.CurrentDetail;
+        }
+
+        return string.IsNullOrWhiteSpace(GetLatestSidebarActivityEntry()?.Detail)
+            ? DefaultSidebarActivityDetail
+            : GetLatestSidebarActivityEntry()!.Detail!;
+    }
+
+    private string? GetSidebarActivityTimestampText()
+    {
+        if (Operations.ActiveLlmTelemetry is { Timestamp: var telemetryTimestamp })
+        {
+            return $"Live {telemetryTimestamp:HH:mm:ss}";
+        }
+
+        if (Operations.IsBusy && Operations.BusyStartedAt is { } busyStartedAt)
+        {
+            return $"Started {busyStartedAt:HH:mm:ss}";
+        }
+
+        return GetLatestSidebarActivityEntry() is { Timestamp: var timestamp }
+            ? $"Updated {timestamp:HH:mm:ss}"
+            : null;
+    }
+
+    private string GetSidebarActivityMonitorFooterText()
+    {
+        if (Operations.ActiveLlmTelemetry is { Model: { Length: > 0 } model })
+        {
+            return $"OPS - {model}";
+        }
+
+        return GetSidebarActivityTimestampText() is { } timestampText
+            ? $"OPS - {timestampText}"
+            : "OPS - Standby";
+    }
+
+    private static string FormatSidebarDuration(TimeSpan duration)
+        => duration.TotalMinutes >= 1
+            ? duration.ToString(@"m\:ss")
+            : duration.ToString(@"s\.f\s");
+
+    private OperationStatusEntry? GetLatestSidebarActivityEntry()
+        => Operations.Entries.FirstOrDefault(static entry => !string.Equals(entry.Level, "busy", StringComparison.OrdinalIgnoreCase));
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
 }

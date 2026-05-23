@@ -4,6 +4,7 @@ using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
+using System.Reflection;
 using LiCvWriter.Web.Services;
 using LlmSetupPage = LiCvWriter.Web.Components.Pages.Setup.Llm;
 using Microsoft.Extensions.DependencyInjection;
@@ -175,6 +176,77 @@ public sealed class LlmSetupPageTests
         Assert.Contains("Foundry Local discovered 2 Windows ML execution provider(s), but none are registered yet.", cut.Markup);
     }
 
+    [Fact]
+    public void Render_WhenLiveBenchmarkHasRankedPartialResults_ShowsLiveResultsTable()
+    {
+        using var context = new BunitContext();
+        var ollamaOptions = new OllamaOptions { Model = "phi", Think = "medium" };
+        var workspace = new WorkspaceSession(ollamaOptions);
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
+            Version: "0.1.0",
+            Model: "phi",
+            Installed: true,
+            AvailableModels: ["phi", "mistral"],
+            RunningModels: Array.Empty<LlmRunningModel>(),
+            Provider: LlmProviderKind.Ollama));
+        workspace.SetLlmSessionSettings("phi", "medium");
+
+        RegisterCommonServices(
+            context.Services,
+            workspace,
+            ollamaOptions,
+            new StubLlmClient(),
+            new StubFoundryCatalogClient(CreateFoundrySnapshot()));
+
+        var coordinator = context.Services.GetRequiredService<ModelBenchmarkCoordinator>();
+        SetCurrentBenchmarkSession(
+            coordinator,
+            new ModelBenchmarkSession(
+                StartedUtc: DateTimeOffset.UtcNow.AddMinutes(-1),
+                CompletedUtc: null,
+                IsRunning: true,
+                IsCancelled: false,
+                CompletedCount: 1,
+                TotalCount: 2,
+                CurrentModel: "slow",
+                Results:
+                [
+                    new ModelBenchmarkResult(
+                        Model: "fast",
+                        Rank: 1,
+                        OverallScore: 0.92,
+                        QualityScore: 0.88,
+                        DecodeTokensPerSecond: 18.4,
+                        LoadDuration: TimeSpan.FromSeconds(0.8),
+                        TotalDuration: TimeSpan.FromSeconds(3.2),
+                        Fit: OllamaCapacityFit.Comfortable,
+                        Notes: ["steady throughput"],
+                        FailedReason: null,
+                        Provider: LlmProviderKind.Ollama)
+                ],
+                Provider: LlmProviderKind.Ollama)
+            {
+                CurrentPhase = ModelBenchmarkRunPhase.Evaluating,
+                CurrentDetail = "Running the second model benchmark.",
+                CompletedFixtureCount = ModelBenchmarkFixtures.DefaultSuite.Count,
+                TotalFixtureCount = ModelBenchmarkFixtures.DefaultSuite.Count
+            });
+
+        var cut = context.Render<LlmSetupPage>();
+
+        cut.WaitForAssertion(() => Assert.Contains("Live results so far", cut.Markup));
+
+        var benchmarkTable = cut.FindAll("table")
+            .Single(table => table.QuerySelectorAll("thead th").First().TextContent.Trim() == "#");
+        var rows = benchmarkTable.QuerySelectorAll("tbody tr");
+        var cells = rows[0].QuerySelectorAll("td");
+
+        Assert.Single(rows);
+        Assert.Contains("fast", rows[0].TextContent, StringComparison.Ordinal);
+        Assert.Equal("1", cells[0].TextContent.Trim());
+        Assert.Equal("fast", cells[2].TextContent.Trim());
+    }
+
     private static void RegisterCommonServices(
         IServiceCollection services,
         WorkspaceSession workspace,
@@ -201,6 +273,13 @@ public sealed class LlmSetupPageTests
 
     private static IElement FindButton(IRenderedComponent<LlmSetupPage> cut, string label)
         => cut.FindAll("button").Single(button => button.TextContent.Contains(label, StringComparison.OrdinalIgnoreCase));
+
+    private static void SetCurrentBenchmarkSession(ModelBenchmarkCoordinator coordinator, ModelBenchmarkSession session)
+    {
+        var currentField = typeof(ModelBenchmarkCoordinator).GetField("current", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(currentField);
+        currentField!.SetValue(coordinator, session);
+    }
 
     private static FoundryCatalogSnapshot CreateFoundrySnapshot(FoundryAccelerationSnapshot? acceleration = null)
         => new(

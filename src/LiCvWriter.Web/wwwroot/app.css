@@ -138,6 +138,10 @@ a {
   width: 100%;
 }
 
+.sidebar-monitor-label-secondary {
+  margin-top: 0.15rem;
+}
+
 .monitor-details > summary {
   list-style: none;
   cursor: pointer;
@@ -167,22 +171,6 @@ a {
 
 .monitor-summary {
   min-height: 1.5rem;
-}
-
-.monitor-summary-badge {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 0.15rem 0.5rem;
-  border-radius: 0.4rem;
-  background: rgba(31, 41, 51, 0.06);
-}
-
-.monitor-summary-badge-live {
-  background: rgba(86, 163, 121, 0.18);
-  color: #2d6b4a;
 }
 
 .monitor-details[open] .crt-monitor {
@@ -227,6 +215,13 @@ a {
   border-radius: 1.05rem;
 }
 
+.sidebar-crt-screen-activity {
+  height: 8.3rem;
+  min-height: 8.3rem;
+  max-height: 8.3rem;
+  font-size: 0.61rem;
+}
+
 .crt-monitor-footer {
   display: flex;
   align-items: center;
@@ -266,40 +261,9 @@ a {
 }
 
 .sidebar-text,
-.activity-detail,
-.activity-time,
 .busy-detail {
   color: var(--muted);
   line-height: 1.5;
-}
-
-.activity-feed {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.activity-entry {
-  padding: 0.7rem 0.75rem;
-  border-radius: 0.9rem;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(31, 41, 51, 0.08);
-}
-
-.activity-busy {
-  border-color: rgba(191, 107, 57, 0.2);
-}
-
-.activity-success {
-  border-color: rgba(34, 139, 34, 0.18);
-}
-
-.activity-error {
-  border-color: rgba(136, 47, 30, 0.2);
-}
-
-.activity-message {
-  font-weight: 600;
 }
 
 .brand-kicker,
@@ -1737,6 +1701,12 @@ textarea.inline-edit-input {
     max-height: 10.4rem;
     font-size: 0.62rem;
     line-height: 1.3;
+  }
+
+  .sidebar-crt-screen-activity {
+    height: 7.6rem;
+    min-height: 7.6rem;
+    max-height: 7.6rem;
   }
 }
 

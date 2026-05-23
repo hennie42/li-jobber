@@ -32,7 +32,7 @@ public sealed record OllamaCapacityVerdict(
     LlmModelInfo? ModelInfo,
     DateTimeOffset MeasuredAtUtc)
 {
-    public static OllamaCapacityVerdict Unknown(string model, string reason)
-        => new(model, OllamaCapacityFit.Unknown, reason, Array.Empty<string>(),
+    public static OllamaCapacityVerdict Unknown(string model, string reason, IReadOnlyList<string>? notes = null)
+        => new(model, OllamaCapacityFit.Unknown, reason, notes ?? Array.Empty<string>(),
             null, null, null, null, null, null, null, DateTimeOffset.UtcNow);
 }

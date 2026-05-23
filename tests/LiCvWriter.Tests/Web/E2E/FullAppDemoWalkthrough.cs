@@ -171,8 +171,8 @@ public sealed class FullAppDemoWalkthrough(
         await GuideAsync(workbench.ReasoningMonitor, "Reasoning Monitor", "The companion monitor keeps current model activity visible.");
         await HoldAsync(LiveMonitorSceneMilliseconds);
 
-        await workbench.FocusActivityFeedAsync();
-        await GuideAsync(workbench.ActivityFeed, "Activity feed", "The activity feed records completed setup, analysis, and generation events.");
+        await workbench.FocusActivityMonitorAsync();
+        await GuideAsync(workbench.ActivityMonitor, "Activity Monitor", "The second CRT monitor keeps the current or latest workflow status visible without a tall scrolling activity list.");
         await HoldAsync(LiveMonitorSceneMilliseconds);
     }
 

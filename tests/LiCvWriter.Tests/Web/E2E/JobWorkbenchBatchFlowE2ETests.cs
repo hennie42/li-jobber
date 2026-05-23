@@ -37,7 +37,6 @@ public sealed class JobWorkbenchBatchFlowE2ETests(PlaywrightAppFixture fixture) 
                     async () =>
                     {
                         await workbench.GotoAsync();
-                        await CompanyNameMasker.StartAsync(page, seed.CompanyNames);
                         await Expect(workbench.SelectedJobCheckboxes).ToHaveCountAsync(0);
                         await workbench.SelectFirstJobSetsAsync(3);
                         await workbench.StartSelectedAsync();

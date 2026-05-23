@@ -21,7 +21,7 @@ public sealed class GuidedDemoWalkthrough(
     private const int BatchRunningSceneMilliseconds = 8_000;
     private const int StatusMonitorSceneMilliseconds = 26_000;
     private const int ReasoningMonitorSceneMilliseconds = 24_000;
-    private const int ActivityFeedSceneMilliseconds = 18_000;
+    private const int ActivityMonitorSceneMilliseconds = 18_000;
     private const int WorkbenchLabelsSceneMilliseconds = 18_000;
     private const int FinalReviewSceneMilliseconds = 5_000;
 
@@ -76,9 +76,9 @@ public sealed class GuidedDemoWalkthrough(
         await GuideAsync(workbench.ReasoningMonitor, "Reasoning Monitor", "The side monitor keeps the current model activity visible during the run.");
         await HoldAsync(ReasoningMonitorSceneMilliseconds);
 
-        await workbench.FocusActivityFeedAsync();
-        await GuideAsync(workbench.ActivityFeed, "Activity feed", "Completed steps are collected below the live monitors.");
-        await HoldAsync(ActivityFeedSceneMilliseconds);
+        await workbench.FocusActivityMonitorAsync();
+        await GuideAsync(workbench.ActivityMonitor, "Activity Monitor", "The second CRT monitor keeps live and latest operation status visible without bringing back a tall scrolling activity list.");
+        await HoldAsync(ActivityMonitorSceneMilliseconds);
 
         await workbench.ScrollWorkbenchToTopAsync();
         await GuideAsync(workbench.JobRowStatuses.First, "Workbench labels", "The rows and batch label show the live state without waiting for full completion.");

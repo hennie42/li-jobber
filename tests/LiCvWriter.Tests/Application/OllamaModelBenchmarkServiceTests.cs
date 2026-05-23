@@ -143,6 +143,36 @@ public sealed class OllamaModelBenchmarkServiceTests
     }
 
     [Fact]
+    public async Task RunSingleAsync_FoundryRuntimeFailure_UsesClassifiedReasonAndNotes()
+    {
+        var llmClient = new ScriptedLlmClient([
+            new LlmResponse("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
+                LoadDuration: TimeSpan.Zero,
+                PromptEvalDuration: TimeSpan.FromSeconds(0.1),
+                EvalDuration: TimeSpan.FromSeconds(1.0))
+        ])
+        {
+            ThrowOnCall = 2,
+            ExceptionToThrow = new FoundryRuntimeException(
+                FoundryRuntimeFailureKind.TensorRtEngineLoad,
+                "Foundry TensorRT engine load failed after a runtime reset retry.",
+                retryAttempted: true,
+                [@"If this keeps recurring, stop the app and reset the affected Foundry model variant under 'C:\Users\henri\.LI-CV-Writer\cache\models'."])
+        };
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+
+        var probe = new OllamaCapacityProbe(llmClient, Options);
+        var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
+
+        var result = await benchmark.RunSingleAsync("m:test");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Foundry TensorRT engine load failed after a runtime reset retry.", result.FailedReason);
+        Assert.Contains(result.Notes, static note => note.Contains(@"C:\Users\henri\.LI-CV-Writer\cache\models", StringComparison.Ordinal));
+        Assert.Equal(OllamaCapacityFit.Comfortable, result.Fit);
+    }
+
+    [Fact]
     public async Task RunSingleAsync_CancellationDuringQualityCall_PropagatesOperationCanceled()
     {
         var llmClient = new ScriptedLlmClient([
@@ -181,6 +211,7 @@ public sealed class OllamaModelBenchmarkServiceTests
         private int callIndex;
         public LlmRunningModel? Running { get; set; }
         public int ThrowOnCall { get; set; } = -1;
+        public Exception? ExceptionToThrow { get; set; }
 
         public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
         {
@@ -199,7 +230,7 @@ public sealed class OllamaModelBenchmarkServiceTests
             callIndex++;
             if (ThrowOnCall == callIndex)
             {
-                throw new InvalidOperationException("scripted failure");
+                throw ExceptionToThrow ?? new InvalidOperationException("scripted failure");
             }
 
             var responseIndex = Math.Min(callIndex - 1, responses.Length - 1);

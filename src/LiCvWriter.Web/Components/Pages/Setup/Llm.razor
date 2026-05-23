@@ -364,6 +364,48 @@
                     }
                 </div>
             }
+
+            @if (liveBenchmark.Results.Count > 0)
+            {
+                <section class="details-card benchmark-summary-shell stack-gap">
+                    <div class="benchmark-live-header">
+                        <div>
+                            <div class="field-label">Live results so far</div>
+                            <h3>@GetBenchmarkLiveResultsHeadline(liveBenchmark)</h3>
+                            <p class="muted-text">@GetBenchmarkLiveResultsDetail(liveBenchmark)</p>
+                        </div>
+                        <div class="status-chip status-pending">
+                            Live benchmark: @FormatProviderLabel(liveBenchmark.Provider) - @liveBenchmark.Results.Count of @liveBenchmark.TotalCount model(s) ranked
+                        </div>
+                    </div>
+                </section>
+
+                <table class="compact-grid setup-list-table">
+                    <thead>
+                        <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in liveBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
+                        {
+                            <tr class="@GetSetupListRowClass(item.index)">
+                                <td>@item.benchmarkRow.Rank</td>
+                                <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
+                                <td>@item.benchmarkRow.Model</td>
+                                <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.OverallScore.ToString("0.00") : "-")</td>
+                                <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.QualityScore.ToString("0.00") : "-")</td>
+                                <td>@(item.benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "-")</td>
+                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@(item.benchmarkRow.Succeeded ? item.benchmarkRow.Fit.ToString() : (item.benchmarkRow.FailedReason ?? "failed"))</td>
+                                <td>
+                                    @if (item.benchmarkRow.Succeeded && CanUseBenchmarkedModel(item.benchmarkRow))
+                                    {
+                                        <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(item.benchmarkRow)">Use</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
         </section>
     }
     else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
@@ -1192,6 +1234,12 @@
                 ? "Foundry models tagged as too large are removed only after their benchmark row is finalized."
                 : "Foundry cache cleanup is off for this run, so all benchmarked models stay available."
             : "Ollama installs and removals stay outside the app.";
+
+    private static string GetBenchmarkLiveResultsHeadline(ModelBenchmarkSession session)
+        => $"{session.Results.Count} of {session.TotalCount} model(s) have completed and been ranked so far.";
+
+    private static string GetBenchmarkLiveResultsDetail(ModelBenchmarkSession session)
+        => $"{CountSucceededBenchmarks(session)} usable result(s) are already visible and rerank after each completed model while the queue continues.";
 
     private static string GetBenchmarkSummaryHeadline(ModelBenchmarkSession session)
         => $"{CountSucceededBenchmarks(session)} of {session.Results.Count} model(s) produced usable benchmark results.";

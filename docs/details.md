@@ -59,7 +59,7 @@ graph TB
 | Concern | Primary files | Purpose |
 | --- | --- | --- |
 | Bootstrap | [Program.cs](../src/LiCvWriter.Web/Program.cs), [App.razor](../src/LiCvWriter.Web/Components/App.razor), [Routes.razor](../src/LiCvWriter.Web/Components/Routes.razor) | DI, routing, HTTP client configuration |
-| Shell | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [NavMenu.razor](../src/LiCvWriter.Web/Components/Layout/NavMenu.razor) | Floating navigation, dual CRT monitors, completed-activity sidebar |
+| Shell | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [NavMenu.razor](../src/LiCvWriter.Web/Components/Layout/NavMenu.razor) | Floating navigation, dual CRT reasoning/activity monitors |
 | Streaming transport | [Program.cs](../src/LiCvWriter.Web/Program.cs), [LlmOperationBroker.cs](../src/LiCvWriter.Web/Services/LlmOperationBroker.cs), [llm-stream.js](../src/LiCvWriter.Web/wwwroot/llm-stream.js) | Start/status/events/cancel endpoints, per-jobset operation broker, browser `EventSource` bridge |
 | Session state | [WorkspaceSession.cs](../src/LiCvWriter.Web/Services/WorkspaceSession.cs), [WorkspaceRecoveryStore.cs](../src/LiCvWriter.Web/Services/WorkspaceRecoveryStore.cs) | In-memory state container, recovery persistence |
 | Setup flow | [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor) | Ollama check, model selection, DMA import, differentiators |
@@ -71,7 +71,7 @@ graph TB
 | Document rendering | [MarkdownDocumentRenderer.cs](../src/LiCvWriter.Infrastructure/Documents/MarkdownDocumentRenderer.cs) | Shapes LLM output into structured Markdown with ATS sections |
 | Template export | [TemplateBasedDocumentExportService.cs](../src/LiCvWriter.Infrastructure/Documents/TemplateBasedDocumentExportService.cs), [CvMarkdownSectionExtractor.cs](../src/LiCvWriter.Infrastructure/Documents/CvMarkdownSectionExtractor.cs), [CvWordTemplateGenerator.cs](../src/LiCvWriter.Infrastructure/Documents/Templates/CvWordTemplateGenerator.cs), [TemplateContentPopulator.cs](../src/LiCvWriter.Infrastructure/Documents/Templates/TemplateContentPopulator.cs) | Template-based Word export with content controls |
 | LLM client | [OllamaClient.cs](../src/LiCvWriter.Infrastructure/Llm/OllamaClient.cs) | Streaming transport, chunk aggregation, repetition detection |
-| Operational status | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Sidebar telemetry feeds and recent activity |
+| Operational status | [MainLayout.razor](../src/LiCvWriter.Web/Components/Layout/MainLayout.razor), [OperationStatusService.cs](../src/LiCvWriter.Web/Services/OperationStatusService.cs) | Sidebar dual-monitor telemetry surfaces |
 
 ---
 
@@ -91,7 +91,7 @@ graph TB
     I --> J[workspace-recovery.json]
 ```
 
-The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, and completed-activity list in sync while long-running work streams in. Page-specific live status now stays in the page itself, such as the setup benchmark rail. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery. Long-running benchmark state is stored explicitly through `ModelBenchmarkSession`, including provider, phase, current fixture, and queue progress, so setup recovery does not have to infer benchmark state from generic activity strings.
+The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, Reasoning Monitor, and Activity Monitor in sync while long-running work streams in. Page-specific live status now stays in the page itself, such as the setup benchmark rail. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery. Long-running benchmark state is stored explicitly through `ModelBenchmarkSession`, including provider, phase, current fixture, and queue progress, so setup recovery does not have to infer benchmark state from generic activity strings.
 
 ---
 
@@ -1042,7 +1042,7 @@ graph LR
     A[Page actions + broker progress callbacks] --> B[OperationStatusService]
     B --> C[MainLayout.razor]
     C --> D[Reasoning monitor — live/last thinking text]
-    C --> F[Finished activity list — last 6 entries]
+    C --> F[Activity monitor — compact current/latest operation state]
     G[WorkspaceSession] --> H[Local recovery snapshot]
     I[LinkedInImportDiagnosticsFormatter] --> G
 ```
@@ -1062,13 +1062,14 @@ The telemetry model (`LlmOperationTelemetry`) carries:
 
 ### Sidebar And Activity Surfaces
 
-The shared sidebar keeps the reasoning monitor and the activity panel visible while pages render their own live status in-context when needed.
+The shared sidebar keeps the reasoning monitor and a second CRT-style activity monitor visible while pages render their own live status in-context when needed.
 
 | Monitor | Shows | Badge |
 | --- | --- | --- |
 | **Reasoning Monitor** | Auto-scrolling thinking text from current or last LLM operation | "Live feed" during streaming, "Last capture" after completion, "Standby" when idle |
+| **Activity Monitor** | Compact CRT-formatted current or latest operation state, detail, timestamp, and model/token hints when available | "Live model" for streamed work, "Working" for non-stream operations, "Latest step" or "Attention" after completion, "Standby" when idle |
 
-The **Activity Panel** below the monitor lists the last 6 completed activity entries with timestamps and durations.
+The activity monitor keeps the latest active or completed message in a shorter CRT surface so the sidebar preserves the old dual-monitor feel without bringing back a tall scrolling activity list.
 
 ### Current vs. Last Telemetry
 
@@ -1092,7 +1093,7 @@ When an LLM operation completes (`update.Completed = true`), `OperationStatusSer
 | Document rendering | `MarkdownDocumentRenderer.RenderAsync()` | No | Deterministic Markdown shaping |
 | Word export (CV) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based with content controls |
 | Word export (other) | `TemplateBasedDocumentExportService.ExportAsync()` | No | Template-based DOCX with content controls |
-| Operational status | `MainLayout.razor` and `OperationStatusService` | No | Shared sidebar for live summary and recent activity |
+| Operational status | `MainLayout.razor` and `OperationStatusService` | No | Shared sidebar for the Reasoning Monitor and Activity Monitor |
 
 ---
 

@@ -58,7 +58,8 @@ public sealed class OllamaModelBenchmarkService(
         }
         catch (Exception exception)
         {
-            return Failed(model, $"Capacity probe failed: {exception.Message}", stopwatch.Elapsed);
+            var failure = ClassifyFailure(exception, "Capacity probe failed");
+            return Failed(model, failure.Reason, stopwatch.Elapsed, notes: failure.Notes);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -140,7 +141,8 @@ public sealed class OllamaModelBenchmarkService(
         }
         catch (Exception exception)
         {
-            return Failed(model, $"Quality call failed: {exception.Message}", stopwatch.Elapsed, verdict);
+            var failure = ClassifyFailure(exception, "Quality call failed");
+            return Failed(model, failure.Reason, stopwatch.Elapsed, verdict, failure.Notes);
         }
 
         stopwatch.Stop();
@@ -198,7 +200,8 @@ public sealed class OllamaModelBenchmarkService(
         string model,
         string reason,
         TimeSpan? totalDuration = null,
-        OllamaCapacityVerdict? verdict = null)
+        OllamaCapacityVerdict? verdict = null,
+        IReadOnlyList<string>? notes = null)
         => new(
             Model: model,
             Rank: 0,
@@ -208,6 +211,29 @@ public sealed class OllamaModelBenchmarkService(
             LoadDuration: verdict?.LoadDuration,
             TotalDuration: totalDuration,
             Fit: verdict?.Fit ?? OllamaCapacityFit.Unknown,
-            Notes: verdict?.Notes ?? Array.Empty<string>(),
+            Notes: CombineNotes(verdict?.Notes, notes),
             FailedReason: reason);
+
+    private static (string Reason, IReadOnlyList<string> Notes) ClassifyFailure(Exception exception, string fallbackPrefix)
+        => exception is FoundryRuntimeException foundryException
+            ? (foundryException.Message, foundryException.Notes)
+            : ($"{fallbackPrefix}: {exception.Message}", Array.Empty<string>());
+
+    private static IReadOnlyList<string> CombineNotes(IReadOnlyList<string>? primary, IReadOnlyList<string>? additional)
+    {
+        var combined = new List<string>();
+        if (primary is { Count: > 0 })
+        {
+            combined.AddRange(primary.Where(static note => !string.IsNullOrWhiteSpace(note)));
+        }
+
+        if (additional is { Count: > 0 })
+        {
+            combined.AddRange(additional.Where(static note => !string.IsNullOrWhiteSpace(note)));
+        }
+
+        return combined.Count == 0
+            ? Array.Empty<string>()
+            : combined.Distinct(StringComparer.Ordinal).ToArray();
+    }
 }

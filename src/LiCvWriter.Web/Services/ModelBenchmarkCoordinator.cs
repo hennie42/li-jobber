@@ -279,6 +279,8 @@ public sealed class ModelBenchmarkCoordinator(
 
     private void UpdateProgress(string? currentModel, IReadOnlyList<ModelBenchmarkResult> partialResults, int completedCount, ModelBenchmarkProgress progress)
     {
+        var rankedPartialResults = RankResults(partialResults);
+
         lock (gate)
         {
             if (current is null)
@@ -290,7 +292,7 @@ public sealed class ModelBenchmarkCoordinator(
             {
                 CurrentModel = currentModel,
                 CompletedCount = completedCount,
-                Results = partialResults,
+                Results = rankedPartialResults,
                 CurrentPhase = progress.Phase,
                 CurrentDetail = progress.Detail,
                 CurrentFixtureId = progress.CurrentFixtureId,
