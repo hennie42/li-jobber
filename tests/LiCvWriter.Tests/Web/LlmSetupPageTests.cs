@@ -195,6 +195,7 @@ public sealed class LlmSetupPageTests
             sp.GetRequiredService<WorkspaceSession>(),
             sp.GetRequiredService<OperationStatusService>(),
             sp.GetRequiredService<OllamaOptions>(),
+                sp.GetRequiredService<FoundryOptions>(),
             sp.GetRequiredService<TimeProvider>()));
     }
 

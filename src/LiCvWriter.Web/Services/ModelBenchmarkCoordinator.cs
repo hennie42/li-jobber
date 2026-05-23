@@ -19,6 +19,7 @@ public sealed class ModelBenchmarkCoordinator(
     WorkspaceSession workspace,
     OperationStatusService operations,
     OllamaOptions ollamaOptions,
+    FoundryOptions foundryOptions,
     TimeProvider timeProvider)
 {
     private readonly object gate = new();
@@ -146,9 +147,10 @@ public sealed class ModelBenchmarkCoordinator(
             try
             {
                 using var scope = scopeFactory.CreateScope();
+                FoundryAccelerationSnapshot? foundryAcceleration = null;
                 if (provider == LlmProviderKind.Foundry)
                 {
-                    await EnsureFoundryModelReadyAsync(
+                    foundryAcceleration = await EnsureFoundryModelReadyAsync(
                         scope.ServiceProvider,
                         model,
                         index,
@@ -164,6 +166,11 @@ public sealed class ModelBenchmarkCoordinator(
                     progress => ReportLiveProgress(model, index, models.Count, results.ToArray(), progress),
                     effectiveToken);
                 result = result with { Provider = provider };
+
+                if (foundryAcceleration is not null)
+                {
+                    result = ApplyFoundryAccelerationNotes(result, foundryAcceleration);
+                }
 
                 if (provider == LlmProviderKind.Foundry)
                 {
@@ -348,7 +355,7 @@ public sealed class ModelBenchmarkCoordinator(
         return new OllamaModelBenchmarkService(capacityProbe, foundryClient, ollamaOptions);
     }
 
-    private async Task EnsureFoundryModelReadyAsync(
+    private async Task<FoundryAccelerationSnapshot> EnsureFoundryModelReadyAsync(
         IServiceProvider serviceProvider,
         string model,
         int index,
@@ -359,9 +366,11 @@ public sealed class ModelBenchmarkCoordinator(
     {
         var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
         var snapshot = await catalogClient.GetSnapshotAsync(cancellationToken);
+        snapshot = await EnsureFoundryAccelerationReadyAsync(catalogClient, model, index, totalCount, snapshot, progress, cancellationToken);
+
         if (snapshot.Availability.AvailableModels.Any(alias => alias.Equals(model, StringComparison.OrdinalIgnoreCase)))
         {
-            return;
+            return snapshot.Acceleration;
         }
 
         if (!downloadMissingModels)
@@ -385,6 +394,66 @@ public sealed class ModelBenchmarkCoordinator(
                 CompletedFixtureCount: 0,
                 TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count)),
             cancellationToken);
+
+        var refreshedSnapshot = await catalogClient.GetSnapshotAsync(cancellationToken);
+        return refreshedSnapshot.Acceleration;
+    }
+
+    private async Task<FoundryCatalogSnapshot> EnsureFoundryAccelerationReadyAsync(
+        IFoundryCatalogClient catalogClient,
+        string model,
+        int index,
+        int totalCount,
+        FoundryCatalogSnapshot snapshot,
+        Action<ModelBenchmarkProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!ShouldRegisterFoundryAcceleration(snapshot.Acceleration))
+        {
+            return snapshot;
+        }
+
+        progress?.Invoke(new ModelBenchmarkProgress(
+            Model: model,
+            Phase: ModelBenchmarkRunPhase.Preparing,
+            Detail: "Registering Windows ML execution providers before benchmark.",
+            CompletedFixtureCount: 0,
+            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count));
+
+        try
+        {
+            var preferredExecutionProviders = GetPreferredExecutionProviders();
+            var acceleration = await catalogClient.RegisterExecutionProvidersAsync(
+                preferredExecutionProviders.Count == 0 ? null : preferredExecutionProviders,
+                (providerName, registrationPercent) => progress?.Invoke(new ModelBenchmarkProgress(
+                    Model: model,
+                    Phase: ModelBenchmarkRunPhase.Preparing,
+                    Detail: string.IsNullOrWhiteSpace(providerName)
+                        ? $"Registering Windows ML execution providers: {registrationPercent:0.0}%"
+                        : $"Registering Windows ML provider '{providerName}': {registrationPercent:0.0}%",
+                    CompletedFixtureCount: 0,
+                    TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count)),
+                cancellationToken);
+
+            return snapshot with
+            {
+                Acceleration = acceleration,
+                CollectedAtUtc = timeProvider.GetUtcNow()
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            operations.Error($"Could not register Windows ML execution providers before benchmarking {model}.", exception.Message);
+            return snapshot with
+            {
+                Acceleration = FoundryAccelerationSnapshot.Unavailable($"Execution-provider registration failed before benchmark: {exception.Message}"),
+                CollectedAtUtc = timeProvider.GetUtcNow()
+            };
+        }
     }
 
     private async Task RemoveFoundryModelAsync(IServiceProvider serviceProvider, string model, CancellationToken cancellationToken)
@@ -455,6 +524,21 @@ public sealed class ModelBenchmarkCoordinator(
         => string.IsNullOrWhiteSpace(note)
             ? result
             : result with { Notes = [.. result.Notes, note] };
+
+    private static ModelBenchmarkResult ApplyFoundryAccelerationNotes(ModelBenchmarkResult result, FoundryAccelerationSnapshot acceleration)
+        => acceleration.Readiness == FoundryAccelerationReadiness.Ready
+            ? result
+            : AppendBenchmarkNote(result, $"Foundry acceleration during benchmark: {acceleration.GuidanceMessage}");
+
+    private static bool ShouldRegisterFoundryAcceleration(FoundryAccelerationSnapshot acceleration)
+        => acceleration.Readiness is FoundryAccelerationReadiness.NeedsRegistration or FoundryAccelerationReadiness.PartiallyReady;
+
+    private IReadOnlyList<string> GetPreferredExecutionProviders()
+        => foundryOptions.PreferredExecutionProviders
+            .Where(static providerName => !string.IsNullOrWhiteSpace(providerName))
+            .Select(static providerName => providerName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     private static bool ShouldRemoveFoundryModelAfterBenchmark(ModelBenchmarkResult result)
         => result.Fit == OllamaCapacityFit.TooLargeForInteractive;

@@ -251,7 +251,75 @@ public sealed class ModelBenchmarkCoordinatorTests
         Assert.Contains(result.Notes, note => note.Contains("could not be removed from the local Foundry cache", StringComparison.Ordinal));
     }
 
-    private static FoundryCatalogSnapshot CreateFoundrySnapshot(IReadOnlyList<string> cachedModels, bool isCached)
+    [Fact]
+    public async Task StartAsync_FoundryRun_WhenAccelerationNeedsRegistration_RegistersProvidersBeforeBenchmark()
+    {
+        var callSequence = new List<string>();
+        var degradedAcceleration = new FoundryAccelerationSnapshot(
+            IsSupported: true,
+            IsEnabled: true,
+            CanManageExecutionProviders: true,
+            StatusMessage: "Foundry Local discovered 2 Windows ML execution provider(s), but none are registered yet.",
+            ExecutionProviders:
+            [
+                new FoundryExecutionProviderInfo("dml", "DirectML", false),
+                new FoundryExecutionProviderInfo("cuda", "CUDA", false)
+            ],
+            CollectedAtUtc: DateTimeOffset.UtcNow);
+        var readyAcceleration = new FoundryAccelerationSnapshot(
+            IsSupported: true,
+            IsEnabled: true,
+            CanManageExecutionProviders: true,
+            StatusMessage: "Foundry Local reports all 2 Windows ML execution provider(s) registered.",
+            ExecutionProviders:
+            [
+                new FoundryExecutionProviderInfo("dml", "DirectML", true),
+                new FoundryExecutionProviderInfo("cuda", "CUDA", true)
+            ],
+            CollectedAtUtc: DateTimeOffset.UtcNow);
+
+        var foundryResponses = BuildPerfectResponses("phi-foundry", evalSeconds: 16.0);
+        var foundryBridge = new ScriptedFoundrySdkBridge(
+            foundryResponses,
+            ["phi-foundry"],
+            [new LlmRunningModel("phi-foundry", "phi-foundry", null, SizeVramBytes: 4_000_000_000, SizeBytes: 16_000_000_000, Provider: LlmProviderKind.Foundry)],
+            (_, invocation) => callSequence.Add(invocation == 1 ? "benchmark" : "benchmark-followup"));
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: ["phi-foundry"], isCached: true, acceleration: degradedAcceleration),
+            registeredAcceleration: readyAcceleration,
+            onRegister: providerNames =>
+            {
+                callSequence.Add("register");
+                Assert.NotNull(providerNames);
+                Assert.Contains("cuda", providerNames!, StringComparer.OrdinalIgnoreCase);
+            });
+        var foundryOptions = new FoundryOptions
+        {
+            DefaultModelAlias = "phi-foundry",
+            UseWindowsMlAcceleration = true,
+            PreferredExecutionProviders = ["cuda"]
+        };
+
+        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient, foundryOptions);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var registerIndex = callSequence.IndexOf("register");
+        var benchmarkIndex = callSequence.IndexOf("benchmark");
+
+        Assert.True(registerIndex >= 0, "Expected Foundry execution providers to be registered before benchmark.");
+        Assert.True(benchmarkIndex > registerIndex, "Expected provider registration to happen before Foundry generation.");
+        Assert.DoesNotContain(coordinator.Last!.Results.Single().Notes, note => note.Contains("Foundry acceleration during benchmark", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static FoundryCatalogSnapshot CreateFoundrySnapshot(
+        IReadOnlyList<string> cachedModels,
+        bool isCached,
+        FoundryAccelerationSnapshot? acceleration = null)
         => new(
             new LlmModelAvailability(
                 Version: "1.0.0",
@@ -261,16 +329,19 @@ public sealed class ModelBenchmarkCoordinatorTests
                 RunningModels: Array.Empty<LlmRunningModel>(),
                 Provider: LlmProviderKind.Foundry),
             [new FoundryCatalogModel("phi-foundry", "Phi Foundry", "phi-foundry", 1024, isCached, false)],
-            FoundryAccelerationSnapshot.Unsupported("Not available"),
+            acceleration ?? FoundryAccelerationSnapshot.Unsupported("Not available"),
             DateTimeOffset.UtcNow);
 
     private static (ModelBenchmarkCoordinator coordinator, WorkspaceSession workspace) BuildCoordinator(
         ILlmClient llmClient,
         IFoundrySdkBridge? foundryBridge = null,
-        IFoundryCatalogClient? foundryCatalogClient = null)
+        IFoundryCatalogClient? foundryCatalogClient = null,
+        FoundryOptions? foundryOptions = null)
     {
+        var resolvedFoundryOptions = foundryOptions ?? new FoundryOptions();
         var services = new ServiceCollection();
         services.AddSingleton(Options);
+        services.AddSingleton(resolvedFoundryOptions);
         services.AddSingleton(llmClient);
         services.AddSingleton<IFoundrySdkBridge>(foundryBridge ?? new ScriptedFoundrySdkBridge(Array.Empty<LlmResponse>(), Array.Empty<string>()));
         services.AddSingleton<IFoundryCatalogClient>(foundryCatalogClient ?? new ScriptedFoundryCatalogClient(
@@ -293,12 +364,13 @@ public sealed class ModelBenchmarkCoordinatorTests
             Options));
         var provider = services.BuildServiceProvider();
 
-        var workspace = new WorkspaceSession(Options, recoveryStore: null);
+        var workspace = new WorkspaceSession(Options, recoveryStore: null, foundryOptions: resolvedFoundryOptions);
         var coordinator = new ModelBenchmarkCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             workspace,
             new OperationStatusService(),
             Options,
+            resolvedFoundryOptions,
             TimeProvider.System);
 
         return (coordinator, workspace);
@@ -476,15 +548,24 @@ public sealed class ModelBenchmarkCoordinatorTests
 
     private sealed class RecordingFoundryCatalogClient(
         FoundryCatalogSnapshot snapshot,
+        FoundryAccelerationSnapshot? registeredAcceleration = null,
+        Action<IReadOnlyList<string>?>? onRegister = null,
         Action<string>? onDownload = null,
         Action<string>? onRemove = null,
         Exception? removeException = null) : IFoundryCatalogClient
     {
+        private FoundryAccelerationSnapshot currentAcceleration = snapshot.Acceleration;
+
         public Task<FoundryCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(snapshot);
+            => Task.FromResult(snapshot with { Acceleration = currentAcceleration, CollectedAtUtc = DateTimeOffset.UtcNow });
 
         public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
-            => Task.FromResult(snapshot.Acceleration);
+        {
+            onRegister?.Invoke(names);
+            progress?.Invoke(names?.FirstOrDefault() ?? "execution providers", 100.0);
+            currentAcceleration = registeredAcceleration ?? currentAcceleration;
+            return Task.FromResult(currentAcceleration);
+        }
 
         public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
         {
