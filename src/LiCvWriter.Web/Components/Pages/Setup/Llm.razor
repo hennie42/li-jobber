@@ -324,7 +324,7 @@
                     <h3>@GetBenchmarkLiveHeadline(liveBenchmark)</h3>
                     <p class="muted-text">@GetBenchmarkLiveDetail(liveBenchmark)</p>
                 </div>
-                <div class="benchmark-stage-pill">@GetBenchmarkStageLabel()</div>
+                <div class="benchmark-stage-pill">@GetBenchmarkStageLabel(liveBenchmark)</div>
             </div>
 
             <div class="benchmark-progress-track" aria-hidden="true">
@@ -335,7 +335,7 @@
                 <article class="benchmark-live-card">
                     <span class="benchmark-live-label">Current model</span>
                     <strong>@(liveBenchmark.CurrentModel ?? "Wrapping up")</strong>
-                    <div class="benchmark-live-detail">@GetBenchmarkOperationSummary()</div>
+                    <div class="benchmark-live-detail">@GetBenchmarkOperationSummary(liveBenchmark)</div>
                 </article>
                 <article class="benchmark-live-card">
                     <span class="benchmark-live-label">Queue progress</span>
@@ -1106,39 +1106,46 @@
             : $"{FormatProviderLabel(liveBenchmark.Provider)} benchmark is currently pressure-testing {liveBenchmark.CurrentModel}.";
 
     private string GetBenchmarkLiveDetail(ModelBenchmarkSession liveBenchmark)
-        => $"{liveBenchmark.CompletedCount} of {liveBenchmark.TotalCount} complete in {FormatElapsedTime(DateTimeOffset.UtcNow - liveBenchmark.StartedUtc)}. {GetBenchmarkOperationSummary()}";
+        => $"{liveBenchmark.CompletedCount} of {liveBenchmark.TotalCount} complete in {FormatElapsedTime(DateTimeOffset.UtcNow - liveBenchmark.StartedUtc)}. {GetBenchmarkOperationSummary(liveBenchmark)}";
 
-    private string GetBenchmarkStageLabel()
+    private static string GetBenchmarkStageLabel(ModelBenchmarkSession liveBenchmark)
     {
-        var statusText = $"{Operations.CurrentMessage} {Operations.CurrentDetail}";
-        if (statusText.Contains("Downloading model before benchmark", StringComparison.OrdinalIgnoreCase)
-            || statusText.Contains("Preparing ", StringComparison.OrdinalIgnoreCase))
+        return liveBenchmark.CurrentPhase switch
         {
-            return "Downloading";
-        }
-
-        if (statusText.Contains("Removing non-fitting model", StringComparison.OrdinalIgnoreCase)
-            || statusText.Contains("remove Foundry model", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Cleanup";
-        }
-
-        if (statusText.Contains("Registering Windows ML execution providers", StringComparison.OrdinalIgnoreCase))
-        {
-            return "Acceleration";
-        }
-
-        return statusText.Contains("Benchmarking ", StringComparison.OrdinalIgnoreCase)
-            ? "Benchmarking"
-            : "Working";
+            ModelBenchmarkRunPhase.Preparing => "Preparing",
+            ModelBenchmarkRunPhase.Warmup => "Warm-up",
+            ModelBenchmarkRunPhase.Evaluating => "Evaluating",
+            ModelBenchmarkRunPhase.Cleanup => "Cleanup",
+            ModelBenchmarkRunPhase.Finalizing => "Finalizing",
+            ModelBenchmarkRunPhase.Completed => "Completed",
+            ModelBenchmarkRunPhase.Cancelled => "Cancelled",
+            _ => "Working"
+        };
     }
 
-    private string GetBenchmarkOperationSummary()
-        => string.IsNullOrWhiteSpace(Operations.CurrentMessage)
+    private string GetBenchmarkOperationSummary(ModelBenchmarkSession liveBenchmark)
+    {
+        if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentFixtureDisplayName)
+            && liveBenchmark.TotalFixtureCount > 0
+            && liveBenchmark.CurrentPhase is ModelBenchmarkRunPhase.Evaluating or ModelBenchmarkRunPhase.Finalizing)
+        {
+            var fixtureOrdinal = liveBenchmark.CurrentFixtureNumber > 0
+                ? liveBenchmark.CurrentFixtureNumber
+                : Math.Min(liveBenchmark.CompletedFixtureCount + 1, liveBenchmark.TotalFixtureCount);
+            return $"Fixture {fixtureOrdinal}/{liveBenchmark.TotalFixtureCount}: {liveBenchmark.CurrentFixtureDisplayName}. {liveBenchmark.CurrentDetail}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentDetail))
+        {
+            return liveBenchmark.CurrentDetail;
+        }
+
+        return string.IsNullOrWhiteSpace(Operations.CurrentMessage)
             ? "Queue is moving through the selected models."
             : string.IsNullOrWhiteSpace(Operations.CurrentDetail)
                 ? Operations.CurrentMessage
                 : $"{Operations.CurrentMessage} {Operations.CurrentDetail}";
+    }
 
     private static string GetBenchmarkProgressStyle(ModelBenchmarkSession liveBenchmark)
         => $"width: {GetBenchmarkProgressPercent(liveBenchmark):0.##}%";
@@ -1156,6 +1163,14 @@
 
     private static string GetBenchmarkProgressCaption(ModelBenchmarkSession liveBenchmark)
     {
+        if (liveBenchmark.TotalFixtureCount > 0 && liveBenchmark.CurrentPhase == ModelBenchmarkRunPhase.Evaluating)
+        {
+            var fixtureOrdinal = liveBenchmark.CurrentFixtureNumber > 0
+                ? liveBenchmark.CurrentFixtureNumber
+                : Math.Min(liveBenchmark.CompletedFixtureCount + 1, liveBenchmark.TotalFixtureCount);
+            return $"Fixture {fixtureOrdinal}/{liveBenchmark.TotalFixtureCount} is in flight for the current model.";
+        }
+
         var remainingAfterCurrent = Math.Max(liveBenchmark.TotalCount - liveBenchmark.CompletedCount - (string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel) ? 0 : 1), 0);
         return string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel)
             ? "Final ranking and notes are being locked in."

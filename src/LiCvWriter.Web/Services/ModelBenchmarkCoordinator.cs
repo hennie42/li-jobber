@@ -80,7 +80,12 @@ public sealed class ModelBenchmarkCoordinator(
                 TotalCount: trimmed.Length,
                 CurrentModel: trimmed[0],
                 Results: Array.Empty<ModelBenchmarkResult>(),
-                Provider: provider);
+                Provider: provider)
+            {
+                CurrentPhase = ModelBenchmarkRunPhase.Preparing,
+                CurrentDetail = "Queue initialized for benchmark run.",
+                TotalFixtureCount = ModelBenchmarkFixtures.DefaultSuite.Count
+            };
         }
 
         Changed?.Invoke();
@@ -114,10 +119,17 @@ public sealed class ModelBenchmarkCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
 
             var model = models[index];
-            UpdateProgress(model, results.ToArray(), index);
-            operations.UpdateCurrent(
-                $"Benchmarking {model} ({index + 1}/{models.Count})",
-                "Capacity probe + JSON quality fixture…");
+            ReportLiveProgress(
+                model,
+                index,
+                models.Count,
+                results.ToArray(),
+                new ModelBenchmarkProgress(
+                    Model: model,
+                    Phase: ModelBenchmarkRunPhase.Preparing,
+                    Detail: "Queue slot reserved for benchmark run.",
+                    CompletedFixtureCount: 0,
+                    TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count));
 
             ModelBenchmarkResult result;
             using var perModelCts = perModelTimeoutSeconds > 0
@@ -142,15 +154,31 @@ public sealed class ModelBenchmarkCoordinator(
                         index,
                         models.Count,
                         downloadMissingModels,
+                        progress => ReportLiveProgress(model, index, models.Count, results.ToArray(), progress),
                         cancellationToken);
                 }
 
                 var benchmarkService = ResolveBenchmarkService(scope.ServiceProvider, provider);
-                result = await benchmarkService.RunSingleAsync(model, effectiveToken);
+                result = await benchmarkService.RunSingleAsync(
+                    model,
+                    progress => ReportLiveProgress(model, index, models.Count, results.ToArray(), progress),
+                    effectiveToken);
                 result = result with { Provider = provider };
 
                 if (provider == LlmProviderKind.Foundry)
                 {
+                    ReportLiveProgress(
+                        model,
+                        index,
+                        models.Count,
+                        results.ToArray(),
+                        new ModelBenchmarkProgress(
+                            Model: model,
+                            Phase: ModelBenchmarkRunPhase.Cleanup,
+                            Detail: "Applying Foundry cleanup and availability refresh.",
+                            CompletedFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
+                            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count));
+
                     result = await FinalizeFoundryBenchmarkResultAsync(
                         scope.ServiceProvider,
                         model,
@@ -178,7 +206,8 @@ public sealed class ModelBenchmarkCoordinator(
                     Fit: OllamaCapacityFit.Unknown,
                     Notes: Array.Empty<string>(),
                     FailedReason: $"Timed out after {perModelTimeoutSeconds}s.",
-                    Provider: provider);
+                    Provider: provider,
+                    FixtureResults: Array.Empty<ModelBenchmarkFixtureResult>());
             }
             catch (Exception exception)
             {
@@ -192,16 +221,24 @@ public sealed class ModelBenchmarkCoordinator(
                     TotalDuration: null,
                     Fit: OllamaCapacityFit.Unknown,
                     Notes: Array.Empty<string>(),
-                        FailedReason: exception.Message,
-                        Provider: provider);
+                    FailedReason: exception.Message,
+                    Provider: provider,
+                    FixtureResults: Array.Empty<ModelBenchmarkFixtureResult>());
             }
 
             results.Add(result);
             EmitPerModelActivity(result);
-            UpdateProgress(
+            ReportLiveProgress(
                 index + 1 < models.Count ? models[index + 1] : null,
+                index + 1,
+                models.Count,
                 results.ToArray(),
-                index + 1);
+                new ModelBenchmarkProgress(
+                    Model: model,
+                    Phase: ModelBenchmarkRunPhase.Finalizing,
+                    Detail: "Locking in partial rankings and moving to the next model.",
+                    CompletedFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
+                    TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count));
         }
 
         var ranked = RankResults(results);
@@ -214,7 +251,13 @@ public sealed class ModelBenchmarkCoordinator(
             TotalCount: models.Count,
             CurrentModel: null,
             Results: ranked,
-            Provider: provider);
+            Provider: provider)
+        {
+            CurrentPhase = cancelled ? ModelBenchmarkRunPhase.Cancelled : ModelBenchmarkRunPhase.Completed,
+            CurrentDetail = cancelled ? "Benchmark run cancelled." : "Benchmark run completed.",
+            CompletedFixtureCount = ModelBenchmarkFixtures.DefaultSuite.Count,
+            TotalFixtureCount = ModelBenchmarkFixtures.DefaultSuite.Count
+        };
 
         lock (gate)
         {
@@ -227,7 +270,7 @@ public sealed class ModelBenchmarkCoordinator(
         Changed?.Invoke();
     }
 
-    private void UpdateProgress(string? currentModel, IReadOnlyList<ModelBenchmarkResult> partialResults, int completedCount)
+    private void UpdateProgress(string? currentModel, IReadOnlyList<ModelBenchmarkResult> partialResults, int completedCount, ModelBenchmarkProgress progress)
     {
         lock (gate)
         {
@@ -240,12 +283,39 @@ public sealed class ModelBenchmarkCoordinator(
             {
                 CurrentModel = currentModel,
                 CompletedCount = completedCount,
-                Results = partialResults
+                Results = partialResults,
+                CurrentPhase = progress.Phase,
+                CurrentDetail = progress.Detail,
+                CurrentFixtureId = progress.CurrentFixtureId,
+                CurrentFixtureDisplayName = progress.CurrentFixtureDisplayName,
+                CurrentPromptId = progress.CurrentPromptId,
+                CurrentFixtureNumber = progress.CurrentFixtureNumber,
+                CompletedFixtureCount = progress.CompletedFixtureCount,
+                TotalFixtureCount = progress.TotalFixtureCount
             };
         }
 
         Changed?.Invoke();
     }
+
+    private void ReportLiveProgress(
+        string? currentModel,
+        int completedCount,
+        int totalCount,
+        IReadOnlyList<ModelBenchmarkResult> partialResults,
+        ModelBenchmarkProgress progress)
+    {
+        UpdateProgress(currentModel, partialResults, completedCount, progress);
+        operations.UpdateCurrent(GetProgressMessage(currentModel ?? progress.Model, completedCount, totalCount, progress), progress.Detail);
+    }
+
+    private static string GetProgressMessage(string model, int completedCount, int totalCount, ModelBenchmarkProgress progress)
+        => progress.Phase switch
+        {
+            ModelBenchmarkRunPhase.Preparing => $"Preparing {model} ({completedCount + 1}/{totalCount})",
+            ModelBenchmarkRunPhase.Cleanup => $"Cleaning up {model} ({completedCount + 1}/{totalCount})",
+            _ => $"Benchmarking {model} ({completedCount + 1}/{totalCount})"
+        };
 
     private void EmitPerModelActivity(ModelBenchmarkResult result)
     {
@@ -284,6 +354,7 @@ public sealed class ModelBenchmarkCoordinator(
         int index,
         int totalCount,
         bool downloadMissingModels,
+        Action<ModelBenchmarkProgress>? progress,
         CancellationToken cancellationToken)
     {
         var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
@@ -298,15 +369,21 @@ public sealed class ModelBenchmarkCoordinator(
             throw new InvalidOperationException($"The Foundry model '{model}' is not cached locally. Download it first or run benchmark with download enabled.");
         }
 
-        operations.UpdateCurrent(
-            $"Preparing {model} ({index + 1}/{totalCount})",
-            "Downloading model before benchmark…");
+        progress?.Invoke(new ModelBenchmarkProgress(
+            Model: model,
+            Phase: ModelBenchmarkRunPhase.Preparing,
+            Detail: "Downloading model before benchmark.",
+            CompletedFixtureCount: 0,
+            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count));
 
         await catalogClient.DownloadModelAsync(
             model,
-            progress => operations.UpdateCurrent(
-                $"Preparing {model} ({index + 1}/{totalCount})",
-                $"Downloading model before benchmark: {progress:0.0}%"),
+            downloadPercent => progress?.Invoke(new ModelBenchmarkProgress(
+                Model: model,
+                Phase: ModelBenchmarkRunPhase.Preparing,
+                Detail: $"Downloading model before benchmark: {downloadPercent:0.0}%",
+                CompletedFixtureCount: 0,
+                TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count)),
             cancellationToken);
     }
 

@@ -96,6 +96,31 @@ public sealed class ModelBenchmarkCoordinatorTests
     }
 
     [Fact]
+    public async Task StartAsync_WhenRunningBenchmark_PublishesTypedFixtureProgress()
+    {
+        var llmClient = new ScriptedLlmClient(BuildPerfectResponses("a"));
+        var (coordinator, _) = BuildCoordinator(llmClient);
+        var observedSessions = new List<ModelBenchmarkSession>();
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { IsRunning: true } current)
+            {
+                observedSessions.Add(current);
+            }
+        };
+
+        await coordinator.StartAsync(["a"]);
+
+        Assert.Contains(observedSessions, session => session.CurrentPhase == ModelBenchmarkRunPhase.Warmup);
+        Assert.Contains(observedSessions, session => session.CurrentPhase == ModelBenchmarkRunPhase.Evaluating);
+        Assert.Contains(observedSessions, session => session.CurrentFixtureDisplayName == ModelBenchmarkFixtures.FixtureDisplayName);
+        Assert.Contains(observedSessions, session => session.TotalFixtureCount == ModelBenchmarkFixtures.DefaultSuite.Count);
+        Assert.Equal(ModelBenchmarkRunPhase.Completed, coordinator.Last!.CurrentPhase);
+        Assert.Equal(ModelBenchmarkFixtures.DefaultSuite.Count, coordinator.Last.TotalFixtureCount);
+    }
+
+    [Fact]
     public async Task StartAsync_WhileAnotherRunActive_Throws()
     {
         var releaseFirst = new TaskCompletionSource();
@@ -281,13 +306,26 @@ public sealed class ModelBenchmarkCoordinatorTests
 
     private static LlmResponse[] BuildPerfectResponses(string model, double evalSeconds = 1.0)
     {
-        var perfectJson = """
+                var perfectJobExtractJson = """
             {
               "roleTitle": "Senior Backend Engineer",
               "companyName": "Acme Robotics",
               "mustHaveThemes": ["go", "kubernetes", "distributed systems"]
             }
             """;
+                var perfectCompanyJson = """
+                        {
+                            "name": "Nordic Cloud Guild",
+                            "guidingPrinciples": ["trust", "mentoring", "pragmatic delivery"],
+                            "differentiators": ["knowledge sharing", "platform modernization"]
+                        }
+                        """;
+                var perfectTechnologyGapJson = """
+                        {
+                            "detectedTechnologies": ["RAG", "vector search", "Kubernetes", "LLM evaluation"],
+                            "possiblyUnderrepresentedTechnologies": ["Kubernetes", "LLM evaluation"]
+                        }
+                        """;
         return
         [
             // Warm-up call.
@@ -295,8 +333,9 @@ public sealed class ModelBenchmarkCoordinatorTests
                 LoadDuration: TimeSpan.Zero,
                 PromptEvalDuration: TimeSpan.FromSeconds(0.1),
                 EvalDuration: TimeSpan.FromSeconds(evalSeconds)),
-            // Quality call.
-            new LlmResponse(model, perfectJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
+                        new LlmResponse(model, perfectJobExtractJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+                        new LlmResponse(model, perfectCompanyJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+                        new LlmResponse(model, perfectTechnologyGapJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
         ];
     }
 

@@ -54,7 +54,13 @@ public sealed class WorkspaceSessionRecoveryTests
                 CompletedCount: 1,
                 TotalCount: 1,
                 CurrentModel: null,
-                Results: [result]);
+                Results: [result])
+            {
+                CurrentPhase = ModelBenchmarkRunPhase.Completed,
+                CurrentDetail = "Benchmark run completed.",
+                CompletedFixtureCount = 3,
+                TotalFixtureCount = 3
+            };
 
             session.SetLastBenchmarkSession(benchmarkSession);
 
@@ -72,6 +78,8 @@ public sealed class WorkspaceSessionRecoveryTests
             Assert.Null(rehydratedResult.FailedReason);
             Assert.Single(rehydratedResult.FixtureResults);
             Assert.Equal(ModelBenchmarkFixtures.FixtureId, rehydratedResult.FixtureResults[0].FixtureId);
+            Assert.Equal(ModelBenchmarkRunPhase.Completed, rehydrated.LastBenchmarkSession.CurrentPhase);
+            Assert.Equal(3, rehydrated.LastBenchmarkSession.TotalFixtureCount);
         }
         finally
         {

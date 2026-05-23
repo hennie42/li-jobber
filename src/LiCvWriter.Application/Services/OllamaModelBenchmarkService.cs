@@ -24,12 +24,27 @@ public sealed class OllamaModelBenchmarkService(
     private const double QualityWeight = 0.6;
     private const double SpeedWeight = 0.4;
 
-    public async Task<ModelBenchmarkResult> RunSingleAsync(string model, CancellationToken cancellationToken = default)
+    public Task<ModelBenchmarkResult> RunSingleAsync(string model, CancellationToken cancellationToken = default)
+        => RunSingleCoreAsync(model, progress: null, cancellationToken);
+
+    public Task<ModelBenchmarkResult> RunSingleAsync(
+        string model,
+        Action<ModelBenchmarkProgress> progress,
+        CancellationToken cancellationToken = default)
+        => RunSingleCoreAsync(model, progress, cancellationToken);
+
+    private async Task<ModelBenchmarkResult> RunSingleCoreAsync(
+        string model,
+        Action<ModelBenchmarkProgress>? progress,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(model))
         {
             return Failed(model ?? string.Empty, "Empty model name.");
         }
+
+        var totalFixtures = ModelBenchmarkFixtures.DefaultSuite.Count;
+        ReportProgress(progress, model, ModelBenchmarkRunPhase.Warmup, "Measuring load time and decode speed.", 0, totalFixtures);
 
         var stopwatch = Stopwatch.StartNew();
         OllamaCapacityVerdict verdict;
@@ -65,14 +80,24 @@ public sealed class OllamaModelBenchmarkService(
         try
         {
             var scoredFixtures = new List<ModelBenchmarkFixtureResult>(ModelBenchmarkFixtures.DefaultSuite.Count);
-            foreach (var fixture in ModelBenchmarkFixtures.DefaultSuite)
+            foreach (var item in ModelBenchmarkFixtures.DefaultSuite.Select((fixture, index) => new { fixture, index }))
             {
+                ReportProgress(
+                    progress,
+                    model,
+                    ModelBenchmarkRunPhase.Evaluating,
+                    $"Running fixture {item.index + 1} of {totalFixtures}: {item.fixture.DisplayName}.",
+                    item.index,
+                    totalFixtures,
+                    item.index + 1,
+                    item.fixture);
+
                 var fixtureRequest = qualityRequest with
                 {
-                    SystemPrompt = fixture.SystemPrompt,
-                    Messages = [new LlmChatMessage("user", fixture.UserPrompt)],
-                    ResponseFormat = fixture.ResponseFormat,
-                    PromptId = fixture.PromptId,
+                    SystemPrompt = item.fixture.SystemPrompt,
+                    Messages = [new LlmChatMessage("user", item.fixture.UserPrompt)],
+                    ResponseFormat = item.fixture.ResponseFormat,
+                    PromptId = item.fixture.PromptId,
                     PromptVersion = LlmPromptCatalog.Version1
                 };
 
@@ -83,12 +108,22 @@ public sealed class OllamaModelBenchmarkService(
                     cancellationToken);
 
                 var scoredFixture = invocation.Attempts
-                    .Select(attempt => ModelBenchmarkFixtures.Evaluate(fixture, attempt.RawContent))
+                    .Select(attempt => ModelBenchmarkFixtures.Evaluate(item.fixture, attempt.RawContent))
                     .OrderByDescending(static result => result.Score)
                     .FirstOrDefault()
-                    ?? ModelBenchmarkFixtures.Evaluate(fixture, candidateJson: null);
+                    ?? ModelBenchmarkFixtures.Evaluate(item.fixture, candidateJson: null);
 
                 scoredFixtures.Add(scoredFixture);
+
+                ReportProgress(
+                    progress,
+                    model,
+                    ModelBenchmarkRunPhase.Evaluating,
+                    $"Completed fixture {item.index + 1} of {totalFixtures}: {item.fixture.DisplayName}.",
+                    item.index + 1,
+                    totalFixtures,
+                    item.index + 1,
+                    item.fixture);
             }
 
             fixtureResults = scoredFixtures;
@@ -96,6 +131,8 @@ public sealed class OllamaModelBenchmarkService(
             qualityScore = totalWeight <= 0.0
                 ? 0.0
                 : fixtureResults.Sum(static result => result.WeightedScore) / totalWeight;
+
+            ReportProgress(progress, model, ModelBenchmarkRunPhase.Finalizing, "Combining weighted fixture results.", totalFixtures, totalFixtures);
         }
         catch (OperationCanceledException)
         {
@@ -124,6 +161,28 @@ public sealed class OllamaModelBenchmarkService(
                 FailedReason: null,
                 FixtureResults: fixtureResults);
     }
+
+        private static void ReportProgress(
+            Action<ModelBenchmarkProgress>? progress,
+            string model,
+            ModelBenchmarkRunPhase phase,
+            string detail,
+            int completedFixtureCount,
+            int totalFixtureCount,
+            int currentFixtureNumber = 0,
+            ModelBenchmarkFixtureDefinition? fixture = null)
+        {
+            progress?.Invoke(new ModelBenchmarkProgress(
+                Model: model,
+                Phase: phase,
+                Detail: detail,
+                CompletedFixtureCount: completedFixtureCount,
+                TotalFixtureCount: totalFixtureCount,
+                CurrentFixtureNumber: currentFixtureNumber,
+                CurrentFixtureId: fixture?.FixtureId,
+                CurrentFixtureDisplayName: fixture?.DisplayName,
+                CurrentPromptId: fixture?.PromptId));
+        }
 
     private static double NormalizeSpeed(double? decodeTokensPerSecond)
     {
