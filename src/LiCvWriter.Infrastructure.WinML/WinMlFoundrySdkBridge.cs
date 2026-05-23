@@ -272,9 +272,14 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         {
             var executionProviders = MapExecutionProviders(discoverMethod.Invoke(manager, null) as IEnumerable);
             var registeredCount = executionProviders.Count(static executionProvider => executionProvider.IsRegistered);
-            var statusMessage = executionProviders.Count == 0
-                ? "No Windows ML execution providers were reported by Foundry Local."
-                : $"Foundry Local reports {registeredCount}/{executionProviders.Count} Windows ML execution provider(s) registered.";
+            var discoveredCount = executionProviders.Count;
+            var statusMessage = discoveredCount switch
+            {
+                0 => "No Windows ML execution providers were reported by Foundry Local.",
+                _ when registeredCount == 0 => $"Foundry Local discovered {discoveredCount} Windows ML execution provider(s), but none are registered yet.",
+                _ when registeredCount < discoveredCount => $"Foundry Local reports {registeredCount}/{discoveredCount} Windows ML execution provider(s) registered.",
+                _ => $"Foundry Local reports all {discoveredCount} Windows ML execution provider(s) registered."
+            };
 
             return new FoundryAccelerationSnapshot(
                 true,

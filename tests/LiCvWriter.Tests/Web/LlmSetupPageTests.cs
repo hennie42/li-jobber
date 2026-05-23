@@ -153,6 +153,28 @@ public sealed class LlmSetupPageTests
         Assert.True(removalCheckbox!.HasAttribute("checked"));
     }
 
+    [Fact]
+    public void Render_WhenFoundryExecutionProvidersNeedRegistration_ShowsAccelerationGuidance()
+    {
+        using var context = new BunitContext();
+        var ollamaOptions = new OllamaOptions { Model = "phi", Think = "medium" };
+        var workspace = new WorkspaceSession(ollamaOptions, foundryOptions: new FoundryOptions { DefaultModelAlias = "phi-foundry" });
+        workspace.SetFoundryAvailability(CreateFoundrySnapshot(CreateUnregisteredAccelerationSnapshot()).Availability);
+        workspace.SetLlmProviderSelection(LlmProviderKind.Foundry);
+
+        RegisterCommonServices(
+            context.Services,
+            workspace,
+            ollamaOptions,
+            new StubLlmClient(),
+            new StubFoundryCatalogClient(CreateFoundrySnapshot(CreateUnregisteredAccelerationSnapshot())));
+
+        var cut = context.Render<LlmSetupPage>();
+
+        cut.WaitForAssertion(() => Assert.Contains("Execution providers are discovered but none are registered yet.", cut.Markup));
+        Assert.Contains("Foundry Local discovered 2 Windows ML execution provider(s), but none are registered yet.", cut.Markup);
+    }
+
     private static void RegisterCommonServices(
         IServiceCollection services,
         WorkspaceSession workspace,
@@ -179,7 +201,7 @@ public sealed class LlmSetupPageTests
     private static IElement FindButton(IRenderedComponent<LlmSetupPage> cut, string label)
         => cut.FindAll("button").Single(button => button.TextContent.Contains(label, StringComparison.OrdinalIgnoreCase));
 
-    private static FoundryCatalogSnapshot CreateFoundrySnapshot()
+    private static FoundryCatalogSnapshot CreateFoundrySnapshot(FoundryAccelerationSnapshot? acceleration = null)
         => new(
             new LlmModelAvailability(
                 Version: "1.0.0",
@@ -192,8 +214,21 @@ public sealed class LlmSetupPageTests
                 new FoundryCatalogModel("phi-foundry", "Phi Foundry", "phi-foundry", 1024, false, false, "Lightweight reasoning and chat tasks."),
                 new FoundryCatalogModel("mistral-foundry", "Mistral Foundry", "mistral-foundry", 2048, true, false, "Balanced general-purpose local assistant.")
             ],
-            FoundryAccelerationSnapshot.Unsupported("Not available"),
+            acceleration ?? FoundryAccelerationSnapshot.Unsupported("Not available"),
             DateTimeOffset.UtcNow);
+
+    private static FoundryAccelerationSnapshot CreateUnregisteredAccelerationSnapshot()
+        => new(
+            IsSupported: true,
+            IsEnabled: true,
+            CanManageExecutionProviders: true,
+            StatusMessage: "Foundry Local discovered 2 Windows ML execution provider(s), but none are registered yet.",
+            ExecutionProviders:
+            [
+                new FoundryExecutionProviderInfo("dml", "DirectML", false),
+                new FoundryExecutionProviderInfo("cuda", "CUDA", false)
+            ],
+            CollectedAtUtc: DateTimeOffset.UtcNow);
 
     private sealed class StubLlmClient : ILlmClient
     {

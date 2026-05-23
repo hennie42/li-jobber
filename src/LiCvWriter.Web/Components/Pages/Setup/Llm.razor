@@ -1234,15 +1234,7 @@
             return "This runtime path does not expose Windows ML acceleration details, so expect more generic local-runtime behavior than the WinML path can provide.";
         }
 
-        var registeredCount = acceleration.ExecutionProviders.Count(static executionProvider => executionProvider.IsRegistered);
-        if (registeredCount == 0 && acceleration.CanManageExecutionProviders)
-        {
-            return "No execution providers are registered yet. Foundry can fall back to a weaker CPU-style path, which often makes a good model look disappointing.";
-        }
-
-        return registeredCount == 0
-            ? acceleration.StatusMessage
-            : $"{registeredCount} execution provider(s) are registered. Benchmarks should reflect the best compatible hardware path the local runtime can actually use on this machine.";
+        return acceleration.GuidanceMessage;
     }
 
     private static string GetFoundryAliasGuidance()
@@ -1268,11 +1260,14 @@
             : "n/a";
 
     private static string GetFoundryAccelerationChipClass(FoundryAccelerationSnapshot acceleration)
-        => acceleration.CanManageExecutionProviders
-            ? "status-ok"
-            : acceleration.IsSupported && acceleration.IsEnabled
-                ? "status-pending"
-                : "status-neutral";
+        => acceleration.Readiness switch
+        {
+            FoundryAccelerationReadiness.Ready => "status-ok",
+            FoundryAccelerationReadiness.PartiallyReady => "status-pending",
+            FoundryAccelerationReadiness.NeedsRegistration => "status-pending",
+            FoundryAccelerationReadiness.Unavailable => "status-warning",
+            _ => "status-neutral"
+        };
 
     private static bool ShouldShowFoundryAccelerationSection(FoundryAccelerationSnapshot acceleration)
         => OperatingSystem.IsWindows() || acceleration.IsSupported;
