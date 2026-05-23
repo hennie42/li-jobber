@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using static Microsoft.Playwright.Assertions;
+using Xunit.Sdk;
 
 namespace LiCvWriter.Tests.Web.E2E;
 
@@ -123,6 +124,12 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         return await row.InnerTextAsync();
     }
 
+    public async Task<string> GetBenchmarkDiagnosticsAsync()
+    {
+        var bodyText = await page.Locator("body").InnerTextAsync();
+        return await BuildBenchmarkDiagnosticsAsync(bodyText);
+    }
+
     public async Task<IReadOnlyList<string>> GetVisibleAliasesAsync()
     {
         var aliasCells = page.Locator(".setup-list-table tbody tr td:nth-child(3)");
@@ -138,7 +145,69 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
     public async Task AssertNoDisposedRuntimeErrorsAsync()
     {
         var bodyText = await page.Locator("body").InnerTextAsync();
-        Assert.DoesNotContain("Cannot access a disposed object", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("SemaphoreSlim", bodyText, StringComparison.OrdinalIgnoreCase);
+        if (bodyText.Contains("Cannot access a disposed object", StringComparison.OrdinalIgnoreCase)
+            || bodyText.Contains("SemaphoreSlim", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new XunitException(await BuildBenchmarkDiagnosticsAsync(bodyText));
+        }
     }
+
+    private async Task<string> BuildBenchmarkDiagnosticsAsync(string bodyText)
+    {
+        var benchmarkRows = await GetBenchmarkRowsAsync();
+        var diagnostics = new List<string>
+        {
+            "Disposed runtime text surfaced on the Setup / LLM page."
+        };
+
+        if (TryExtractQueueProgress(bodyText) is { } queueProgress)
+        {
+            diagnostics.Add($"Queue progress: {queueProgress}");
+        }
+
+        if (benchmarkRows.Count > 0)
+        {
+            diagnostics.Add("Benchmark rows:");
+            diagnostics.AddRange(benchmarkRows.Select(static row => $"- {row}"));
+        }
+
+        diagnostics.Add($"Body excerpt: {ExtractDisposedErrorExcerpt(bodyText)}");
+        return string.Join(Environment.NewLine, diagnostics);
+    }
+
+    private async Task<IReadOnlyList<string>> GetBenchmarkRowsAsync()
+    {
+        var rows = await page.Locator(".benchmark-summary-shell + table tbody tr").AllInnerTextsAsync();
+        return rows
+            .Select(FlattenWhitespace)
+            .Where(static row => !string.IsNullOrWhiteSpace(row))
+            .ToArray();
+    }
+
+    private static string? TryExtractQueueProgress(string bodyText)
+    {
+        var match = Regex.Match(bodyText, "\\b\\d+\\s*/\\s*\\d+\\s+complete\\b", RegexOptions.IgnoreCase);
+        return match.Success ? FlattenWhitespace(match.Value) : null;
+    }
+
+    private static string ExtractDisposedErrorExcerpt(string bodyText)
+    {
+        var markerIndex = bodyText.IndexOf("Cannot access a disposed object", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            markerIndex = bodyText.IndexOf("SemaphoreSlim", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (markerIndex < 0)
+        {
+            return FlattenWhitespace(bodyText);
+        }
+
+        var start = Math.Max(0, markerIndex - 120);
+        var length = Math.Min(bodyText.Length - start, 320);
+        return FlattenWhitespace(bodyText.Substring(start, length));
+    }
+
+    private static string FlattenWhitespace(string value)
+        => Regex.Replace(value, "\\s+", " ").Trim();
 }

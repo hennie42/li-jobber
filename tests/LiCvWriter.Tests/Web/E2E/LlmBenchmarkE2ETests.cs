@@ -1,4 +1,5 @@
 using Microsoft.Playwright;
+using Xunit.Sdk;
 
 namespace LiCvWriter.Tests.Web.E2E;
 
@@ -44,10 +45,10 @@ public sealed class LlmBenchmarkE2ETests(PlaywrightAppFixture fixture) : IClassF
             }, TimeSpan.FromMinutes(6));
 
             var mini4kRow = await setupPage.GetBenchmarkRowTextAsync("phi-3-mini-4k");
+            var benchmarkDiagnostics = await setupPage.GetBenchmarkDiagnosticsAsync();
 
             await setupPage.AssertNoDisposedRuntimeErrorsAsync();
-            Assert.DoesNotContain("SemaphoreSlim", mini4kRow, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("disposed object", mini4kRow, StringComparison.OrdinalIgnoreCase);
+            AssertRowDoesNotContainDisposedRuntimeText("phi-3-mini-4k", mini4kRow, benchmarkDiagnostics);
         }
         finally
         {
@@ -64,6 +65,18 @@ public sealed class LlmBenchmarkE2ETests(PlaywrightAppFixture fixture) : IClassF
         catch (TimeoutException exception)
         {
             throw new TimeoutException($"Playwright benchmark stage '{stage}' exceeded {timeout}.", exception);
+        }
+    }
+
+    private static void AssertRowDoesNotContainDisposedRuntimeText(string alias, string rowText, string benchmarkDiagnostics)
+    {
+        if (rowText.Contains("SemaphoreSlim", StringComparison.OrdinalIgnoreCase)
+            || rowText.Contains("disposed object", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new XunitException(
+                $"Benchmark row for '{alias}' contains disposed-runtime text.{Environment.NewLine}"
+                + $"Row: {rowText}{Environment.NewLine}"
+                + benchmarkDiagnostics);
         }
     }
 }
