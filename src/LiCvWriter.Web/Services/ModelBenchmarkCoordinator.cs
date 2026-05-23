@@ -392,7 +392,7 @@ public sealed class ModelBenchmarkCoordinator(
             downloadPercent => progress?.Invoke(new ModelBenchmarkProgress(
                 Model: model,
                 Phase: ModelBenchmarkRunPhase.Preparing,
-                Detail: $"Downloading model before benchmark: {downloadPercent:0.0}%",
+                Detail: FoundryProgressFormatter.FormatDetail("Downloading model before benchmark", downloadPercent),
                 CompletedFixtureCount: 0,
                 TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count)),
             cancellationToken);
@@ -430,9 +430,11 @@ public sealed class ModelBenchmarkCoordinator(
                 (providerName, registrationPercent) => progress?.Invoke(new ModelBenchmarkProgress(
                     Model: model,
                     Phase: ModelBenchmarkRunPhase.Preparing,
-                    Detail: string.IsNullOrWhiteSpace(providerName)
-                        ? $"Registering Windows ML execution providers: {registrationPercent:0.0}%"
-                        : $"Registering Windows ML provider '{providerName}': {registrationPercent:0.0}%",
+                    Detail: FoundryProgressFormatter.FormatDetail(
+                        string.IsNullOrWhiteSpace(providerName)
+                            ? "Registering Windows ML execution providers"
+                            : $"Registering Windows ML provider '{providerName}'",
+                        registrationPercent),
                     CompletedFixtureCount: 0,
                     TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count)),
                 cancellationToken);

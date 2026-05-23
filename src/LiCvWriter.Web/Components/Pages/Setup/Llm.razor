@@ -769,7 +769,7 @@
                         alias,
                         progress => Operations.UpdateCurrent(
                             "Downloading Foundry models",
-                            $"{alias} ({index + 1}/{selectedAliases.Count}): {progress:0.0}%")));
+                            FoundryProgressFormatter.FormatDetail($"{alias} ({index + 1}/{selectedAliases.Count})", progress))));
             }
 
             await RefreshFoundrySnapshotAsync();
@@ -813,7 +813,7 @@
                     providerNames,
                     (providerName, percent) => Operations.UpdateCurrent(
                         "Registering Windows ML execution providers",
-                        $"{providerName}: {percent:0.0}%")));
+                        FoundryProgressFormatter.FormatDetail(providerName, percent))));
 
             await RefreshFoundrySnapshotAsync();
             Operations.Success(
@@ -1354,7 +1354,7 @@
                 preferredProviders,
                 (providerName, percent) => Operations.UpdateCurrent(
                     "Registering Windows ML execution providers",
-                    $"{providerName}: {percent:0.0}%")));
+                    FoundryProgressFormatter.FormatDetail(providerName, percent))));
 
         await RefreshFoundrySnapshotAsync();
         return true;
