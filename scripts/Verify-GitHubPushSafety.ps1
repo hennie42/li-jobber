@@ -86,8 +86,57 @@ function Should-IgnoreAllowedPersonalDataFinding {
 
     $allowedHolder = ('Hen' + 'rik') + ' ' + ('Nie' + 'mann')
     $allowedLine = "Copyright (c) 2026 $allowedHolder. All rights reserved."
+    $allowedDemoUrl = ('https://' + ('hen' + 'nie' + '42') + '.github.io/li-jobber/playwright-demo.html')
 
-    return $Finding.Path -eq 'LICENSE' -and $Finding.Line -eq $allowedLine
+    if ($Finding.Path -eq 'LICENSE' -and $Finding.Line -eq $allowedLine) {
+        return $true
+    }
+
+    return $Finding.Type -eq 'Scrub term 003' -and $Finding.Line.Contains($allowedDemoUrl, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Should-ScanFileContent {
+    param(
+        [string]$RelativePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) {
+        return $false
+    }
+
+    $binaryExtensions = @(
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.gif',
+        '.webp',
+        '.ico',
+        '.bmp',
+        '.pdf',
+        '.zip',
+        '.gz',
+        '.tar',
+        '.7z',
+        '.dll',
+        '.exe',
+        '.so',
+        '.dylib',
+        '.woff',
+        '.woff2',
+        '.ttf',
+        '.eot',
+        '.mp4',
+        '.webm',
+        '.mov',
+        '.avi'
+    )
+
+    $extension = [System.IO.Path]::GetExtension($RelativePath)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        return $true
+    }
+
+    return $extension.ToLowerInvariant() -notin $binaryExtensions
 }
 
 function New-WordPattern {
@@ -143,7 +192,7 @@ try {
     $trackedFiles = Get-GitLines -Arguments @('ls-files')
     $stagedFiles = Get-GitLines -Arguments @('diff', '--cached', '--name-only', '--diff-filter=ACMR') -AllowFailure
     $candidateFiles = @($trackedFiles + $stagedFiles | Sort-Object -Unique)
-    $contentScanFiles = @($candidateFiles | Where-Object { $_ -ne 'scripts/Verify-GitHubPushSafety.ps1' })
+    $contentScanFiles = @($candidateFiles | Where-Object { $_ -ne 'scripts/Verify-GitHubPushSafety.ps1' -and (Should-ScanFileContent $_) })
 
     Write-Host "Repo root: $resolvedRepoRoot"
     Write-Host "Tracked files: $($trackedFiles.Count)"
