@@ -91,7 +91,7 @@ graph TB
     I --> J[workspace-recovery.json]
 ```
 
-The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, and completed-activity list in sync while long-running work streams in. Page-specific live status now stays in the page itself, such as the setup benchmark rail. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery.
+The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, and completed-activity list in sync while long-running work streams in. Page-specific live status now stays in the page itself, such as the setup benchmark rail. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery. Long-running benchmark state is stored explicitly through `ModelBenchmarkSession`, including provider, phase, current fixture, and queue progress, so setup recovery does not have to infer benchmark state from generic activity strings.
 
 ---
 
@@ -225,7 +225,7 @@ classDiagram
 
 ## 5. Start / Setup Flow
 
-Implemented in [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor). Combines three setup steps with shared status messaging.
+Implemented across [Home.razor](../src/LiCvWriter.Web/Components/Pages/Home.razor) and [Llm.razor](../src/LiCvWriter.Web/Components/Pages/Setup/Llm.razor). `Home.razor` gives the session-level readiness overview, while the dedicated setup page owns provider-specific catalog loading, acceleration diagnostics, model downloads, and local benchmarking.
 
 ### Sequence
 
@@ -259,11 +259,15 @@ sequenceDiagram
     Home->>Workspace: SetApplicantDifferentiatorProfile()
 ```
 
-### Step 1: Ollama and Session Model
+### Step 1: Session Model and Local Provider Readiness
 
 The page checks Ollama through `ILlmClient.VerifyModelAvailabilityAsync()`. The returned `OllamaModelAvailability` determines which models the user can select. The model and thinking level are session-scoped and remain editable throughout the session. After LLM-backed work begins, the setup page warns that later changes apply to future operations only, so completed analyses or generated drafts need to be rerun if the user wants them refreshed with the new settings.
 
 The panel is collapsible — after `UseSessionLlmSettingsAsync()`, the controls collapse into a compact shell. Clicking `CheckOllamaAsync()` expands them again and refreshes model availability.
+
+For Microsoft Foundry Local, the dedicated setup page loads `FoundryCatalogSnapshot`, including `FoundryAccelerationSnapshot`. That snapshot now carries typed readiness (`Unsupported`, `Disabled`, `Unavailable`, `NeedsRegistration`, `PartiallyReady`, `Ready`) plus guidance text, so the UI can report whether Windows ML execution providers are missing, partially registered, or ready without guessing from raw status strings.
+
+The setup benchmark rail is driven by `ModelBenchmarkCoordinator` and `ModelBenchmarkSession`. In-flight state includes the active provider, model, benchmark phase (`Preparing`, `Warm-up`, `Evaluating`, `Cleanup`, `Finalizing`), and current fixture metadata. For Foundry benchmarks, the coordinator also ensures the execution-provider path is prepared before the model run so benchmark results do not silently measure a degraded local runtime path when the runtime can correct it.
 
 ### Step 2: LinkedIn DMA Import
 
