@@ -15,9 +15,17 @@ public sealed class OllamaModelBenchmarkServiceTests
     };
 
     [Fact]
+    public void DefaultSuite_WhenSummed_UsesNormalizedWeights()
+    {
+        var totalWeight = ModelBenchmarkFixtures.DefaultSuite.Sum(static fixture => fixture.Weight);
+
+        Assert.Equal(1.0, totalWeight, 3);
+    }
+
+    [Fact]
     public async Task RunSingleAsync_HappyPath_ProducesScoredResult()
     {
-        var perfectJson = """
+                var perfectJobExtractJson = """
             {
               "roleTitle": "Senior Backend Engineer",
               "companyName": "Acme Robotics",
@@ -25,14 +33,31 @@ public sealed class OllamaModelBenchmarkServiceTests
             }
             """;
 
+                var perfectCompanyJson = """
+                        {
+                            "name": "Nordic Cloud Guild",
+                            "guidingPrinciples": ["trust", "mentoring", "pragmatic delivery"],
+                            "differentiators": ["knowledge sharing", "platform modernization"]
+                        }
+                        """;
+
+                var perfectTechnologyGapJson = """
+                        {
+                            "detectedTechnologies": ["RAG", "vector search", "Kubernetes", "LLM evaluation"],
+                            "possiblyUnderrepresentedTechnologies": ["Kubernetes", "LLM evaluation"]
+                        }
+                        """;
+
         var llmClient = new ScriptedLlmClient([
             // Warm-up call (capacity probe). 64 tok/s decode.
             new LlmResponse("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
                 LoadDuration: TimeSpan.FromSeconds(0.5),
                 PromptEvalDuration: TimeSpan.FromSeconds(0.1),
                 EvalDuration: TimeSpan.FromSeconds(1.0)),
-            // Quality call.
-            new LlmResponse("m:test", perfectJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
+                        // Weighted benchmark fixture calls.
+                        new LlmResponse("m:test", perfectJobExtractJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+                        new LlmResponse("m:test", perfectCompanyJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+                        new LlmResponse("m:test", perfectTechnologyGapJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
         ]);
         llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
@@ -48,21 +73,30 @@ public sealed class OllamaModelBenchmarkServiceTests
         Assert.True(result.OverallScore > 0.6); // 0.6 * 1.0 quality + 0.4 * (64/60) clamped = 1.0
         Assert.NotNull(result.DecodeTokensPerSecond);
         Assert.Equal(OllamaCapacityFit.Comfortable, result.Fit);
+        Assert.Equal(ModelBenchmarkFixtures.DefaultSuite.Count, result.FixtureResults.Count);
+        Assert.Equal(ModelBenchmarkFixtures.DefaultSuite.Count, result.FixtureResults.Select(static fixture => fixture.FixtureId).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(result.FixtureResults, fixture => Assert.Equal(3, fixture.Dimensions.Count));
+        Assert.Equal(result.QualityScore, result.FixtureResults.Sum(static fixture => fixture.WeightedScore), 3);
     }
 
     [Fact]
     public async Task RunSingleAsync_QualityResponseIsGarbage_ReturnsLowQualityScore()
     {
-        var llmClient = new ScriptedLlmClient([
-            new LlmResponse("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
+        var responses = new List<LlmResponse>
+        {
+            new("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
                 LoadDuration: TimeSpan.Zero,
                 PromptEvalDuration: TimeSpan.FromSeconds(0.1),
-                EvalDuration: TimeSpan.FromSeconds(1.0)),
-            // Quality response: invalid JSON. LlmJsonInvoker will trigger a repair attempt.
-            new LlmResponse("m:test", "definitely not json", null, true, 5, 5, TimeSpan.FromSeconds(0.5)),
-            // Repair attempt also fails.
-            new LlmResponse("m:test", "still not json", null, true, 5, 5, TimeSpan.FromSeconds(0.5))
-        ]);
+                EvalDuration: TimeSpan.FromSeconds(1.0))
+        };
+
+        foreach (var _ in ModelBenchmarkFixtures.DefaultSuite)
+        {
+            responses.Add(new LlmResponse("m:test", "definitely not json", null, true, 5, 5, TimeSpan.FromSeconds(0.5)));
+            responses.Add(new LlmResponse("m:test", "still not json", null, true, 5, 5, TimeSpan.FromSeconds(0.5)));
+        }
+
+        var llmClient = new ScriptedLlmClient([.. responses]);
         llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var probe = new OllamaCapacityProbe(llmClient, Options);
@@ -72,6 +106,12 @@ public sealed class OllamaModelBenchmarkServiceTests
 
         Assert.True(result.Succeeded);
         Assert.Equal(0.0, result.QualityScore);
+        Assert.Equal(ModelBenchmarkFixtures.DefaultSuite.Count, result.FixtureResults.Count);
+        Assert.All(result.FixtureResults, fixture =>
+        {
+            Assert.Equal(0.0, fixture.Score);
+            Assert.Contains(fixture.Notes, static note => note.Contains("not valid JSON", StringComparison.Ordinal));
+        });
         // Speed half still contributes: 0.4 * clamp(64/60) ≈ 0.4
         Assert.InRange(result.OverallScore, 0.39, 0.41);
     }

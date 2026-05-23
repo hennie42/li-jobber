@@ -1,5 +1,6 @@
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
+using LiCvWriter.Application.Services;
 using LiCvWriter.Web.Services;
 
 namespace LiCvWriter.Tests.Web;
@@ -29,7 +30,22 @@ public sealed class WorkspaceSessionRecoveryTests
                 TotalDuration: TimeSpan.FromSeconds(3.2),
                 Fit: OllamaCapacityFit.Comfortable,
                 Notes: ["sample note"],
-                FailedReason: null);
+                FailedReason: null,
+                FixtureResults:
+                [
+                    new ModelBenchmarkFixtureResult(
+                        FixtureId: ModelBenchmarkFixtures.FixtureId,
+                        PromptId: LlmPromptCatalog.JobExtractJson,
+                        DisplayName: ModelBenchmarkFixtures.FixtureDisplayName,
+                        Weight: ModelBenchmarkFixtures.FixtureWeight,
+                        Score: 0.9,
+                        Dimensions:
+                        [
+                            new ModelBenchmarkDimensionScore("json-parsable", 1.0, 0.4, true, "Output parsed as JSON."),
+                            new ModelBenchmarkDimensionScore("required-keys", 1.0, 0.3, true, "3/3 required keys present."),
+                            new ModelBenchmarkDimensionScore("value-similarity", 1.0, 0.3, true, "Expected-value similarity 1.00.")
+                        ],
+                        Notes: Array.Empty<string>())]);
             var benchmarkSession = new ModelBenchmarkSession(
                 StartedUtc: new DateTimeOffset(2026, 4, 22, 10, 0, 0, TimeSpan.Zero),
                 CompletedUtc: new DateTimeOffset(2026, 4, 22, 10, 5, 0, TimeSpan.Zero),
@@ -54,6 +70,8 @@ public sealed class WorkspaceSessionRecoveryTests
             Assert.Equal(OllamaCapacityFit.Comfortable, rehydratedResult.Fit);
             Assert.Single(rehydratedResult.Notes);
             Assert.Null(rehydratedResult.FailedReason);
+            Assert.Single(rehydratedResult.FixtureResults);
+            Assert.Equal(ModelBenchmarkFixtures.FixtureId, rehydratedResult.FixtureResults[0].FixtureId);
         }
         finally
         {

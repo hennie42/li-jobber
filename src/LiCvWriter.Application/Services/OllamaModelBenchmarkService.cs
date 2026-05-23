@@ -7,9 +7,9 @@ namespace LiCvWriter.Application.Services;
 
 /// <summary>
 /// Runs the standard per-model benchmark: a capacity probe (warm-up call →
-/// decode tok/s + GPU fit) followed by a deterministic JSON-extraction quality
-/// task scored by <see cref="ModelBenchmarkFixtures"/>. Combines both signals
-/// into a single overall score for ranking. Never throws; failures surface
+/// decode tok/s + GPU fit) followed by a deterministic weighted fixture suite
+/// scored by <see cref="ModelBenchmarkFixtures"/>. Combines both signals into a
+/// single overall score for ranking. Never throws; failures surface
 /// as a <see cref="ModelBenchmarkResult"/> with <c>FailedReason</c> set.
 /// </summary>
 public sealed class OllamaModelBenchmarkService(
@@ -60,21 +60,42 @@ public sealed class OllamaModelBenchmarkService(
             Temperature: 0.0,
             ResponseFormat: LlmResponseFormat.Json);
 
+        IReadOnlyList<ModelBenchmarkFixtureResult> fixtureResults;
         double qualityScore;
         try
         {
-            var invocation = await jsonInvoker.InvokeAsync(
-                qualityRequest,
-                parse: static content => content,
-                progress: null,
-                cancellationToken);
+            var scoredFixtures = new List<ModelBenchmarkFixtureResult>(ModelBenchmarkFixtures.DefaultSuite.Count);
+            foreach (var fixture in ModelBenchmarkFixtures.DefaultSuite)
+            {
+                var fixtureRequest = qualityRequest with
+                {
+                    SystemPrompt = fixture.SystemPrompt,
+                    Messages = [new LlmChatMessage("user", fixture.UserPrompt)],
+                    ResponseFormat = fixture.ResponseFormat,
+                    PromptId = fixture.PromptId,
+                    PromptVersion = LlmPromptCatalog.Version1
+                };
 
-            // Score the strict-stage content first, then fall back to the most
-            // recoverable attempt (typically the lenient or repaired output).
-            qualityScore = invocation.Attempts
-                .Select(attempt => ModelBenchmarkFixtures.Score(attempt.RawContent))
-                .DefaultIfEmpty(0.0)
-                .Max();
+                var invocation = await jsonInvoker.InvokeAsync(
+                    fixtureRequest,
+                    parse: static content => content,
+                    progress: null,
+                    cancellationToken);
+
+                var scoredFixture = invocation.Attempts
+                    .Select(attempt => ModelBenchmarkFixtures.Evaluate(fixture, attempt.RawContent))
+                    .OrderByDescending(static result => result.Score)
+                    .FirstOrDefault()
+                    ?? ModelBenchmarkFixtures.Evaluate(fixture, candidateJson: null);
+
+                scoredFixtures.Add(scoredFixture);
+            }
+
+            fixtureResults = scoredFixtures;
+            var totalWeight = fixtureResults.Sum(static result => result.Weight);
+            qualityScore = totalWeight <= 0.0
+                ? 0.0
+                : fixtureResults.Sum(static result => result.WeightedScore) / totalWeight;
         }
         catch (OperationCanceledException)
         {
@@ -100,7 +121,8 @@ public sealed class OllamaModelBenchmarkService(
             TotalDuration: stopwatch.Elapsed,
             Fit: verdict.Fit,
             Notes: verdict.Notes,
-            FailedReason: null);
+                FailedReason: null,
+                FixtureResults: fixtureResults);
     }
 
     private static double NormalizeSpeed(double? decodeTokensPerSecond)
