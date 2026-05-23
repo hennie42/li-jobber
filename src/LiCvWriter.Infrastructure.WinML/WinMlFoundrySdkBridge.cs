@@ -185,30 +185,13 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         {
             throw;
         }
-        catch (Exception exception) when (FoundryRuntimeFailureClassifier.IsRetriableModelLoadFailure(exception))
-        {
-            var recoveryNotes = await TryResetFoundryRuntimeAsync(cancellationToken);
-            try
-            {
-                return await ExecuteGenerateAsync(modelAlias, request, progress, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception retryException)
-            {
-                if (TryNormalizeFoundryRuntimeException(retryException, retryAttempted: true, recoveryNotes) is { } normalizedRetryException)
-                {
-                    throw normalizedRetryException;
-                }
-
-                throw;
-            }
-        }
         catch (Exception exception)
         {
-            if (TryNormalizeFoundryRuntimeException(exception, retryAttempted: false, additionalNotes: null) is { } normalizedException)
+            IReadOnlyList<string>? recoveryNotes = FoundryRuntimeFailureClassifier.IsRetriableModelLoadFailure(exception)
+                ? ["The app skipped an in-process Foundry runtime reset because the current SDK can return disposed-object failures after a reset. Restart the app to force a clean Foundry runtime."]
+                : null;
+
+            if (TryNormalizeFoundryRuntimeException(exception, retryAttempted: false, additionalNotes: recoveryNotes) is { } normalizedException)
             {
                 throw normalizedException;
             }
@@ -433,23 +416,6 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         stopwatch.Stop();
 
         return FoundryOpenAiResponseMapper.MapChatCompletion(modelAlias, response, stopwatch.Elapsed);
-    }
-
-    private async Task<IReadOnlyList<string>> TryResetFoundryRuntimeAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await managerAccessor.ResetAsync(cancellationToken);
-            return Array.Empty<string>();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            return [$"The in-process Foundry runtime reset attempt also failed: {exception.Message}"];
-        }
     }
 
     private FoundryRuntimeException? TryNormalizeFoundryRuntimeException(
