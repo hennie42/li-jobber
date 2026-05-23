@@ -2075,7 +2075,7 @@ else if (CanRunFitReview)
     {
         try
         {
-            Workspace.SetOllamaAvailability(await LlmClient.VerifyModelAvailabilityAsync());
+            Workspace.SetLlmAvailability(await LlmClient.VerifyModelAvailabilityAsync());
         }
         catch
         {

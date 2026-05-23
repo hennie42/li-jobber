@@ -22,7 +22,7 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
             return OllamaCapacityVerdict.Unknown(model ?? string.Empty, "No model selected.");
         }
 
-        OllamaModelInfo? modelInfo = null;
+        LlmModelInfo? modelInfo = null;
         try
         {
             modelInfo = await llmClient.GetModelInfoAsync(model, cancellationToken);
@@ -54,14 +54,14 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
             return OllamaCapacityVerdict.Unknown(model, $"Warm-up call failed: {exception.Message}");
         }
 
-        OllamaModelAvailability availability;
+        LlmModelAvailability availability;
         try
         {
             availability = await llmClient.VerifyModelAvailabilityAsync(cancellationToken);
         }
         catch
         {
-            availability = new OllamaModelAvailability(string.Empty, model, true, Array.Empty<string>(), Array.Empty<OllamaRunningModel>());
+            availability = new LlmModelAvailability(string.Empty, model, true, Array.Empty<string>(), Array.Empty<LlmRunningModel>());
         }
 
         var running = availability.EffectiveRunningModels
@@ -75,8 +75,8 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
     internal static OllamaCapacityVerdict BuildVerdict(
         string model,
         LlmResponse warmup,
-        OllamaRunningModel? running,
-        OllamaModelInfo? modelInfo,
+        LlmRunningModel? running,
+        LlmModelInfo? modelInfo,
         OllamaOptions options)
     {
         var notes = new List<string>();
@@ -157,6 +157,12 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
 
         if (decodeTokensPerSecond.Value < options.CapacityTooSlowTokensPerSecond)
         {
+            if (vramBytes is null && residentSize is null)
+            {
+                notes.Add("Runtime did not report residency details, so the model is not being classified as too large from speed alone.");
+                return OllamaCapacityFit.Unknown;
+            }
+
             return vramBytes is 0 && residentSize is > 0
                 ? OllamaCapacityFit.CpuOnly
                 : OllamaCapacityFit.TooLargeForInteractive;
@@ -177,7 +183,7 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
             : OllamaCapacityFit.Usable;
     }
 
-    private static long? ReadResidentSize(OllamaRunningModel? running)
+    private static long? ReadResidentSize(LlmRunningModel? running)
     {
         // Prefer the total resident size from /api/ps. Falls back to size_vram which
         // at least bounds the comparison to "fully on GPU" when the field is missing.

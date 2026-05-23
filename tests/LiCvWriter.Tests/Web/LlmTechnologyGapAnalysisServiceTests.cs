@@ -87,11 +87,11 @@ public sealed class LlmTechnologyGapAnalysisServiceTests
     {
         public LlmRequest? LastRequest { get; private set; }
 
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
 
         public Task<LlmResponse> GenerateAsync(
             LlmRequest request,

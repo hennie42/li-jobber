@@ -12,15 +12,15 @@ Watch the recording on [the browser-playable Playwright demo page](https://henni
 2. Review each job-set row while the company-name masking remains visible.
 3. Select the three job sets in the batch list.
 4. Click Start selected.
-5. Watch the batch label, job-set status chips, Status Monitor, Reasoning Monitor, and Activity feed update while the LLM operation runs.
+5. Watch the batch label, job-set status chips, Reasoning Monitor, and Activity feed update while the LLM operation runs.
 
 ![screenshot of the Job Workbench showing three ready job sets with company names blurred](assets/playwright-job-workbench-demo/01-ready-jobsets.png)
 
 ![screenshot of the Job Workbench with all three batch checkboxes selected and company names blurred](assets/playwright-job-workbench-demo/02-three-jobsets-selected.png)
 
-![screenshot of the running batch with the Status Monitor and job-set labels updating while company names are blurred](assets/playwright-job-workbench-demo/03-live-llm-progress.png)
+![screenshot of the running batch with the live batch label and job-set labels updating while company names are blurred](assets/playwright-job-workbench-demo/03-live-llm-progress.png)
 
-![screenshot of the Job Workbench after live LLM output appears in the Status Monitor and workbench labels update with company names blurred](assets/playwright-job-workbench-demo/04-workbench-labels-updated.png)
+![screenshot of the Job Workbench after live batch status and workbench labels update with company names blurred](assets/playwright-job-workbench-demo/04-workbench-labels-updated.png)
 
 ## Video
 
@@ -35,7 +35,7 @@ A local copy of the WebM and the diagnostic Playwright trace are also written un
 3. It shows the redirect pages that now fold import, research, and generation back into the main setup and workbench flows.
 4. It walks through the Job Workbench overview, discovery, batch action settings, and job-set rows.
 5. It opens a job-set detail page to show research, fit review, technology gap, ranked evidence, draft generation, generated markdown drafts, and exported files.
-6. It returns to the overview, selects three job sets, clicks Start selected, and holds on live Status Monitor, Reasoning Monitor, and Activity feed updates.
+6. It returns to the overview, selects three job sets, clicks Start selected, and holds on live batch status, Reasoning Monitor, and Activity feed updates.
 
 ## Validation
 

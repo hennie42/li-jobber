@@ -23,7 +23,7 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
 
     public ILocator BatchButton => page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Batch ", RegexOptions.IgnoreCase) });
 
-    public ILocator StatusMonitor => page.Locator(".sidebar-status-crt-screen");
+    public ILocator StatusMonitor => BatchStatusText;
 
     public ILocator ReasoningMonitor => page.Locator(".sidebar-crt-screen").First;
 
@@ -123,7 +123,7 @@ public sealed class JobWorkbenchPage(IPage page, string baseUrl)
             Timeout = 30_000
         });
 
-        await Expect(StatusMonitor).Not.ToContainTextAsync("No streaming status captured yet", new LocatorAssertionsToContainTextOptions
+        await Expect(ActivityFeed).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
         {
             Timeout = 180_000
         });

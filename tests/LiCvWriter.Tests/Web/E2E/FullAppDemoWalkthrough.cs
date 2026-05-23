@@ -164,7 +164,7 @@ public sealed class FullAppDemoWalkthrough(
         await HoldAsync(StandardSceneMilliseconds);
 
         await workbench.FocusStatusMonitorAsync();
-        await GuideAsync(workbench.StatusMonitor, "Status Monitor", "Live LLM status appears while the operation is running.");
+        await GuideAsync(workbench.StatusMonitor, "Batch live status", "The running state stays in the main workbench flow while the sidebar keeps the reasoning and activity surfaces.");
         await HoldAsync(LiveMonitorSceneMilliseconds);
 
         await workbench.FocusReasoningMonitorAsync();

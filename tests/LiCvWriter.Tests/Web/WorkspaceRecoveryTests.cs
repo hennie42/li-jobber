@@ -23,7 +23,7 @@ public sealed class WorkspaceRecoveryTests
             var options = new OllamaOptions { Model = "configured-model", Think = "low" };
             var session = new WorkspaceSession(options, store);
 
-            session.SetOllamaAvailability(new OllamaModelAvailability(
+            session.SetOllamaAvailability(new LlmModelAvailability(
                 "0.9.0",
                 "configured-model",
                 true,
@@ -36,6 +36,7 @@ public sealed class WorkspaceRecoveryTests
 
             var restoredSession = new WorkspaceSession(options, store);
 
+            Assert.Equal(LlmProviderKind.Ollama, restoredSession.SelectedLlmProvider);
             Assert.Equal("session-model", restoredSession.SelectedLlmModel);
             Assert.Equal("high", restoredSession.SelectedThinkingLevel);
 
@@ -136,9 +137,36 @@ public sealed class WorkspaceRecoveryTests
             var options = new OllamaOptions { Model = "configured-model", Think = "high" };
             var restoredSession = new WorkspaceSession(options, store);
 
+            Assert.Equal(LlmProviderKind.Ollama, restoredSession.SelectedLlmProvider);
             Assert.Equal("configured-model", restoredSession.SelectedLlmModel);
             Assert.Equal("high", restoredSession.SelectedThinkingLevel);
             Assert.Equal(string.Empty, restoredSession.GetJobSet(jobSetId).AdditionalInstructions);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorkspaceSession_RestoresSelectedLlmProvider()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+
+            session.SetLlmProviderSelection(LlmProviderKind.Foundry);
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            Assert.Equal(LlmProviderKind.Foundry, restoredSession.SelectedLlmProvider);
+            Assert.False(restoredSession.IsLlmReady);
         }
         finally
         {

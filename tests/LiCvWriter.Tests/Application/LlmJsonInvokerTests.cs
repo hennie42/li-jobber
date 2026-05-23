@@ -110,7 +110,7 @@ public sealed class LlmJsonInvokerTests
         public int Calls { get; private set; }
         public List<LlmRequest> Requests { get; } = [];
 
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
@@ -128,7 +128,7 @@ public sealed class LlmJsonInvokerTests
                 Duration: TimeSpan.Zero));
         }
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
     }
 }

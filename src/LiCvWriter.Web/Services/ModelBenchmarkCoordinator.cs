@@ -1,16 +1,18 @@
+using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
+using LiCvWriter.Infrastructure.Llm;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LiCvWriter.Web.Services;
 
 /// <summary>
-/// Drives a sequential benchmark across an arbitrary list of installed Ollama
-/// models, persists the ranked outcome through <see cref="WorkspaceSession"/>,
-/// and surfaces live progress to the UI via <see cref="Changed"/>. A single
-/// run is active at a time; <see cref="Cancel"/> signals the in-flight model
-/// to stop and short-circuits the remaining queue.
+/// Drives a sequential benchmark across an arbitrary list of local models for a
+/// specific provider, persists the ranked outcome through
+/// <see cref="WorkspaceSession"/>, and surfaces live progress to the UI via
+/// <see cref="Changed"/>. A single run is active at a time; <see cref="Cancel"/>
+/// signals the in-flight model to stop and short-circuits the remaining queue.
 /// </summary>
 public sealed class ModelBenchmarkCoordinator(
     IServiceScopeFactory scopeFactory,
@@ -35,6 +37,16 @@ public sealed class ModelBenchmarkCoordinator(
     public bool IsRunning => Current is { IsRunning: true };
 
     public Task StartAsync(IReadOnlyList<string> models)
+        => StartAsync(LlmProviderKind.Ollama, models);
+
+    public Task StartAsync(LlmProviderKind provider, IReadOnlyList<string> models)
+        => StartAsync(provider, models, downloadMissingModels: false, removeTooLargeModelsAfterBenchmark: false);
+
+    public Task StartAsync(
+        LlmProviderKind provider,
+        IReadOnlyList<string> models,
+        bool downloadMissingModels,
+        bool removeTooLargeModelsAfterBenchmark)
     {
         ArgumentNullException.ThrowIfNull(models);
 
@@ -67,11 +79,12 @@ public sealed class ModelBenchmarkCoordinator(
                 CompletedCount: 0,
                 TotalCount: trimmed.Length,
                 CurrentModel: trimmed[0],
-                Results: Array.Empty<ModelBenchmarkResult>());
+                Results: Array.Empty<ModelBenchmarkResult>(),
+                Provider: provider);
         }
 
         Changed?.Invoke();
-        return RunAsync(trimmed, token);
+        return RunAsync(provider, trimmed, downloadMissingModels, removeTooLargeModelsAfterBenchmark, token);
     }
 
     public void Cancel()
@@ -85,7 +98,12 @@ public sealed class ModelBenchmarkCoordinator(
         cts?.Cancel();
     }
 
-    private async Task RunAsync(IReadOnlyList<string> models, CancellationToken cancellationToken)
+    private async Task RunAsync(
+        LlmProviderKind provider,
+        IReadOnlyList<string> models,
+        bool downloadMissingModels,
+        bool removeTooLargeModelsAfterBenchmark,
+        CancellationToken cancellationToken)
     {
         var results = new List<ModelBenchmarkResult>(models.Count);
         var perModelTimeoutSeconds = ollamaOptions.MaxOperationSeconds;
@@ -116,8 +134,30 @@ public sealed class ModelBenchmarkCoordinator(
             try
             {
                 using var scope = scopeFactory.CreateScope();
-                var benchmarkService = scope.ServiceProvider.GetRequiredService<OllamaModelBenchmarkService>();
+                if (provider == LlmProviderKind.Foundry)
+                {
+                    await EnsureFoundryModelReadyAsync(
+                        scope.ServiceProvider,
+                        model,
+                        index,
+                        models.Count,
+                        downloadMissingModels,
+                        cancellationToken);
+                }
+
+                var benchmarkService = ResolveBenchmarkService(scope.ServiceProvider, provider);
                 result = await benchmarkService.RunSingleAsync(model, effectiveToken);
+                result = result with { Provider = provider };
+
+                if (provider == LlmProviderKind.Foundry)
+                {
+                    result = await FinalizeFoundryBenchmarkResultAsync(
+                        scope.ServiceProvider,
+                        model,
+                        result,
+                        removeTooLargeModelsAfterBenchmark,
+                        cancellationToken);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -137,7 +177,8 @@ public sealed class ModelBenchmarkCoordinator(
                     TotalDuration: null,
                     Fit: OllamaCapacityFit.Unknown,
                     Notes: Array.Empty<string>(),
-                    FailedReason: $"Timed out after {perModelTimeoutSeconds}s.");
+                    FailedReason: $"Timed out after {perModelTimeoutSeconds}s.",
+                    Provider: provider);
             }
             catch (Exception exception)
             {
@@ -151,7 +192,8 @@ public sealed class ModelBenchmarkCoordinator(
                     TotalDuration: null,
                     Fit: OllamaCapacityFit.Unknown,
                     Notes: Array.Empty<string>(),
-                    FailedReason: exception.Message);
+                        FailedReason: exception.Message,
+                        Provider: provider);
             }
 
             results.Add(result);
@@ -171,7 +213,8 @@ public sealed class ModelBenchmarkCoordinator(
             CompletedCount: ranked.Count,
             TotalCount: models.Count,
             CurrentModel: null,
-            Results: ranked);
+            Results: ranked,
+            Provider: provider);
 
         lock (gate)
         {
@@ -206,16 +249,138 @@ public sealed class ModelBenchmarkCoordinator(
 
     private void EmitPerModelActivity(ModelBenchmarkResult result)
     {
+        var providerLabel = result.Provider switch
+        {
+            LlmProviderKind.Foundry => "Foundry",
+            _ => "Ollama"
+        };
+
         if (!result.Succeeded)
         {
-            operations.Error($"Benchmark failed: {result.Model}", result.FailedReason);
+            operations.Error($"{providerLabel} benchmark failed: {result.Model}", result.FailedReason);
             return;
         }
 
         var speed = result.DecodeTokensPerSecond is { } tps ? $"{tps:0.0} tok/s" : "speed n/a";
         var detail = $"overall {result.OverallScore:0.00} • quality {result.QualityScore:0.00} • {speed} • {result.Fit}";
-        operations.Info($"Benchmarked {result.Model}", detail);
+        operations.Info($"Benchmarked {providerLabel} model {result.Model}", detail);
     }
+
+    private OllamaModelBenchmarkService ResolveBenchmarkService(IServiceProvider serviceProvider, LlmProviderKind provider)
+    {
+        if (provider != LlmProviderKind.Foundry)
+        {
+            return serviceProvider.GetRequiredService<OllamaModelBenchmarkService>();
+        }
+
+        var foundryClient = serviceProvider.GetRequiredService<FoundryLlmClient>();
+        var capacityProbe = new OllamaCapacityProbe(foundryClient, ollamaOptions);
+        return new OllamaModelBenchmarkService(capacityProbe, foundryClient, ollamaOptions);
+    }
+
+    private async Task EnsureFoundryModelReadyAsync(
+        IServiceProvider serviceProvider,
+        string model,
+        int index,
+        int totalCount,
+        bool downloadMissingModels,
+        CancellationToken cancellationToken)
+    {
+        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
+        var snapshot = await catalogClient.GetSnapshotAsync(cancellationToken);
+        if (snapshot.Availability.AvailableModels.Any(alias => alias.Equals(model, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (!downloadMissingModels)
+        {
+            throw new InvalidOperationException($"The Foundry model '{model}' is not cached locally. Download it first or run benchmark with download enabled.");
+        }
+
+        operations.UpdateCurrent(
+            $"Preparing {model} ({index + 1}/{totalCount})",
+            "Downloading model before benchmark…");
+
+        await catalogClient.DownloadModelAsync(
+            model,
+            progress => operations.UpdateCurrent(
+                $"Preparing {model} ({index + 1}/{totalCount})",
+                $"Downloading model before benchmark: {progress:0.0}%"),
+            cancellationToken);
+    }
+
+    private async Task RemoveFoundryModelAsync(IServiceProvider serviceProvider, string model, CancellationToken cancellationToken)
+    {
+        operations.UpdateCurrent($"Removing {model}", "Removing non-fitting model from the local Foundry cache…");
+        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
+        await catalogClient.RemoveModelAsync(model, cancellationToken);
+    }
+
+    private async Task<ModelBenchmarkResult> FinalizeFoundryBenchmarkResultAsync(
+        IServiceProvider serviceProvider,
+        string model,
+        ModelBenchmarkResult result,
+        bool removeTooLargeModelsAfterBenchmark,
+        CancellationToken cancellationToken)
+    {
+        var finalizedResult = result;
+
+        if (removeTooLargeModelsAfterBenchmark && ShouldRemoveFoundryModelAfterBenchmark(result))
+        {
+            try
+            {
+                await RemoveFoundryModelAsync(serviceProvider, model, cancellationToken);
+                finalizedResult = AppendBenchmarkNote(
+                    finalizedResult,
+                    "Removed from the local Foundry cache after benchmark because it was classified as too large for interactive use.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                operations.Error($"Could not remove Foundry model {model} after benchmark.", exception.Message);
+                finalizedResult = AppendBenchmarkNote(
+                    finalizedResult,
+                    $"Benchmark completed, but the model could not be removed from the local Foundry cache: {exception.Message}");
+            }
+        }
+
+        try
+        {
+            await RefreshFoundryAvailabilityAsync(serviceProvider, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            operations.Error("Could not refresh Foundry catalog after benchmark.", exception.Message);
+            finalizedResult = AppendBenchmarkNote(
+                finalizedResult,
+                $"Benchmark completed, but the Foundry catalog refresh failed afterward: {exception.Message}");
+        }
+
+        return finalizedResult;
+    }
+
+    private async Task RefreshFoundryAvailabilityAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken)
+    {
+        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
+        var snapshot = await catalogClient.GetSnapshotAsync(cancellationToken);
+        workspace.SetFoundryAvailability(snapshot.Availability);
+    }
+
+    private static ModelBenchmarkResult AppendBenchmarkNote(ModelBenchmarkResult result, string note)
+        => string.IsNullOrWhiteSpace(note)
+            ? result
+            : result with { Notes = [.. result.Notes, note] };
+
+    private static bool ShouldRemoveFoundryModelAfterBenchmark(ModelBenchmarkResult result)
+        => result.Fit == OllamaCapacityFit.TooLargeForInteractive;
 
     private static IReadOnlyList<ModelBenchmarkResult> RankResults(IEnumerable<ModelBenchmarkResult> results)
     {

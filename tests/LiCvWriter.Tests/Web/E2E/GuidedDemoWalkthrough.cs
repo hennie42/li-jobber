@@ -64,13 +64,13 @@ public sealed class GuidedDemoWalkthrough(
         await HoldAsync(BatchRunningSceneMilliseconds);
 
         await workbench.FocusStatusMonitorAsync();
-        await GuideAsync(workbench.StatusMonitor, "Status Monitor", "Live LLM output streams here while the batch is running.");
+        await GuideAsync(workbench.StatusMonitor, "Batch live status", "The running label stays in the main workbench flow instead of a second sidebar monitor.");
         await HoldAsync(StatusMonitorSceneMilliseconds);
         await HideGuideAsync();
         await artifacts.CaptureAsync(
             page,
             "03-live-llm-progress.png",
-            "screenshot of the running batch with the Status Monitor and job-set labels updating while company names are blurred");
+            "screenshot of the running batch with the live batch label and job-set labels updating while company names are blurred");
 
         await workbench.FocusReasoningMonitorAsync();
         await GuideAsync(workbench.ReasoningMonitor, "Reasoning Monitor", "The side monitor keeps the current model activity visible during the run.");
@@ -88,7 +88,7 @@ public sealed class GuidedDemoWalkthrough(
         await artifacts.CaptureAsync(
             page,
             "04-workbench-labels-updated.png",
-            "screenshot of the Job Workbench after live LLM output appears in the Status Monitor and workbench labels update with company names blurred");
+            "screenshot of the Job Workbench after live batch status and workbench labels update with company names blurred");
         await HoldAsync(FinalReviewSceneMilliseconds);
     }
 

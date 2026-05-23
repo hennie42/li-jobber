@@ -16,7 +16,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_FullGpuResidency_AndFastDecode_IsComfortable()
     {
         var warmup = CreateWarmup(evalTokens: 64, evalSeconds: 1.0); // 64 tok/s
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 8_000_000_000, SizeBytes: 8_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 8_000_000_000, SizeBytes: 8_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, ModelInfo("8B", "Q4_0", 8192), DefaultOptions);
 
@@ -32,7 +32,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_FullGpuResidency_AndModerateDecode_IsUsable()
     {
         var warmup = CreateWarmup(evalTokens: 64, evalSeconds: 4.0); // 16 tok/s
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 6_000_000_000, SizeBytes: 6_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 6_000_000_000, SizeBytes: 6_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -43,7 +43,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_PartialGpuOffload_FastEnough_IsPartialOffload()
     {
         var warmup = CreateWarmup(evalTokens: 64, evalSeconds: 4.0); // 16 tok/s — above too-slow threshold
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 8_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 8_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -57,7 +57,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_NoVram_AndAcceptableDecode_IsCpuOnly()
     {
         var warmup = CreateWarmup(evalTokens: 64, evalSeconds: 4.0); // 16 tok/s
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 0, SizeBytes: 4_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 0, SizeBytes: 4_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -69,7 +69,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_NoVram_AndVerySlowDecode_IsCpuOnly()
     {
         var warmup = CreateWarmup(evalTokens: 16, evalSeconds: 8.0); // 2 tok/s — below too-slow threshold
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 0, SizeBytes: 12_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 0, SizeBytes: 12_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -80,7 +80,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_PartialOffload_AndVerySlowDecode_IsTooLargeForInteractive()
     {
         var warmup = CreateWarmup(evalTokens: 16, evalSeconds: 8.0); // 2 tok/s
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 16_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 16_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -89,10 +89,21 @@ public sealed class OllamaCapacityProbeTests
     }
 
     [Fact]
+    public void BuildVerdict_NoResidencySignals_AndVerySlowDecode_IsUnknown()
+    {
+        var warmup = CreateWarmup(evalTokens: 16, evalSeconds: 8.0); // 2 tok/s
+
+        var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running: null, modelInfo: null, DefaultOptions);
+
+        Assert.Equal(OllamaCapacityFit.Unknown, verdict.Fit);
+        Assert.Contains(verdict.Notes, n => n.Contains("did not report residency", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildVerdict_MissingDecodeTiming_IsUnknown()
     {
         var warmup = CreateWarmup(evalTokens: null, evalSeconds: null);
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -104,7 +115,7 @@ public sealed class OllamaCapacityProbeTests
     public void BuildVerdict_LongLoadDuration_AddsEvictionWarning()
     {
         var warmup = CreateWarmup(evalTokens: 64, evalSeconds: 1.0, loadSeconds: 20.0);
-        var running = new OllamaRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        var running = new LlmRunningModel("m:latest", "m:latest", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var verdict = OllamaCapacityProbe.BuildVerdict("m:latest", warmup, running, modelInfo: null, DefaultOptions);
 
@@ -124,6 +135,6 @@ public sealed class OllamaCapacityProbeTests
             PromptEvalDuration: TimeSpan.FromSeconds(0.1),
             EvalDuration: evalSeconds is null ? null : TimeSpan.FromSeconds(evalSeconds.Value));
 
-    private static OllamaModelInfo ModelInfo(string parameters, string quant, long contextLength)
+    private static LlmModelInfo ModelInfo(string parameters, string quant, long contextLength)
         => new(Name: "m:latest", FileSizeBytes: 4_000_000_000, ParameterSize: parameters, QuantizationLevel: quant, Family: "llama", ContextLength: contextLength);
 }

@@ -1,0 +1,387 @@
+@page "/setup/differentiators"
+@implements IDisposable
+@inject IInsightsDiscoveryPdfImporter InsightsDiscoveryPdfImporter
+@inject InsightsDiscoveryApplicantDifferentiatorDraftingService InsightsDiscoveryDraftingService
+@inject OperationStatusService Operations
+@inject WorkspaceSession Workspace
+
+<PageTitle>Setup / Differentiators</PageTitle>
+
+<section class="card-panel setup-header">
+    <div class="setup-header-row">
+        <div>
+            <div class="field-label">Setup</div>
+            <h2>Personal differentiators</h2>
+            <p class="muted-text">Capture how you work, communicate, and position yourself, or draft the fields from an Insights Discovery PDF.</p>
+        </div>
+        <div class="button-row">
+            <a class="secondary-button" href="/">Back to overview</a>
+            <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench →</a>
+        </div>
+    </div>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Applicant differentiators</div>
+    <div class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
+        @(Workspace.ApplicantDifferentiatorProfile.HasContent
+            ? "Differentiators stored for this session."
+            : "Optional — used during fit review and draft generation.")
+    </div>
+
+    <p class="muted-text">Add notes about your work style, communication, and positioning. Fill them in manually or upload an Insights Discovery PDF to draft them automatically.</p>
+
+    @if (GetInsightsDraftTelemetry() is { } telemetry)
+    {
+        <div class="details-card stack-gap">
+            <div class="field-label">Live LLM progress</div>
+            <div class="sidebar-metric">@telemetry.Message</div>
+            @if (!string.IsNullOrWhiteSpace(telemetry.Detail))
+            {
+                <p class="muted-text">@telemetry.Detail</p>
+            }
+            <dl class="key-value-grid compact-grid">
+                <dt>Elapsed</dt>
+                <dd>@FormatDuration(telemetry.Elapsed)</dd>
+                @if (telemetry.PromptTokens is not null)
+                {
+                    <dt>Prompt</dt>
+                    <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
+                }
+                @if (telemetry.CompletionTokens is not null)
+                {
+                    <dt>Completion</dt>
+                    <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
+                }
+                @if (telemetry.HasEstimatedRemaining)
+                {
+                    <dt>ETA</dt>
+                    <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
+                }
+            </dl>
+        </div>
+    }
+
+    <div class="stack-gap">
+        <label class="field-label" for="insightsDiscoveryPdf">Insights Discovery PDF</label>
+        <InputFile id="insightsDiscoveryPdf" class="text-input" OnChange="HandleInsightsDiscoveryPdfSelectedAsync" accept=".pdf,application/pdf" disabled="@(!Workspace.IsLlmReady || IsInsightsDraftActive())" />
+        <p class="muted-text">Upload a PDF to auto-draft the fields below. The PDF is processed in memory and not stored.</p>
+
+        <div class="status-chip @GetInsightsDraftStatusClass()">
+            @GetInsightsDraftStatusMessage()
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(GetInsightsDraftStatusDetail()))
+        {
+            <p class="muted-text">@GetInsightsDraftStatusDetail()</p>
+        }
+
+        @if (insightsPdfWarnings.Count > 0)
+        {
+            <div class="message warning">
+                <ul class="feature-list">
+                    @foreach (var warning in insightsPdfWarnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(insightsPdfErrorMessage))
+        {
+            <div class="message error">@insightsPdfErrorMessage</div>
+        }
+    </div>
+
+    <div class="content-grid applicant-profile-grid">
+        <div class="stack-gap">
+            <div>
+                <label class="field-label" for="workStyle">Work style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.WorkStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.WorkStyle.Usage</p>
+                <textarea id="workStyle" class="prompt-box compact-prompt" @bind="workStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="communicationStyle">Communication style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Usage</p>
+                <textarea id="communicationStyle" class="prompt-box compact-prompt" @bind="communicationStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="leadershipStyle">Leadership style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Usage</p>
+                <textarea id="leadershipStyle" class="prompt-box compact-prompt" @bind="leadershipStyle"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="stakeholderStyle">Stakeholder style</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Usage</p>
+                <textarea id="stakeholderStyle" class="prompt-box compact-prompt" @bind="stakeholderStyle"></textarea>
+            </div>
+        </div>
+
+        <div class="stack-gap">
+            <div>
+                <label class="field-label" for="motivators">Motivators</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Motivators.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Motivators.Usage</p>
+                <textarea id="motivators" class="prompt-box compact-prompt" @bind="motivators"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="targetNarrative">Target narrative</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.TargetNarrative.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.TargetNarrative.Usage</p>
+                <textarea id="targetNarrative" class="prompt-box compact-prompt" @bind="targetNarrative"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="watchouts">Watchouts</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Watchouts.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Watchouts.Usage</p>
+                <textarea id="watchouts" class="prompt-box compact-prompt" @bind="watchouts"></textarea>
+            </div>
+
+            <div>
+                <label class="field-label" for="aboutApplicantBasis">About applicant basis</label>
+                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Usage</p>
+                <textarea id="aboutApplicantBasis" class="prompt-box compact-prompt" @bind="aboutApplicantBasis"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="button-row">
+        <button class="primary-button" @onclick="SaveApplicantDifferentiatorsAsync">Save applicant differentiators</button>
+        <button class="secondary-button" @onclick="ClearApplicantDifferentiatorsAsync" disabled="@(!Workspace.ApplicantDifferentiatorProfile.HasContent)">Clear differentiators</button>
+    </div>
+</section>
+
+@code {
+    private const long MaxInsightsPdfSizeBytes = 10 * 1024 * 1024;
+    private const string InsightsDraftRequestMessage = "Drafting applicant differentiators from Insights Discovery PDF";
+    private const string InsightsExtractionMessage = "Extracting text from Insights Discovery PDF";
+    private const string InsightsDraftTelemetryMessage = "Drafting applicant differentiators";
+
+    private bool isProcessingInsightsPdf;
+    private string? insightsPdfErrorMessage;
+    private string? insightsDraftStatusDetail;
+    private IReadOnlyList<string> insightsPdfWarnings = Array.Empty<string>();
+    private string workStyle = string.Empty;
+    private string communicationStyle = string.Empty;
+    private string leadershipStyle = string.Empty;
+    private string stakeholderStyle = string.Empty;
+    private string motivators = string.Empty;
+    private string targetNarrative = string.Empty;
+    private string watchouts = string.Empty;
+    private string aboutApplicantBasis = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        SyncApplicantDifferentiatorInputs(Workspace.ApplicantDifferentiatorProfile);
+        Operations.Changed += HandleChanged;
+    }
+
+    public void Dispose()
+    {
+        Operations.Changed -= HandleChanged;
+    }
+
+    private Task SaveApplicantDifferentiatorsAsync()
+    {
+        var differentiatorProfile = BuildApplicantDifferentiatorProfileFromInputs();
+
+        Workspace.SetApplicantDifferentiatorProfile(differentiatorProfile);
+        insightsPdfWarnings = Array.Empty<string>();
+        insightsPdfErrorMessage = null;
+        insightsDraftStatusDetail = differentiatorProfile.HasContent
+            ? "Current applicant differentiator field values are saved. A new Insights Discovery upload will replace them only after a successful extract-and-draft pass."
+            : null;
+        Operations.Success(
+            differentiatorProfile.HasContent ? "Applicant differentiators saved." : "Applicant differentiators cleared.",
+            differentiatorProfile.HasContent
+                ? "The notes are stored and will be applied the next time you run fit review or generate drafts."
+                : "The session no longer applies an applicant differentiator overlay.");
+        return Task.CompletedTask;
+    }
+
+    private Task ClearApplicantDifferentiatorsAsync()
+    {
+        SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile.Empty);
+        Workspace.SetApplicantDifferentiatorProfile(ApplicantDifferentiatorProfile.Empty);
+        insightsDraftStatusDetail = null;
+        insightsPdfWarnings = Array.Empty<string>();
+        insightsPdfErrorMessage = null;
+        Operations.Info("Applicant differentiators cleared.", "The cleared notes will take effect the next time you run fit review or generate drafts.");
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleInsightsDiscoveryPdfSelectedAsync(InputFileChangeEventArgs eventArgs)
+    {
+        insightsPdfErrorMessage = null;
+        insightsPdfWarnings = Array.Empty<string>();
+
+        var file = eventArgs.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        if (!Workspace.IsLlmReady)
+        {
+            insightsPdfErrorMessage = "Choose the session LLM settings before uploading an Insights Discovery PDF.";
+            return;
+        }
+
+        if (!string.Equals(Path.GetExtension(file.Name), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            insightsPdfErrorMessage = "Only PDF files are supported for Insights Discovery upload.";
+            return;
+        }
+
+        if (file.Size > MaxInsightsPdfSizeBytes)
+        {
+            insightsPdfErrorMessage = $"The uploaded PDF is too large. The current limit is {MaxInsightsPdfSizeBytes / (1024 * 1024)} MB.";
+            return;
+        }
+
+        isProcessingInsightsPdf = true;
+        var draftedProfile = ApplicantDifferentiatorProfile.Empty;
+
+        try
+        {
+            using var stream = file.OpenReadStream(MaxInsightsPdfSizeBytes);
+
+            await Operations.RunAsync(
+                InsightsDraftRequestMessage,
+                file.Name,
+                async () =>
+                {
+                    Operations.UpdateCurrent(InsightsExtractionMessage, file.Name);
+                    var importResult = await InsightsDiscoveryPdfImporter.ImportAsync(stream);
+                    insightsPdfWarnings = [.. importResult.Warnings];
+
+                    if (!importResult.HasText)
+                    {
+                        throw new InvalidOperationException("No readable text could be extracted from the uploaded PDF. It may be image-only or scanned.");
+                    }
+
+                    Workspace.MarkLlmWorkStarted();
+                    Operations.UpdateCurrent(
+                        "Drafting applicant differentiators",
+                        $"{importResult.PageCount} pages and {importResult.CharacterCount:N0} extracted characters.");
+
+                    draftedProfile = await InsightsDiscoveryDraftingService.DraftAsync(
+                        importResult.ExtractedText,
+                        Workspace.SelectedLlmModel,
+                        Workspace.SelectedThinkingLevel,
+                        Operations.UpdateCurrent);
+                });
+
+            SyncApplicantDifferentiatorInputs(draftedProfile);
+            Workspace.SetApplicantDifferentiatorProfile(draftedProfile);
+            insightsDraftStatusDetail = $"Latest draft source: {file.Name}. A new upload will replace the current field values only after a successful extract-and-draft pass.";
+        }
+        catch (Exception exception)
+        {
+            insightsPdfErrorMessage = exception.Message;
+        }
+        finally
+        {
+            isProcessingInsightsPdf = false;
+        }
+    }
+
+    private void SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile differentiatorProfile)
+    {
+        workStyle = differentiatorProfile.WorkStyle ?? string.Empty;
+        communicationStyle = differentiatorProfile.CommunicationStyle ?? string.Empty;
+        leadershipStyle = differentiatorProfile.LeadershipStyle ?? string.Empty;
+        stakeholderStyle = differentiatorProfile.StakeholderStyle ?? string.Empty;
+        motivators = differentiatorProfile.Motivators ?? string.Empty;
+        targetNarrative = differentiatorProfile.TargetNarrative ?? string.Empty;
+        watchouts = differentiatorProfile.Watchouts ?? string.Empty;
+        aboutApplicantBasis = differentiatorProfile.AboutApplicantBasis ?? string.Empty;
+    }
+
+    private ApplicantDifferentiatorProfile BuildApplicantDifferentiatorProfileFromInputs()
+        => new()
+        {
+            WorkStyle = NullIfWhiteSpace(workStyle),
+            CommunicationStyle = NullIfWhiteSpace(communicationStyle),
+            LeadershipStyle = NullIfWhiteSpace(leadershipStyle),
+            StakeholderStyle = NullIfWhiteSpace(stakeholderStyle),
+            Motivators = NullIfWhiteSpace(motivators),
+            TargetNarrative = NullIfWhiteSpace(targetNarrative),
+            Watchouts = NullIfWhiteSpace(watchouts),
+            AboutApplicantBasis = NullIfWhiteSpace(aboutApplicantBasis)
+        };
+
+    private string GetInsightsDraftStatusClass()
+    {
+        if (IsInsightsDraftActive())
+        {
+            return "status-pending";
+        }
+
+        return Workspace.ApplicantDifferentiatorProfile.HasContent && !string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
+            ? "status-ok"
+            : "status-pending";
+    }
+
+    private string GetInsightsDraftStatusMessage()
+    {
+        if (IsInsightsDraftActive())
+        {
+            return "Insights Discovery PDF is being processed. The fields below will only be replaced if extraction and drafting both succeed.";
+        }
+
+        if (!Workspace.IsLlmReady)
+        {
+            return Workspace.SelectedLlmProvider == LlmProviderKind.Ollama
+                ? "Choose the session LLM settings before uploading an Insights Discovery PDF."
+                : "Choose or download a Foundry model before uploading an Insights Discovery PDF.";
+        }
+
+        return string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
+            ? "Upload an Insights Discovery PDF to auto-draft these fields, or fill them in manually."
+            : "Insights Discovery draft applied to the applicant differentiator fields.";
+    }
+
+    private LlmOperationTelemetry? GetInsightsDraftTelemetry()
+        => IsInsightsDraftTelemetryActive() ? Operations.ActiveLlmTelemetry : null;
+
+    private bool IsInsightsDraftActive()
+        => isProcessingInsightsPdf
+            || IsCurrentInsightsOperation(InsightsDraftRequestMessage)
+            || IsCurrentInsightsOperation(InsightsExtractionMessage)
+            || IsCurrentInsightsOperation(InsightsDraftTelemetryMessage)
+            || IsInsightsDraftTelemetryActive();
+
+    private bool IsInsightsDraftTelemetryActive()
+        => string.Equals(Operations.ActiveLlmTelemetry?.Message, InsightsDraftTelemetryMessage, StringComparison.Ordinal);
+
+    private bool IsCurrentInsightsOperation(string message)
+        => Operations.IsBusy && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
+
+    private string? GetInsightsDraftStatusDetail()
+        => IsInsightsDraftActive() ? Operations.CurrentDetail : insightsDraftStatusDetail;
+
+    private static string FormatDuration(TimeSpan? duration)
+    {
+        if (duration is null)
+        {
+            return "Pending";
+        }
+
+        var value = duration.Value;
+        return value.TotalMinutes >= 1
+            ? value.ToString(@"m\:ss")
+            : value.ToString(@"s\.f\s");
+    }
+
+    private static string FormatTokenCount(long? tokens)
+        => tokens?.ToString("N0") ?? "Pending";
+
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+}

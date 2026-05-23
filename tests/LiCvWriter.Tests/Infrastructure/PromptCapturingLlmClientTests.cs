@@ -45,11 +45,11 @@ public sealed class PromptCapturingLlmClientTests
 
     private sealed class StubLlmClient : ILlmClient
     {
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new LlmResponse(request.Model, "ok", null, true, null, null, null));

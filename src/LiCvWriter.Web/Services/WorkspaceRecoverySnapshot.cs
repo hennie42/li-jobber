@@ -10,6 +10,7 @@ public sealed record WorkspaceRecoverySnapshot(
     IReadOnlyList<JobSetRecoveryState> JobSets,
     ApplicantDifferentiatorProfile? ApplicantDifferentiatorProfile = null,
     CandidateProfile? CandidateProfile = null,
+    string SelectedLlmProvider = "",
     string SelectedLlmModel = "",
     string SelectedThinkingLevel = "",
     DraftGenerationPreferences? DraftGenerationPreferences = null,

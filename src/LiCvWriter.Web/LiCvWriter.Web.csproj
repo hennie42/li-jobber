@@ -3,17 +3,49 @@
     <RootNamespace>LiCvWriter.Web</RootNamespace>
     <AssemblyName>LiCvWriter.Web</AssemblyName>
     <UserSecretsId>LiCvWriter-0d09564a-60f2-4a3d-af83-601d8f91dfe1</UserSecretsId>
+    <FoundryWinMlPluginProject>..\LiCvWriter.Infrastructure.WinML\LiCvWriter.Infrastructure.WinML.csproj</FoundryWinMlPluginProject>
+    <FoundryWinMlPluginOutputRoot>..\LiCvWriter.Infrastructure.WinML\bin\$(Configuration)\net10.0-windows10.0.26100.0\win-x64\</FoundryWinMlPluginOutputRoot>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LiCvWriter.Application\LiCvWriter.Application.csproj" />
     <ProjectReference Include="..\LiCvWriter.Infrastructure\LiCvWriter.Infrastructure.csproj" />
     <ProjectReference Include="..\LiCvWriter.Core\LiCvWriter.Core.csproj" />
-    <ProjectReference Include="..\LiCvWriter.Web.Client\LiCvWriter.Web.Client.csproj" />
+    <ProjectReference Include="..\LiCvWriter.Web.Client\LiCvWriter.Web.Client.csproj"
+              GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishSingleFile;UseAppHost;PublishTrimmed" />
     <ProjectReference Include="..\LiCvWriter.Web.SharedUI\LiCvWriter.Web.SharedUI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.7" />
   </ItemGroup>
+
+  <Target Name="BuildFoundryWinMlPlugin" BeforeTargets="Build;Publish"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(FoundryWinMlPluginProject)')">
+    <MSBuild Projects="$(FoundryWinMlPluginProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;PublishSingleFile=false;SelfContained=false;PublishTrimmed=false" />
+  </Target>
+
+  <Target Name="CopyFoundryWinMlPluginToBuildOutput" AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(FoundryWinMlPluginOutputRoot)LiCvWriter.Infrastructure.WinML.dll')">
+    <ItemGroup>
+      <FoundryWinMlPluginFiles Include="$(FoundryWinMlPluginOutputRoot)**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(FoundryWinMlPluginFiles)"
+          DestinationFiles="@(FoundryWinMlPluginFiles->'$(OutDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyFoundryWinMlPluginToPublishOutput" AfterTargets="Publish"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(FoundryWinMlPluginOutputRoot)LiCvWriter.Infrastructure.WinML.dll') and '$(PublishDir)' != ''">
+    <ItemGroup>
+      <FoundryWinMlPluginPublishFiles Include="$(FoundryWinMlPluginOutputRoot)**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(FoundryWinMlPluginPublishFiles)"
+          DestinationFiles="@(FoundryWinMlPluginPublishFiles->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

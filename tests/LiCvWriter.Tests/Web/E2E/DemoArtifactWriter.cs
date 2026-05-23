@@ -113,7 +113,7 @@ public sealed class DemoArtifactWriter
             "2. Review each job-set row while the company-name masking remains visible.",
             "3. Select the three job sets in the batch list.",
             "4. Click Start selected.",
-            "5. Watch the batch label, job-set status chips, Status Monitor, Reasoning Monitor, and Activity feed update while the LLM operation runs.",
+            "5. Watch the batch label, job-set status chips, Reasoning Monitor, and Activity feed update while the LLM operation runs.",
             string.Empty
         };
 
@@ -136,7 +136,7 @@ public sealed class DemoArtifactWriter
         markdown.Add("3. It shows the redirect pages that now fold import, research, and generation back into the main setup and workbench flows.");
         markdown.Add("4. It walks through the Job Workbench overview, discovery, batch action settings, and job-set rows.");
         markdown.Add("5. It opens a job-set detail page to show research, fit review, technology gap, ranked evidence, draft generation, generated markdown drafts, and exported files.");
-        markdown.Add("6. It returns to the overview, selects three job sets, clicks Start selected, and holds on live Status Monitor, Reasoning Monitor, and Activity feed updates.");
+        markdown.Add("6. It returns to the overview, selects three job sets, clicks Start selected, and holds on live batch status, Reasoning Monitor, and Activity feed updates.");
         markdown.Add(string.Empty);
         markdown.Add("## Validation");
         markdown.Add(string.Empty);

@@ -25,10 +25,11 @@ public enum CompanyProfileEditableField
     Signals
 }
 
-public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecoveryStore? recoveryStore = null)
+public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecoveryStore? recoveryStore = null, FoundryOptions? foundryOptions = null)
 {
     private static readonly string[] SupportedThinkingLevels = ["low", "medium", "high"];
     private readonly object gate = new();
+    private readonly FoundryOptions foundryOptions = foundryOptions ?? new FoundryOptions();
     private readonly WorkspaceRecoveryStore? recoveryStateStore = recoveryStore;
     private readonly List<JobSetSessionState> jobSets = LoadRecoveredJobSets(recoveryStore);
     private readonly List<SavedSuggestionListState> savedSuggestionLists = LoadSavedSuggestionLists(recoveryStore);
@@ -39,7 +40,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private LinkedInImportDiagnosticsSnapshot? linkedInImportDiagnostics = LoadLinkedInImportDiagnostics(recoveryStore);
     private ApplicantDifferentiatorProfile applicantDifferentiatorProfile = LoadApplicantDifferentiatorProfile(recoveryStore);
     private LinkedInAuthorizationStatus linkedInAuthorizationStatus = LoadLinkedInAuthorizationStatus(recoveryStore);
-    private OllamaModelAvailability? ollamaAvailability;
+    private LlmModelAvailability? ollamaAvailability;
+    private LlmModelAvailability? foundryAvailability;
+    private LlmProviderKind selectedLlmProvider = LoadSelectedLlmProvider(recoveryStore);
     private string selectedLlmModel = LoadSelectedLlmModel(recoveryStore, ollamaOptions.Model);
     private string selectedThinkingLevel = LoadSelectedThinkingLevel(recoveryStore, ollamaOptions.Think);
     private DraftGenerationPreferences draftGenerationPreferences = LoadDraftGenerationPreferences(recoveryStore);
@@ -78,13 +81,18 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     public bool CanStartDraftGenerationForJobSet(string jobSetId) => Read(() =>
         candidateProfile is not null
         && GetJobSetUnsafe(jobSetId).JobPosting is not null
-        && ollamaAvailability is not null
-        && isLlmSessionConfigured
-        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
+        && IsSelectedProviderReadyUnsafe());
 
     public LinkedInAuthorizationStatus LinkedInAuthorizationStatus => Read(() => linkedInAuthorizationStatus);
 
-    public OllamaModelAvailability? OllamaAvailability => Read(() => ollamaAvailability);
+    public LlmModelAvailability? OllamaAvailability => Read(() => ollamaAvailability);
+
+    public LlmModelAvailability? FoundryAvailability => Read(() => foundryAvailability);
+
+    /// <summary>
+    /// Gets the provider selected for future LLM-backed work in the current session.
+    /// </summary>
+    public LlmProviderKind SelectedLlmProvider => Read(() => selectedLlmProvider);
 
     public string SelectedLlmModel => Read(() => selectedLlmModel);
 
@@ -102,9 +110,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
 
     public bool HasStartedLlmWork => Read(() => hasStartedLlmWork);
 
-    public bool IsLlmReady => Read(() => ollamaAvailability is not null
-        && isLlmSessionConfigured
-        && ollamaAvailability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)));
+    public bool IsLlmReady => Read(IsSelectedProviderReadyUnsafe);
 
     public bool CanEditLlmSessionSettings => true;
 
@@ -114,9 +120,34 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             : capacityVerdicts.TryGetValue(model, out var verdict) ? verdict : null);
 
     public OllamaCapacityVerdict? CurrentCapacityVerdict => Read(() =>
-        string.IsNullOrWhiteSpace(selectedLlmModel)
+        selectedLlmProvider != LlmProviderKind.Ollama || string.IsNullOrWhiteSpace(selectedLlmModel)
             ? null
             : capacityVerdicts.TryGetValue(selectedLlmModel, out var verdict) ? verdict : null);
+
+    public void SetLlmAvailability(LlmModelAvailability availability)
+    {
+        ArgumentNullException.ThrowIfNull(availability);
+
+        lock (gate)
+        {
+            switch (availability.Provider)
+            {
+                case LlmProviderKind.Foundry:
+                    foundryAvailability = availability;
+                    break;
+                default:
+                    ollamaAvailability = availability;
+                    break;
+            }
+
+            if (selectedLlmProvider == availability.Provider)
+            {
+                ReconcileSelectedProviderAvailabilityUnsafe(availability.Provider, availability);
+            }
+        }
+
+        NotifyChanged();
+    }
 
     public void SetCapacityVerdict(OllamaCapacityVerdict verdict)
     {
@@ -618,21 +649,35 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
-    public void SetOllamaAvailability(OllamaModelAvailability availability)
+    public void SetOllamaAvailability(LlmModelAvailability availability)
+        => SetLlmAvailability(availability with { Provider = LlmProviderKind.Ollama });
+
+    public void SetFoundryAvailability(LlmModelAvailability availability)
+        => SetLlmAvailability(availability with { Provider = LlmProviderKind.Foundry });
+
+    /// <summary>
+    /// Updates the selected LLM provider while preserving the current model choice for later recovery.
+    /// </summary>
+    /// <param name="provider">The provider to use for future LLM operations.</param>
+    public void SetLlmProviderSelection(LlmProviderKind provider)
     {
         lock (gate)
         {
-            ollamaAvailability = availability;
+            if (selectedLlmProvider == provider)
+            {
+                return;
+            }
 
-            if (!availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)))
+            selectedLlmProvider = provider;
+            var availability = GetAvailabilityUnsafe(provider);
+            if (availability is not null
+                && !availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)))
             {
-                selectedLlmModel = ResolvePreferredModel(availability.AvailableModels, ollamaOptions.Model);
-                isLlmSessionConfigured = false;
+                selectedLlmModel = ResolvePreferredModel(availability.AvailableModels, GetConfiguredModel(provider));
             }
-            else if (!isLlmSessionConfigured)
-            {
-                isLlmSessionConfigured = true;
-            }
+
+            isLlmSessionConfigured = availability is not null
+                && availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase));
         }
 
         NotifyChanged();
@@ -642,9 +687,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     {
         lock (gate)
         {
-            if (ollamaAvailability is null)
+            var availability = GetAvailabilityUnsafe(selectedLlmProvider);
+            if (availability is null)
             {
-                throw new InvalidOperationException("Check Ollama access before selecting the session model.");
+                throw new InvalidOperationException($"Check {GetProviderDisplayName(selectedLlmProvider)} access before selecting the session model.");
             }
 
             var normalizedModel = model.Trim();
@@ -653,9 +699,9 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 throw new ArgumentException("A session model is required.", nameof(model));
             }
 
-            if (!ollamaAvailability.AvailableModels.Any(value => value.Equals(normalizedModel, StringComparison.OrdinalIgnoreCase)))
+            if (!availability.AvailableModels.Any(value => value.Equals(normalizedModel, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new InvalidOperationException($"The selected model '{normalizedModel}' is not available from Ollama in this session.");
+                throw new InvalidOperationException($"The selected model '{normalizedModel}' is not available from {GetProviderDisplayName(selectedLlmProvider)} in this session.");
             }
 
             selectedLlmModel = normalizedModel;
@@ -828,6 +874,50 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             ? normalized
             : "medium";
     }
+
+    private bool IsSelectedProviderReadyUnsafe()
+    {
+        var availability = GetAvailabilityUnsafe(selectedLlmProvider);
+        return availability is not null
+            && isLlmSessionConfigured
+            && availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private LlmModelAvailability? GetAvailabilityUnsafe(LlmProviderKind provider)
+        => provider switch
+        {
+            LlmProviderKind.Foundry => foundryAvailability,
+            _ => ollamaAvailability
+        };
+
+    private void ReconcileSelectedProviderAvailabilityUnsafe(LlmProviderKind provider, LlmModelAvailability availability)
+    {
+        if (!availability.AvailableModels.Any(model => model.Equals(selectedLlmModel, StringComparison.OrdinalIgnoreCase)))
+        {
+            selectedLlmModel = ResolvePreferredModel(availability.AvailableModels, GetConfiguredModel(provider));
+            isLlmSessionConfigured = false;
+            return;
+        }
+
+        if (!isLlmSessionConfigured)
+        {
+            isLlmSessionConfigured = true;
+        }
+    }
+
+    private string GetConfiguredModel(LlmProviderKind provider)
+        => provider switch
+        {
+            LlmProviderKind.Foundry => foundryOptions.DefaultModelAlias,
+            _ => ollamaOptions.Model
+        };
+
+    private static string GetProviderDisplayName(LlmProviderKind provider)
+        => provider switch
+        {
+            LlmProviderKind.Foundry => "Microsoft Foundry Local",
+            _ => "Ollama"
+        };
 
     private static string ResolvePreferredModel(IReadOnlyList<string> availableModels, string configuredModel)
     {
@@ -1003,6 +1093,14 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private static LinkedInAuthorizationStatus LoadLinkedInAuthorizationStatus(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.LinkedInAuthorizationStatus
             ?? new LinkedInAuthorizationStatus(false, "DMA member snapshot not loaded.", null, null, null);
+
+    private static LlmProviderKind LoadSelectedLlmProvider(WorkspaceRecoveryStore? recoveryStore)
+    {
+        var recoveredProvider = recoveryStore?.Load()?.SelectedLlmProvider;
+        return Enum.TryParse<LlmProviderKind>(recoveredProvider, ignoreCase: true, out var provider)
+            ? provider
+            : LlmProviderKind.Ollama;
+    }
 
     private static string LoadSelectedLlmModel(WorkspaceRecoveryStore? recoveryStore, string configuredModel)
     {
@@ -1196,6 +1294,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
                 jobSet.LatestIngestionWarnings.Count == 0 ? null : jobSet.LatestIngestionWarnings.ToArray())).ToArray(),
             applicantDifferentiatorProfile,
             candidateProfile,
+            selectedLlmProvider.ToString(),
             selectedLlmModel,
             selectedThinkingLevel,
             draftGenerationPreferences,

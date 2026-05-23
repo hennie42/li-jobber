@@ -16,7 +16,7 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "low" });
 
-        session.SetOllamaAvailability(new OllamaModelAvailability(
+        session.SetOllamaAvailability(new LlmModelAvailability(
             "0.9.0",
             "configured-model",
             true,
@@ -35,7 +35,7 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
 
-        session.SetOllamaAvailability(new OllamaModelAvailability(
+        session.SetOllamaAvailability(new LlmModelAvailability(
             "0.9.0",
             "configured-model",
             true,
@@ -51,7 +51,7 @@ public sealed class WorkspaceSessionTests
     {
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
 
-        session.SetOllamaAvailability(new OllamaModelAvailability(
+        session.SetOllamaAvailability(new LlmModelAvailability(
             "0.9.0",
             "configured-model",
             true,
@@ -72,7 +72,7 @@ public sealed class WorkspaceSessionTests
         var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
 
         session.MarkLlmWorkStarted();
-        session.SetOllamaAvailability(new OllamaModelAvailability(
+        session.SetOllamaAvailability(new LlmModelAvailability(
             "0.9.0",
             "configured-model",
             true,
@@ -82,6 +82,86 @@ public sealed class WorkspaceSessionTests
         Assert.True(session.IsLlmSessionConfigured);
         Assert.True(session.IsLlmReady);
         Assert.Equal("configured-model", session.SelectedLlmModel);
+    }
+
+    [Fact]
+    public void SelectedLlmProvider_DefaultsToOllama()
+    {
+        var session = new WorkspaceSession(new OllamaOptions());
+
+        Assert.Equal(LlmProviderKind.Ollama, session.SelectedLlmProvider);
+    }
+
+    [Fact]
+    public void SetLlmProviderSelection_Foundry_ResetsReadiness()
+    {
+        var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
+
+        session.SetOllamaAvailability(new LlmModelAvailability(
+            "0.9.0",
+            "configured-model",
+            true,
+            ["configured-model", "other-model"]));
+
+        session.SetLlmProviderSelection(LlmProviderKind.Foundry);
+
+        Assert.Equal(LlmProviderKind.Foundry, session.SelectedLlmProvider);
+        Assert.False(session.IsLlmReady);
+        Assert.False(session.IsLlmSessionConfigured);
+    }
+
+    [Fact]
+    public void CurrentCapacityVerdict_IsHiddenWhenFoundryIsSelected()
+    {
+        var session = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
+
+        session.SetCapacityVerdict(OllamaCapacityVerdict.Unknown("configured-model", "pending"));
+        session.SetLlmProviderSelection(LlmProviderKind.Foundry);
+
+        Assert.Null(session.CurrentCapacityVerdict);
+    }
+
+    [Fact]
+    public void SetFoundryAvailability_AfterProviderSelection_SelectsConfiguredDefaultModelWithoutMarkingReady()
+    {
+        var session = new WorkspaceSession(
+            new OllamaOptions { Model = "ollama-model", Think = "medium" },
+            foundryOptions: new FoundryOptions { DefaultModelAlias = "phi-3.5-mini" });
+
+        session.SetLlmProviderSelection(LlmProviderKind.Foundry);
+        session.SetFoundryAvailability(new LlmModelAvailability(
+            "1.1.0",
+            "phi-3.5-mini",
+            true,
+            ["phi-3.5-mini", "phi-4-mini"],
+            Provider: LlmProviderKind.Foundry));
+
+        Assert.Equal("phi-3.5-mini", session.SelectedLlmModel);
+        Assert.False(session.IsLlmSessionConfigured);
+        Assert.False(session.IsLlmReady);
+    }
+
+    [Fact]
+    public void SetLlmSessionSettings_WhenFoundrySelected_MarksSessionReadyForCachedModel()
+    {
+        var session = new WorkspaceSession(
+            new OllamaOptions { Model = "ollama-model", Think = "medium" },
+            foundryOptions: new FoundryOptions { DefaultModelAlias = "phi-3.5-mini" });
+
+        session.SetLlmProviderSelection(LlmProviderKind.Foundry);
+        session.SetFoundryAvailability(new LlmModelAvailability(
+            "1.1.0",
+            "phi-3.5-mini",
+            true,
+            ["phi-3.5-mini", "phi-4-mini"],
+            Provider: LlmProviderKind.Foundry));
+
+        session.SetLlmSessionSettings("phi-4-mini", "high");
+
+        Assert.Equal("phi-4-mini", session.SelectedLlmModel);
+        Assert.Equal("high", session.SelectedThinkingLevel);
+        Assert.True(session.IsLlmSessionConfigured);
+        Assert.True(session.IsLlmReady);
     }
 
     [Fact]

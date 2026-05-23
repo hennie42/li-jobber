@@ -29,11 +29,13 @@ builder.Services.AddRazorComponents()
 
 var linkedInOptions = builder.Configuration.GetSection(LinkedInAuthOptions.SectionName).Get<LinkedInAuthOptions>() ?? new LinkedInAuthOptions();
 var jobDiscoveryOptions = builder.Configuration.GetSection(JobDiscoveryOptions.SectionName).Get<JobDiscoveryOptions>() ?? new JobDiscoveryOptions();
+var foundryOptions = builder.Configuration.GetSection(FoundryOptions.SectionName).Get<FoundryOptions>() ?? new FoundryOptions();
 var ollamaOptions = builder.Configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>() ?? new OllamaOptions();
 var storageOptions = builder.Configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>() ?? new StorageOptions();
 
 builder.Services.AddSingleton(linkedInOptions);
 builder.Services.AddSingleton(jobDiscoveryOptions);
+builder.Services.AddSingleton(foundryOptions);
 builder.Services.AddSingleton(ollamaOptions);
 builder.Services.AddSingleton(storageOptions);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -72,8 +74,18 @@ builder.Services.AddHttpClient<OllamaClient>(client =>
     client.BaseAddress = NormalizeApiBase(ollamaOptions.BaseUrl);
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
+builder.Services.AddSingleton<FoundryLocalManagerAccessor>();
+builder.Services.AddSingleton<DefaultFoundrySdkBridge>();
+builder.Services.AddSingleton<IFoundrySdkBridge>(provider =>
+    FoundrySdkBridgeLoader.Create(
+        provider.GetRequiredService<FoundryOptions>(),
+        provider.GetRequiredService<ILoggerFactory>(),
+        provider.GetRequiredService<DefaultFoundrySdkBridge>()));
+builder.Services.AddSingleton<IFoundryCatalogClient, FoundryCatalogClient>();
+builder.Services.AddScoped<FoundryLlmClient>();
+builder.Services.AddScoped<WorkspaceLlmClient>();
 builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
-    new PromptCapturingLlmClient(provider.GetRequiredService<OllamaClient>()));
+    new PromptCapturingLlmClient(provider.GetRequiredService<WorkspaceLlmClient>()));
 builder.Services.AddScoped<ILlmClient>(provider =>
     provider.GetRequiredService<PromptCapturingLlmClient>());
 builder.Services.AddScoped<OllamaCapacityProbe>();
@@ -132,10 +144,22 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/api/health/ollama", async (ILlmClient client, CancellationToken cancellationToken) =>
+app.MapGet("/api/health/ollama", async (OllamaClient client, CancellationToken cancellationToken) =>
 {
     var result = await client.VerifyModelAvailabilityAsync(cancellationToken);
     return Results.Ok(result);
+});
+
+app.MapGet("/api/health/foundry", async (IFoundryCatalogClient catalogClient, CancellationToken cancellationToken) =>
+{
+    var result = await catalogClient.GetSnapshotAsync(cancellationToken);
+    return Results.Ok(result.Availability);
+});
+
+app.MapGet("/api/health/foundry/acceleration", async (IFoundryCatalogClient catalogClient, CancellationToken cancellationToken) =>
+{
+    var result = await catalogClient.GetSnapshotAsync(cancellationToken);
+    return Results.Ok(result.Acceleration);
 });
 
 app.MapPost("/api/llm/operations/generate-drafts", (StartDraftGenerationOperationRequest request, LlmOperationBroker broker) =>
@@ -235,7 +259,7 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
 {
     app.MapPost("/api/playwright/demo-seed", async Task<IResult> (
         WorkspaceSession workspace,
-        ILlmClient llmClient,
+        OllamaClient llmClient,
         JobFitWorkspaceRefreshService fitRefreshService,
         OllamaOptions options,
         HttpContext httpContext,
@@ -307,7 +331,7 @@ static void TryEnableStaticWebAssets(WebApplicationBuilder builder)
     Microsoft.AspNetCore.Hosting.StaticWebAssets.StaticWebAssetsLoader.UseStaticWebAssets(builder.Environment, builder.Configuration);
 }
 
-static string SelectDemoModel(OllamaModelAvailability availability, string configuredModel)
+static string SelectDemoModel(LlmModelAvailability availability, string configuredModel)
 {
     var configuredMatch = availability.AvailableModels.FirstOrDefault(model => model.Equals(configuredModel, StringComparison.OrdinalIgnoreCase));
     return configuredMatch ?? availability.Model ?? availability.AvailableModels[0];

@@ -3,8 +3,25 @@
 
 <nav class="nav-cluster">
     <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">
-        <span>Start / Setup</span>
+        <span>Start / Overview</span>
     </NavLink>
+    <ul class="nav-subitem-list">
+        <li>
+            <NavLink class="nav-item nav-subitem" href="/setup/llm">
+                <span class="nav-subitem-label">LLM setup</span>
+            </NavLink>
+        </li>
+        <li>
+            <NavLink class="nav-item nav-subitem" href="/setup/linkedin">
+                <span class="nav-subitem-label">LinkedIn</span>
+            </NavLink>
+        </li>
+        <li>
+            <NavLink class="nav-item nav-subitem" href="/setup/differentiators">
+                <span class="nav-subitem-label">Differentiators</span>
+            </NavLink>
+        </li>
+    </ul>
     <NavLink class="nav-item" href="/workspace/job-workbench" Match="NavLinkMatch.All">
         <span>Job Workbench</span>
     </NavLink>

@@ -1,9 +1,9 @@
 namespace LiCvWriter.Application.Models;
 
 /// <summary>
-/// Outcome of benchmarking a single Ollama model. Combines a capacity probe
-/// (decode speed, GPU fit) with a deterministic JSON-extraction quality score
-/// to produce a single overall score for ranking.
+/// Outcome of benchmarking a single local model. Combines a capacity probe
+/// (decode speed, fit classification) with a deterministic JSON-extraction
+/// quality score to produce a single overall score for ranking.
 /// </summary>
 public sealed record ModelBenchmarkResult(
     string Model,
@@ -15,7 +15,8 @@ public sealed record ModelBenchmarkResult(
     TimeSpan? TotalDuration,
     OllamaCapacityFit Fit,
     IReadOnlyList<string> Notes,
-    string? FailedReason)
+    string? FailedReason,
+    LlmProviderKind Provider = LlmProviderKind.Ollama)
 {
     public bool Succeeded => FailedReason is null;
 }

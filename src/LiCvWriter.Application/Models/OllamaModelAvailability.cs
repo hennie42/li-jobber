@@ -1,13 +1,14 @@
 namespace LiCvWriter.Application.Models;
 
-public sealed record OllamaModelAvailability(
+public sealed record LlmModelAvailability(
     string Version,
     string Model,
     bool Installed,
     IReadOnlyList<string> AvailableModels,
-    IReadOnlyList<OllamaRunningModel>? RunningModels = null)
+    IReadOnlyList<LlmRunningModel>? RunningModels = null,
+    LlmProviderKind Provider = LlmProviderKind.Ollama)
 {
-    public IReadOnlyList<OllamaRunningModel> EffectiveRunningModels { get; } = RunningModels ?? Array.Empty<OllamaRunningModel>();
+    public IReadOnlyList<LlmRunningModel> EffectiveRunningModels { get; } = RunningModels ?? Array.Empty<LlmRunningModel>();
 
     public bool IsConfiguredModelLoaded
         => IsModelLoaded(Model);

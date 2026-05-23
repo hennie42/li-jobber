@@ -2,6 +2,7 @@ using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
 using LiCvWriter.Application.Services;
+using LiCvWriter.Infrastructure.Llm;
 using LiCvWriter.Web.Services;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -119,11 +120,147 @@ public sealed class ModelBenchmarkCoordinatorTests
             () => coordinator.StartAsync(Array.Empty<string>()));
     }
 
-    private static (ModelBenchmarkCoordinator coordinator, WorkspaceSession workspace) BuildCoordinator(ILlmClient llmClient)
+    [Fact]
+    public async Task StartAsync_WhenProviderIsFoundry_PersistsFoundryProviderInSession()
+    {
+        var foundryResponses = BuildPerfectResponses("phi-foundry");
+        var foundryBridge = new ScriptedFoundrySdkBridge(foundryResponses, ["phi-foundry"]);
+        var foundryCatalogClient = new ScriptedFoundryCatalogClient(
+            new FoundryCatalogSnapshot(
+                new LlmModelAvailability(
+                    Version: "1.0.0",
+                    Model: "phi-foundry",
+                    Installed: true,
+                    AvailableModels: ["phi-foundry"],
+                    RunningModels: Array.Empty<LlmRunningModel>(),
+                    Provider: LlmProviderKind.Foundry),
+                [new FoundryCatalogModel("phi-foundry", "Phi Foundry", "phi-foundry", 1024, true, false)],
+                FoundryAccelerationSnapshot.Unsupported("Not available"),
+                DateTimeOffset.UtcNow));
+        var (coordinator, workspace) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(LlmProviderKind.Foundry, ["phi-foundry"]);
+
+        var session = coordinator.Last;
+        Assert.NotNull(session);
+        Assert.Equal(LlmProviderKind.Foundry, session!.Provider);
+        Assert.All(session.Results, result => Assert.Equal(LlmProviderKind.Foundry, result.Provider));
+        Assert.Equal(LlmProviderKind.Foundry, workspace.LastBenchmarkSession!.Provider);
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_DownloadsBenchmarksRemovesBeforePublishingResult()
+    {
+        var callSequence = new List<string>();
+        ModelBenchmarkCoordinator? coordinator = null;
+
+        var foundryResponses = BuildPerfectResponses("phi-foundry", evalSeconds: 16.0);
+        var foundryBridge = new ScriptedFoundrySdkBridge(
+            foundryResponses,
+            ["phi-foundry"],
+            [new LlmRunningModel("phi-foundry", "phi-foundry", null, SizeVramBytes: 4_000_000_000, SizeBytes: 16_000_000_000, Provider: LlmProviderKind.Foundry)],
+            (_, invocation) => callSequence.Add(invocation == 1 ? "benchmark" : "benchmark-followup"));
+
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: Array.Empty<string>(), isCached: false),
+            onDownload: _ =>
+            {
+                callSequence.Add("download");
+                Assert.Empty(coordinator?.Current?.Results ?? Array.Empty<ModelBenchmarkResult>());
+            },
+            onRemove: _ =>
+            {
+                callSequence.Add("remove");
+                Assert.Empty(coordinator?.Current?.Results ?? Array.Empty<ModelBenchmarkResult>());
+            });
+
+        (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: true);
+
+        var session = coordinator.Last;
+        Assert.NotNull(session);
+        Assert.Single(session!.Results);
+        Assert.Contains(session.Results[0].Notes, note => note.Contains("Removed from the local Foundry cache after benchmark", StringComparison.Ordinal));
+
+        var downloadIndex = callSequence.IndexOf("download");
+        var benchmarkIndex = callSequence.IndexOf("benchmark");
+        var removeIndex = callSequence.IndexOf("remove");
+
+        Assert.True(downloadIndex >= 0, "Expected a download step.");
+        Assert.True(benchmarkIndex > downloadIndex, "Expected the benchmark to run after download.");
+        Assert.True(removeIndex > benchmarkIndex, "Expected removal to happen after benchmark generation and before the result was published.");
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRemovalFailure_PreservesBenchmarkRowAndAddsCleanupNote()
+    {
+        var foundryResponses = BuildPerfectResponses("phi-foundry", evalSeconds: 16.0);
+        var foundryBridge = new ScriptedFoundrySdkBridge(
+            foundryResponses,
+            ["phi-foundry"],
+            [new LlmRunningModel("phi-foundry", "phi-foundry", null, SizeVramBytes: 4_000_000_000, SizeBytes: 16_000_000_000, Provider: LlmProviderKind.Foundry)]);
+
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: ["phi-foundry"], isCached: true),
+            removeException: new InvalidOperationException("simulated remove failure"));
+
+        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: true);
+
+        var session = coordinator.Last;
+        Assert.NotNull(session);
+
+        var result = session!.Results.Single();
+        Assert.True(result.Succeeded);
+        Assert.True(result.OverallScore > 0.0);
+        Assert.Contains(result.Notes, note => note.Contains("could not be removed from the local Foundry cache", StringComparison.Ordinal));
+    }
+
+    private static FoundryCatalogSnapshot CreateFoundrySnapshot(IReadOnlyList<string> cachedModels, bool isCached)
+        => new(
+            new LlmModelAvailability(
+                Version: "1.0.0",
+                Model: cachedModels.FirstOrDefault() ?? string.Empty,
+                Installed: cachedModels.Count > 0,
+                AvailableModels: cachedModels,
+                RunningModels: Array.Empty<LlmRunningModel>(),
+                Provider: LlmProviderKind.Foundry),
+            [new FoundryCatalogModel("phi-foundry", "Phi Foundry", "phi-foundry", 1024, isCached, false)],
+            FoundryAccelerationSnapshot.Unsupported("Not available"),
+            DateTimeOffset.UtcNow);
+
+    private static (ModelBenchmarkCoordinator coordinator, WorkspaceSession workspace) BuildCoordinator(
+        ILlmClient llmClient,
+        IFoundrySdkBridge? foundryBridge = null,
+        IFoundryCatalogClient? foundryCatalogClient = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(Options);
         services.AddSingleton(llmClient);
+        services.AddSingleton<IFoundrySdkBridge>(foundryBridge ?? new ScriptedFoundrySdkBridge(Array.Empty<LlmResponse>(), Array.Empty<string>()));
+        services.AddSingleton<IFoundryCatalogClient>(foundryCatalogClient ?? new ScriptedFoundryCatalogClient(
+            new FoundryCatalogSnapshot(
+                new LlmModelAvailability(
+                    Version: "1.0.0",
+                    Model: string.Empty,
+                    Installed: false,
+                    AvailableModels: Array.Empty<string>(),
+                    RunningModels: Array.Empty<LlmRunningModel>(),
+                    Provider: LlmProviderKind.Foundry),
+                Array.Empty<FoundryCatalogModel>(),
+                FoundryAccelerationSnapshot.Unsupported("Not available"),
+                DateTimeOffset.UtcNow)));
+        services.AddScoped<FoundryLlmClient>();
         services.AddScoped<OllamaCapacityProbe>(sp => new OllamaCapacityProbe(sp.GetRequiredService<ILlmClient>(), Options));
         services.AddScoped<OllamaModelBenchmarkService>(sp => new OllamaModelBenchmarkService(
             sp.GetRequiredService<OllamaCapacityProbe>(),
@@ -186,14 +323,14 @@ public sealed class ModelBenchmarkCoordinatorTests
                 batch => new Queue<LlmResponse>(batch),
                 StringComparer.OrdinalIgnoreCase);
 
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new OllamaModelAvailability(
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
                 Version: "0.0.0",
                 Model: string.Empty,
                 Installed: true,
                 AvailableModels: Array.Empty<string>(),
                 RunningModels: queues.Keys
-                    .Select(static name => new OllamaRunningModel(name, name, null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000))
+                    .Select(static name => new LlmRunningModel(name, name, null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000))
                     .ToArray()));
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
@@ -213,14 +350,14 @@ public sealed class ModelBenchmarkCoordinatorTests
             return Task.FromResult(response);
         }
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
     }
 
     private sealed class GatedLlmClient(Task gate) : ILlmClient
     {
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new OllamaModelAvailability("0.0.0", string.Empty, true, Array.Empty<string>(), Array.Empty<OllamaRunningModel>()));
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability("0.0.0", string.Empty, true, Array.Empty<string>(), Array.Empty<LlmRunningModel>()));
 
         public async Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {
@@ -232,7 +369,97 @@ public sealed class ModelBenchmarkCoordinatorTests
                 EvalDuration: TimeSpan.FromSeconds(1.0));
         }
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+    }
+
+    private sealed class ScriptedFoundrySdkBridge(
+        LlmResponse[] scriptedResponses,
+        IReadOnlyList<string> availableModels,
+        IReadOnlyList<LlmRunningModel>? runningModels = null,
+        Action<string, int>? onGenerate = null) : IFoundrySdkBridge
+    {
+        private readonly Queue<LlmResponse> responses = new(scriptedResponses);
+        private int generateCount;
+
+        public Task<FoundryCatalogSnapshot> GetCatalogSnapshotAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
+                Version: "1.0.0",
+                Model: availableModels.FirstOrDefault() ?? string.Empty,
+                Installed: availableModels.Count > 0,
+                AvailableModels: availableModels,
+                RunningModels: runningModels ?? Array.Empty<LlmRunningModel>(),
+                Provider: LlmProviderKind.Foundry));
+
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            generateCount++;
+            onGenerate?.Invoke(request.Model, generateCount);
+            if (responses.Count == 0)
+            {
+                throw new InvalidOperationException($"No scripted Foundry response for model '{request.Model}'.");
+            }
+
+            return Task.FromResult(responses.Dequeue());
+        }
+    }
+
+    private sealed class ScriptedFoundryCatalogClient(FoundryCatalogSnapshot snapshot) : IFoundryCatalogClient
+    {
+        public Task<FoundryCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot);
+
+        public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot.Acceleration);
+
+        public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class RecordingFoundryCatalogClient(
+        FoundryCatalogSnapshot snapshot,
+        Action<string>? onDownload = null,
+        Action<string>? onRemove = null,
+        Exception? removeException = null) : IFoundryCatalogClient
+    {
+        public Task<FoundryCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot);
+
+        public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot.Acceleration);
+
+        public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
+        {
+            onDownload?.Invoke(alias);
+            progress?.Invoke(100.0);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
+        {
+            onRemove?.Invoke(alias);
+            return removeException is null
+                ? Task.CompletedTask
+                : Task.FromException(removeException);
+        }
     }
 }

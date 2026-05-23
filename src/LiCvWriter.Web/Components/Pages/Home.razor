@@ -1,1036 +1,237 @@
 @page "/"
 @implements IDisposable
-@using LiCvWriter.Application.Models
-@using LiCvWriter.Core.Profiles
-@inject ILlmClient LlmClient
-@inject ILinkedInExportImporter ExportImporter
-@inject IInsightsDiscoveryPdfImporter InsightsDiscoveryPdfImporter
-@inject LinkedInAuthOptions LinkedInOptions
-@inject InsightsDiscoveryApplicantDifferentiatorDraftingService InsightsDiscoveryDraftingService
-@inject OllamaOptions OllamaOptions
-@inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
-@inject OllamaCapacityProbe CapacityProbe
-@inject ModelBenchmarkCoordinator BenchmarkCoordinator
-@inject IJSRuntime JS
 
-<PageTitle>Start / Setup</PageTitle>
+<PageTitle>Start / Overview</PageTitle>
 
 <header class="card-panel setup-header">
     <div class="setup-header-row">
-        <div class="readiness-chips">
-            <span class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
-                Ollama: @(Workspace.IsLlmReady ? "ready" : "pending")
-            </span>
-            <span class="status-chip @(hasProfile ? "status-ok" : "status-pending")">
-                Profile: @(hasProfile ? "loaded" : "not loaded")
-            </span>
-            <span class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
-                Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "saved" : "optional")
-            </span>
-            <span class="status-chip status-neutral">
-                Jobsets: @Workspace.JobSets.Count
-            </span>
+        <div>
+            <div class="field-label">Start</div>
+            <h2>Workspace overview</h2>
+            <p class="muted-text">@GetWorkbenchReadinessMessage()</p>
         </div>
-        <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench →</a>
+        <div class="button-row">
+            <a class="secondary-button" href="/setup/llm">LLM setup</a>
+            <a class="secondary-button" href="/setup/linkedin">LinkedIn</a>
+            <a class="secondary-button" href="/setup/differentiators">Differentiators</a>
+            <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench →</a>
+        </div>
+    </div>
+    <div class="readiness-chips">
+        <span class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+            @FormatProviderLabel(Workspace.SelectedLlmProvider): @(Workspace.IsLlmReady ? "ready" : "pending")
+        </span>
+        <span class="status-chip @(Workspace.CandidateProfile is null ? "status-pending" : "status-ok")">
+            Profile: @(Workspace.CandidateProfile is null ? "not loaded" : "loaded")
+        </span>
+        <span class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
+            Differentiators: @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "saved" : "optional")
+        </span>
+        <span class="status-chip status-neutral">
+            Jobsets: @Workspace.JobSets.Count
+        </span>
     </div>
 </header>
 
-<div class="stepper-container">
 <section class="content-grid setup-grid">
-    <details class="card-panel stack-gap step-card @Step1StateClass" open="@(!Workspace.IsLlmReady)">
-        <summary>
-            <div class="field-label">Step 1</div>
-            <h3>Check Ollama and set the session model</h3>
-            <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
-                @(Workspace.IsLlmReady
-                    ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
-                    : "Model selection is still pending.")
-            </div>
-        </summary>
+    <section class="card-panel stack-gap">
+        <div class="field-label">LLM</div>
+        <h3>Selection and related work</h3>
         <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
-            @(Workspace.IsLlmReady
-                ? $"Ready: {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking."
-                : "Model selection is still pending.")
+            @GetLlmStatusMessage()
         </div>
-        @{
-            var capacityVerdict = Workspace.CurrentCapacityVerdict;
-        }
-        @if (capacityVerdict is not null)
+        <dl class="key-value-grid compact-grid">
+            <dt>Provider</dt>
+            <dd>@FormatProviderLabel(Workspace.SelectedLlmProvider)</dd>
+            <dt>Session model</dt>
+            <dd>@(string.IsNullOrWhiteSpace(Workspace.SelectedLlmModel) ? "Pending" : Workspace.SelectedLlmModel)</dd>
+            <dt>Thinking</dt>
+            <dd>@FormatThinkingLevel(Workspace.SelectedThinkingLevel)</dd>
+            <dt>Available models</dt>
+            <dd>@GetSelectedAvailabilityModelCount()</dd>
+        </dl>
+        @if (Workspace.CurrentCapacityVerdict is { } capacityVerdict)
         {
-            <div class="status-chip @CapacityChipClass(capacityVerdict.Fit)" title="@string.Join(" \u2022 ", capacityVerdict.Notes)">
+            <div class="status-chip @CapacityChipClass(capacityVerdict.Fit)">
                 Hardware fit: @capacityVerdict.Fit — @capacityVerdict.Headline
             </div>
         }
-        <p class="muted-text">Discover locally available models, then choose which one to use for this session.</p>
-
-        @if (availability is not null)
-        {
-            <dl class="key-value-grid compact-grid">
-                <dt>Version</dt>
-                <dd>@availability.Version</dd>
-                <dt>Configured default</dt>
-                <dd>@OllamaOptions.Model</dd>
-                <dt>Available models</dt>
-                <dd>@availability.AvailableModels.Count</dd>
-                <dt>Loaded models</dt>
-                <dd>@availability.EffectiveRunningModels.Count</dd>
-                <dt>Session model loaded</dt>
-                <dd>@FormatLoadedState(availability, selectedModel)</dd>
-            </dl>
-
-            <p class="muted-text">Loaded now: @FormatRunningModels(availability)</p>
-
-            @if (availability.AvailableModels.Count > 0)
-            {
-                <label class="field-label" for="sessionModel">Session model</label>
-                <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@isCheckingOllama">
-                    @foreach (var model in availability.AvailableModels.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
-                    {
-                        <option value="@model">@model</option>
-                    }
-                </select>
-
-                <label class="field-label" for="thinkingLevel">Thinking level</label>
-                <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@isCheckingOllama">
-                    @foreach (var level in ThinkingLevels)
-                    {
-                        <option value="@level">@FormatThinkingLevel(level)</option>
-                    }
-                </select>
-
-                <div class="button-row">
-                    <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
-                    <button class="secondary-button" @onclick="StartBenchmarkAsync" disabled="@(!CanStartBenchmark)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking…" : "Benchmark all installed models")</button>
-                    @if (BenchmarkCoordinator.IsRunning)
-                    {
-                        <button class="link-button" @onclick="CancelBenchmark">Cancel benchmark</button>
-                    }
-                </div>
-
-                @if (BenchmarkCoordinator.Current is { IsRunning: true } liveBenchmark)
-                {
-                    <div class="status-chip status-pending">
-                        Benchmarking @liveBenchmark.CompletedCount/@liveBenchmark.TotalCount
-                        @if (!string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel))
-                        {
-                            <span> — currently @liveBenchmark.CurrentModel</span>
-                        }
-                    </div>
-                }
-                else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
-                {
-                    <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
-                        Last benchmark: @lastBenchmark.Results.Count model(s)
-                        @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
-                        — completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
-                    </div>
-                    <table class="compact-grid">
-                        <thead>
-                            <tr><th>#</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var benchmarkRow in lastBenchmark.Results)
-                            {
-                                <tr>
-                                    <td>@benchmarkRow.Rank</td>
-                                    <td>@benchmarkRow.Model</td>
-                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.OverallScore.ToString("0.00") : "—")</td>
-                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.QualityScore.ToString("0.00") : "—")</td>
-                                    <td>@(benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "—")</td>
-                                    <td>@(benchmarkRow.Succeeded ? benchmarkRow.Fit.ToString() : (benchmarkRow.FailedReason ?? "failed"))</td>
-                                    <td>
-                                        @if (benchmarkRow.Succeeded)
-                                        {
-                                            <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(benchmarkRow.Model)">Use</button>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                }
-            }
-            else
-            {
-                <p class="muted-text">Ollama responded, but no models were returned from the tags endpoint.</p>
-            }
-        }
-        else
-        {
-            <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
-        }
-
-        @if (Workspace.HasStartedLlmWork)
-        {
-            <p class="muted-text">Updated session model and thinking changes apply to future LLM operations. Re-run any completed analysis or draft generation that you want refreshed with the new settings.</p>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(llmErrorMessage))
-        {
-            <div class="message error">@llmErrorMessage</div>
-        }
-
         <div class="button-row">
-            <button class="primary-button" @onclick="CheckOllamaAsync" disabled="@isCheckingOllama">@(isCheckingOllama ? "Checking..." : "Check Ollama and load models")</button>
+            <a class="primary-button" href="/setup/llm">Open LLM setup</a>
         </div>
-    </details>
+    </section>
 
-    <details class="card-panel stack-gap step-card @Step2StateClass" open="@(!hasProfile)">
-        <summary>
-            <div class="field-label">Step 2</div>
-            <h3>Load your LinkedIn profile</h3>
-            <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
-                @Workspace.LinkedInAuthorizationStatus.Message
-            </div>
-        </summary>
+    <section class="card-panel stack-gap">
+        <div class="field-label">LinkedIn</div>
+        <h3>Profile import and review</h3>
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
             @Workspace.LinkedInAuthorizationStatus.Message
         </div>
-
         <dl class="key-value-grid compact-grid">
-            <dt>Required scope</dt>
-            <dd>@LinkedInOptions.PortabilityScope</dd>
-            <dt>LinkedIn-Version</dt>
-            <dd>`YYYYMM` with automatic monthly fallback</dd>
-            <dt>Import mode</dt>
-            <dd>DMA member snapshot only</dd>
+            <dt>Profile</dt>
+            <dd>@(Workspace.CandidateProfile?.Name.FullName ?? "Pending")</dd>
+            <dt>Experience</dt>
+            <dd>@(Workspace.CandidateProfile?.Experience.Count ?? 0)</dd>
+            <dt>Education</dt>
+            <dd>@(Workspace.CandidateProfile?.Education.Count ?? 0)</dd>
+            <dt>Recommendations</dt>
+            <dd>@(Workspace.CandidateProfile?.Recommendations.Count ?? 0)</dd>
         </dl>
-
-        @if (!hasProfile)
-        {
-            @if (!LinkedInOptions.HasAccessToken)
-            {
-                <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
-                <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste your LinkedIn DMA portability access token here."></textarea>
-
-                <p class="muted-text">Paste the DMA portability token from LinkedIn. It is used once for the import and is not stored.</p>
-            }
-            else
-            {
-                <p class="muted-text">Access token loaded from user secrets.</p>
-            }
-        }
-
         <div class="button-row">
-            <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">@(isImportingProfile ? "Importing..." : hasProfile ? "Refresh profile" : "Load LinkedIn profile")</button>
+            <a class="primary-button" href="/setup/linkedin">Open LinkedIn page</a>
         </div>
+    </section>
 
-        @if (isImportingProfile)
-        {
-            <div class="import-progress"></div>
-        }
-
-        @if (isImportingProfile && !string.IsNullOrWhiteSpace(importProgressStatus))
-        {
-            <div class="status-chip status-pending">@importProgressStatus</div>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(profileWarningMessage))
-        {
-            <div class="message warning">@profileWarningMessage</div>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(profileErrorMessage))
-        {
-            <div class="message error">@profileErrorMessage</div>
-        }
-    </details>
-</section>
-
-<details class="card-panel stack-gap step-card @Step3StateClass">
-    <summary>
-        <div class="field-label">Step 3</div>
-        <h3>Add personal differentiators (optional)</h3>
+    <section class="card-panel stack-gap">
+        <div class="field-label">Differentiators</div>
+        <h3>Personal positioning</h3>
         <div class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
             @(Workspace.ApplicantDifferentiatorProfile.HasContent
                 ? "Differentiators stored for this session."
-                : "Optional — used during fit review and draft generation.")
+                : "Optional inputs are still empty.")
         </div>
-    </summary>
-    <p class="muted-text">Add notes about your work style, communication, and positioning. Fill them in manually or upload an Insights Discovery PDF to draft them automatically.</p>
-
-    @if (GetInsightsDraftTelemetry() is { } telemetry)
-    {
-        <div class="details-card stack-gap">
-            <div class="field-label">Live LLM progress</div>
-            <div class="sidebar-metric">@telemetry.Message</div>
-            @if (!string.IsNullOrWhiteSpace(telemetry.Detail))
-            {
-                <p class="muted-text">@telemetry.Detail</p>
-            }
-            <dl class="key-value-grid compact-grid">
-                <dt>Elapsed</dt>
-                <dd>@FormatDuration(telemetry.Elapsed)</dd>
-                @if (telemetry.PromptTokens is not null)
+        @if (Workspace.ApplicantDifferentiatorProfile.ToSummaryLines().Take(3).ToArray() is { Length: > 0 } summaryLines)
+        {
+            <ul class="feature-list compact-list">
+                @foreach (var line in summaryLines)
                 {
-                    <dt>Prompt</dt>
-                    <dd>@FormatTokenCount(telemetry.PromptTokens)</dd>
+                    <li>@line</li>
                 }
-                @if (telemetry.CompletionTokens is not null)
-                {
-                    <dt>Completion</dt>
-                    <dd>@FormatTokenCount(telemetry.CompletionTokens)</dd>
-                }
-                @if (telemetry.HasEstimatedRemaining)
-                {
-                    <dt>ETA</dt>
-                    <dd>@FormatDuration(telemetry.EstimatedRemaining)</dd>
-                }
-            </dl>
-        </div>
-    }
-
-    <div class="stack-gap">
-        <label class="field-label" for="insightsDiscoveryPdf">Insights Discovery PDF</label>
-        <InputFile id="insightsDiscoveryPdf" class="text-input" OnChange="HandleInsightsDiscoveryPdfSelectedAsync" accept=".pdf,application/pdf" disabled="@(!Workspace.IsLlmReady || IsInsightsDraftActive())" />
-        <p class="muted-text">Upload a PDF to auto-draft the fields below. The PDF is processed in memory and not stored.</p>
-
-        <div class="status-chip @GetInsightsDraftStatusClass()">
-            @GetInsightsDraftStatusMessage()
-        </div>
-
-        @if (!string.IsNullOrWhiteSpace(GetInsightsDraftStatusDetail()))
-        {
-            <p class="muted-text">@GetInsightsDraftStatusDetail()</p>
-        }
-
-        @if (insightsPdfWarnings.Count > 0)
-        {
-            <div class="message warning">
-                <ul class="feature-list">
-                    @foreach (var warning in insightsPdfWarnings)
-                    {
-                        <li>@warning</li>
-                    }
-                </ul>
-            </div>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(insightsPdfErrorMessage))
-        {
-            <div class="message error">@insightsPdfErrorMessage</div>
-        }
-    </div>
-
-    <div class="content-grid applicant-profile-grid">
-        <div class="stack-gap">
-            <div>
-                <label class="field-label" for="workStyle">Work style</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.WorkStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.WorkStyle.Usage</p>
-                <textarea id="workStyle" class="prompt-box compact-prompt" @bind="workStyle"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="communicationStyle">Communication style</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.CommunicationStyle.Usage</p>
-                <textarea id="communicationStyle" class="prompt-box compact-prompt" @bind="communicationStyle"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="leadershipStyle">Leadership style</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.LeadershipStyle.Usage</p>
-                <textarea id="leadershipStyle" class="prompt-box compact-prompt" @bind="leadershipStyle"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="stakeholderStyle">Stakeholder style</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.StakeholderStyle.Usage</p>
-                <textarea id="stakeholderStyle" class="prompt-box compact-prompt" @bind="stakeholderStyle"></textarea>
-            </div>
-        </div>
-
-        <div class="stack-gap">
-            <div>
-                <label class="field-label" for="motivators">Motivators</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Motivators.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Motivators.Usage</p>
-                <textarea id="motivators" class="prompt-box compact-prompt" @bind="motivators"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="targetNarrative">Target narrative</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.TargetNarrative.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.TargetNarrative.Usage</p>
-                <textarea id="targetNarrative" class="prompt-box compact-prompt" @bind="targetNarrative"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="watchouts">Watchouts</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.Watchouts.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.Watchouts.Usage</p>
-                <textarea id="watchouts" class="prompt-box compact-prompt" @bind="watchouts"></textarea>
-            </div>
-
-            <div>
-                <label class="field-label" for="aboutApplicantBasis">About applicant basis</label>
-                <p class="muted-text">@ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Meaning Used for: @ApplicantDifferentiatorFieldCatalog.AboutApplicantBasis.Usage</p>
-                <textarea id="aboutApplicantBasis" class="prompt-box compact-prompt" @bind="aboutApplicantBasis"></textarea>
-            </div>
-        </div>
-    </div>
-
-    <div class="button-row">
-        <button class="primary-button" @onclick="SaveApplicantDifferentiatorsAsync">Save applicant differentiators</button>
-        <button class="secondary-button" @onclick="ClearApplicantDifferentiatorsAsync" disabled="@(!Workspace.ApplicantDifferentiatorProfile.HasContent)">Clear differentiators</button>
-    </div>
-</details>
-</div>
-
-@if (Workspace.CandidateProfile is not null)
-{
-    <details class="card-panel stack-gap" open="@isProfileExpanded">
-        <summary>
-            <h3>Imported LinkedIn profile</h3>
-            <span class="profile-summary-line">
-                @Workspace.CandidateProfile.Name.FullName
-                <span class="meta-sep">·</span> @(Workspace.CandidateProfile.Experience.Count) roles
-                @if (Workspace.CandidateProfile.Education.Count > 0)
-                {
-                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Education.Count) education</text>
-                }
-                @if (Workspace.CandidateProfile.Projects.Count > 0)
-                {
-                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Projects.Count) projects</text>
-                }
-            </span>
-        </summary>
-
-        @if (result?.Warnings.Count > 0)
-        {
-            <details class="details-card">
-                <summary>Import warnings (@result.Warnings.Count)</summary>
-                <ul class="feature-list">
-                    @foreach (var warning in result.Warnings)
-                    {
-                        <li>@warning</li>
-                    }
-                </ul>
-            </details>
-        }
-
-        <div class="profile-tabs">
-            <button class="profile-tab @(activeProfileTab == "experience" ? "active" : "")" @onclick='() => activeProfileTab = "experience"'>Experience <span class="tab-count">@Workspace.CandidateProfile.Experience.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "education" ? "active" : "")" @onclick='() => activeProfileTab = "education"'>Education <span class="tab-count">@Workspace.CandidateProfile.Education.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "skills" ? "active" : "")" @onclick='() => activeProfileTab = "skills"'>Skills <span class="tab-count">@Workspace.CandidateProfile.Skills.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "certifications" ? "active" : "")" @onclick='() => activeProfileTab = "certifications"'>Certifications <span class="tab-count">@Workspace.CandidateProfile.Certifications.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "projects" ? "active" : "")" @onclick='() => activeProfileTab = "projects"'>Projects <span class="tab-count">@Workspace.CandidateProfile.Projects.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "recommendations" ? "active" : "")" @onclick='() => activeProfileTab = "recommendations"'>Recommendations <span class="tab-count">@Workspace.CandidateProfile.Recommendations.Count</span></button>
-            <button class="profile-tab @(activeProfileTab == "signals" ? "active" : "")" @onclick='() => activeProfileTab = "signals"'>Notes <span class="tab-count">@Workspace.CandidateProfile.ManualSignals.Count</span></button>
-        </div>
-
-        @if (activeProfileTab == "experience")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Experience.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Experience[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>
-                            @if (editingField == $"exp-title-{index}")
-                            {
-                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Title))" autofocus />
-                            }
-                            else
-                            {
-                                <span class="inline-editable" @onclick='() => StartEdit($"exp-title-{index}", entry.Title)'>@entry.Title</span>
-                            }
-                            @if (savedField == $"exp-title-{index}") { <span class="save-flash">Saved</span> }
-                        </h4>
-                        <div class="profile-entry-actions">
-                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
-                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveExperienceAsync(index)">Remove</button>
-                        </div>
-                    </div>
-                    <div class="profile-entry-sub">
-                        @if (editingField == $"exp-company-{index}")
-                        {
-                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.CompanyName))" autofocus />
-                        }
-                        else
-                        {
-                            <span class="inline-editable" @onclick='() => StartEdit($"exp-company-{index}", entry.CompanyName)'>@entry.CompanyName</span>
-                        }
-                        @if (savedField == $"exp-company-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                    <div class="profile-entry-body">
-                        @if (editingField == $"exp-desc-{index}")
-                        {
-                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Description))" autofocus></textarea>
-                        }
-                        else
-                        {
-                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"exp-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
-                        }
-                        @if (savedField == $"exp-desc-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "education")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Education.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Education[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>
-                            @if (editingField == $"edu-school-{index}")
-                            {
-                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.SchoolName))" autofocus />
-                            }
-                            else
-                            {
-                                <span class="inline-editable" @onclick='() => StartEdit($"edu-school-{index}", entry.SchoolName)'>@entry.SchoolName</span>
-                            }
-                            @if (savedField == $"edu-school-{index}") { <span class="save-flash">Saved</span> }
-                        </h4>
-                        <div class="profile-entry-actions">
-                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
-                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveEducationAsync(index)">Remove</button>
-                        </div>
-                    </div>
-                    <div class="profile-entry-sub">
-                        @if (editingField == $"edu-degree-{index}")
-                        {
-                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.DegreeName))" autofocus />
-                        }
-                        else
-                        {
-                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.DegreeName) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-degree-{index}", entry.DegreeName)'>@(string.IsNullOrWhiteSpace(entry.DegreeName) ? "(click to add degree)" : entry.DegreeName)</span>
-                        }
-                        @if (savedField == $"edu-degree-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                    <div class="profile-entry-body">
-                        @if (editingField == $"edu-notes-{index}")
-                        {
-                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.Notes))" autofocus></textarea>
-                        }
-                        else
-                        {
-                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Notes) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-notes-{index}", entry.Notes)'>@(string.IsNullOrWhiteSpace(entry.Notes) ? "(click to add notes)" : entry.Notes)</span>
-                        }
-                        @if (savedField == $"edu-notes-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "skills")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Skills.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Skills[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>@entry.Name</h4>
-                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveSkillAsync(index)">Remove</button>
-                    </div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "certifications")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Certifications.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Certifications[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>
-                            @if (editingField == $"cert-name-{index}")
-                            {
-                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Name))" autofocus />
-                            }
-                            else
-                            {
-                                <span class="inline-editable" @onclick='() => StartEdit($"cert-name-{index}", entry.Name)'>@entry.Name</span>
-                            }
-                            @if (savedField == $"cert-name-{index}") { <span class="save-flash">Saved</span> }
-                        </h4>
-                        <div class="profile-entry-actions">
-                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
-                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveCertificationAsync(index)">Remove</button>
-                        </div>
-                    </div>
-                    <div class="profile-entry-sub">
-                        @if (editingField == $"cert-authority-{index}")
-                        {
-                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Authority))" autofocus />
-                        }
-                        else
-                        {
-                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Authority) ? "placeholder" : "")" @onclick='() => StartEdit($"cert-authority-{index}", entry.Authority)'>@(string.IsNullOrWhiteSpace(entry.Authority) ? "(click to add authority)" : entry.Authority)</span>
-                        }
-                        @if (savedField == $"cert-authority-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "projects")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Projects.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Projects[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>
-                            @if (editingField == $"proj-title-{index}")
-                            {
-                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Title))" autofocus />
-                            }
-                            else
-                            {
-                                <span class="inline-editable" @onclick='() => StartEdit($"proj-title-{index}", entry.Title)'>@entry.Title</span>
-                            }
-                            @if (savedField == $"proj-title-{index}") { <span class="save-flash">Saved</span> }
-                        </h4>
-                        <div class="profile-entry-actions">
-                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
-                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveProjectAsync(index)">Remove</button>
-                        </div>
-                    </div>
-                    <div class="profile-entry-body">
-                        @if (editingField == $"proj-desc-{index}")
-                        {
-                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Description))" autofocus></textarea>
-                        }
-                        else
-                        {
-                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"proj-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
-                        }
-                        @if (savedField == $"proj-desc-{index}") { <span class="save-flash">Saved</span> }
-                    </div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "recommendations")
-        {
-            @for (var i = 0; i < Workspace.CandidateProfile.Recommendations.Count; i++)
-            {
-                var index = i;
-                var entry = Workspace.CandidateProfile.Recommendations[index];
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>@entry.Author.FullName</h4>
-                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveRecommendationAsync(index)">Remove</button>
-                    </div>
-                    @if (!string.IsNullOrWhiteSpace(entry.Company) || !string.IsNullOrWhiteSpace(entry.JobTitle))
-                    {
-                        <div class="profile-entry-sub">@entry.JobTitle @(!string.IsNullOrWhiteSpace(entry.Company) ? $"at {entry.Company}" : "")</div>
-                    }
-                    <div class="profile-entry-body">@entry.Text</div>
-                </div>
-            }
-        }
-
-        @if (activeProfileTab == "signals")
-        {
-            @foreach (var entry in Workspace.CandidateProfile.ManualSignals.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase))
-            {
-                var key = entry.Key;
-                <div class="profile-entry">
-                    <div class="profile-entry-header">
-                        <h4>@entry.Key</h4>
-                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveManualSignalAsync(key)">Remove</button>
-                    </div>
-                    <div class="profile-entry-body">@entry.Value</div>
-                </div>
-            }
-        }
-    </details>
-}
-
-@code {
-    private static readonly string[] ThinkingLevels = ["low", "medium", "high"];
-    private const long MaxInsightsPdfSizeBytes = 10 * 1024 * 1024;
-    private const string InsightsDraftRequestMessage = "Drafting applicant differentiators from Insights Discovery PDF";
-    private const string InsightsExtractionMessage = "Extracting text from Insights Discovery PDF";
-    private const string InsightsDraftTelemetryMessage = "Drafting applicant differentiators";
-
-    private bool isCheckingOllama;
-    private bool isImportingProfile;
-    private bool isProfileExpanded = true;
-    private string? importProgressStatus;
-    private bool isProcessingInsightsPdf;
-    private string activeProfileTab = "experience";
-    private string? editingField;
-    private string editingValue = string.Empty;
-    private string? savedField;
-    private CancellationTokenSource? savedFieldCts;
-    private string? llmErrorMessage;
-    private string? profileErrorMessage;
-    private string? profileWarningMessage;
-    private string? insightsPdfErrorMessage;
-    private string? insightsDraftStatusDetail;
-    private OllamaModelAvailability? availability;
-    private string selectedModel = string.Empty;
-    private string selectedThinkingLevel = "medium";
-    private string dmaAccessToken = string.Empty;
-    private string workStyle = string.Empty;
-    private string communicationStyle = string.Empty;
-    private string leadershipStyle = string.Empty;
-    private string stakeholderStyle = string.Empty;
-    private string motivators = string.Empty;
-    private string targetNarrative = string.Empty;
-    private string watchouts = string.Empty;
-    private string aboutApplicantBasis = string.Empty;
-    private IReadOnlyList<string> insightsPdfWarnings = Array.Empty<string>();
-    private LinkedInExportImportResult? result;
-
-    private bool CanSaveSessionLlmSettings => !isCheckingOllama
-        && availability is not null
-        && availability.AvailableModels.Count > 0
-        && !string.IsNullOrWhiteSpace(selectedModel);
-
-    private bool hasProfile => Workspace.CandidateProfile is not null;
-
-    private string Step1StateClass => Workspace.IsLlmReady ? "step-done" : (isCheckingOllama ? "step-active" : "step-pending");
-    private string Step2StateClass => hasProfile ? "step-done" : (isImportingProfile ? "step-active" : "step-pending");
-    private string Step3StateClass => Workspace.ApplicantDifferentiatorProfile.HasContent ? "step-done" : "step-pending";
-
-    protected override void OnInitialized()
-    {
-        Operations.Changed += HandleChanged;
-        BenchmarkCoordinator.Changed += HandleChanged;
-        availability = Workspace.OllamaAvailability;
-        selectedModel = Workspace.SelectedLlmModel;
-        selectedThinkingLevel = Workspace.SelectedThinkingLevel;
-        result = Workspace.ImportResult;
-        SyncApplicantDifferentiatorInputs(Workspace.ApplicantDifferentiatorProfile);
-        if (result is not null)
-        {
-            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
-                true,
-                $"LinkedIn profile ready from {result.SourceDescription}.",
-                null,
-                null,
-                LinkedInOptions.PortabilityScope));
-        }
-        else if (Workspace.CandidateProfile is not null)
-        {
-            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
-                true,
-                "LinkedIn profile loaded from recovered session.",
-                null,
-                null,
-                LinkedInOptions.PortabilityScope));
+            </ul>
         }
         else
         {
-            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
-                false,
-                "DMA member snapshot not loaded.",
-                null,
-                null,
-                LinkedInOptions.PortabilityScope));
+            <p class="muted-text">Add notes manually or draft the fields from an Insights Discovery PDF.</p>
         }
+        <div class="button-row">
+            <a class="primary-button" href="/setup/differentiators">Open differentiators page</a>
+        </div>
+    </section>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="hero-row">
+        <div>
+            <div class="field-label">Jobs</div>
+            <h3>Job workbench status</h3>
+            <p class="muted-text">Track every jobset and jump directly to the workbench when you want to edit details or run deeper analysis.</p>
+        </div>
+        <div class="button-row">
+            <a class="primary-button" href="/workspace/job-workbench">Open Job Workbench</a>
+        </div>
+    </div>
+
+    <div class="readiness-chips">
+        <span class="status-chip status-neutral">Total: @Workspace.JobSets.Count</span>
+        <span class="status-chip @(GetJobSetCount(JobSetProgressState.Running) > 0 ? "status-pending" : "status-neutral")">Running: @GetJobSetCount(JobSetProgressState.Running)</span>
+        <span class="status-chip @(GetJobSetCount(JobSetProgressState.Done) > 0 ? "status-ok" : "status-neutral")">Done: @GetJobSetCount(JobSetProgressState.Done)</span>
+        <span class="status-chip @(GetJobSetCount(JobSetProgressState.Failed) > 0 ? "status-warning" : "status-neutral")">Failed: @GetJobSetCount(JobSetProgressState.Failed)</span>
+        <span class="status-chip status-neutral">Pending: @GetPendingJobSetCount()</span>
+    </div>
+
+    @if (Workspace.JobSets.Count == 0)
+    {
+        <p class="muted-text">No jobsets are in the workspace yet. Open Job Workbench to add the first one.</p>
+    }
+    else
+    {
+        <table class="compact-grid">
+            <thead>
+                <tr><th>Jobset</th><th>Status</th><th>Fit</th><th>Subtasks</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var jobSet in Workspace.JobSets.OrderBy(job => job.SortOrder))
+                {
+                    <tr>
+                        <td>
+                            <strong>@jobSet.Title</strong>
+                            <div class="muted-text">@jobSet.OutputFolderName</div>
+                        </td>
+                        <td>
+                            <span class="status-chip @GetProgressChipClass(jobSet.ProgressState)">@jobSet.ProgressState</span>
+                            @if (!string.IsNullOrWhiteSpace(jobSet.ProgressDetail))
+                            {
+                                <div class="muted-text">@jobSet.ProgressDetail</div>
+                            }
+                        </td>
+                        <td>@(jobSet.JobFitAssessment.HasSignals ? $"{jobSet.JobFitAssessment.OverallScore}/100" : "Pending")</td>
+                        <td>
+                            <div class="subtask-indicators">
+                                @foreach (var subtask in Subtasks)
+                                {
+                                    var status = jobSet.GetSubtaskStatus(subtask);
+                                    <span class="subtask-chip subtask-@GetSubtaskStatusClass(status)" title="@FormatSubtaskLabel(subtask): @status">@FormatSubtaskLabel(subtask)</span>
+                                }
+                            </div>
+                        </td>
+                        <td><a class="link-button" href="@($"/workspace/job-workbench/{jobSet.Id}")">Open</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private static readonly JobSetSubtask[] Subtasks =
+    [
+        JobSetSubtask.JobContext,
+        JobSetSubtask.FitReview,
+        JobSetSubtask.TechnologyGap,
+        JobSetSubtask.DraftGeneration
+    ];
+
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += HandleChanged;
     }
 
     public void Dispose()
     {
-        Operations.Changed -= HandleChanged;
-        BenchmarkCoordinator.Changed -= HandleChanged;
+        Workspace.Changed -= HandleChanged;
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && availability is null)
+    private static string FormatProviderLabel(LlmProviderKind provider)
+        => provider switch
         {
-            await CheckOllamaAsync();
-            StateHasChanged();
-        }
-    }
-
-    private Task SaveApplicantDifferentiatorsAsync()
-    {
-        var differentiatorProfile = BuildApplicantDifferentiatorProfileFromInputs();
-
-        Workspace.SetApplicantDifferentiatorProfile(differentiatorProfile);
-        insightsPdfWarnings = Array.Empty<string>();
-        insightsPdfErrorMessage = null;
-        insightsDraftStatusDetail = differentiatorProfile.HasContent
-            ? "Current applicant differentiator field values are saved. A new Insights Discovery upload will replace them only after a successful extract-and-draft pass."
-            : null;
-        Operations.Success(
-            differentiatorProfile.HasContent ? "Applicant differentiators saved." : "Applicant differentiators cleared.",
-            differentiatorProfile.HasContent
-                ? "The notes are stored and will be applied the next time you run fit review or generate drafts."
-                : "The session no longer applies an applicant differentiator overlay.");
-        return Task.CompletedTask;
-    }
-
-    private Task ClearApplicantDifferentiatorsAsync()
-    {
-        SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile.Empty);
-        Workspace.SetApplicantDifferentiatorProfile(ApplicantDifferentiatorProfile.Empty);
-        insightsDraftStatusDetail = null;
-        insightsPdfWarnings = Array.Empty<string>();
-        insightsPdfErrorMessage = null;
-        Operations.Info("Applicant differentiators cleared.", "The cleared notes will take effect the next time you run fit review or generate drafts.");
-        return Task.CompletedTask;
-    }
-
-    private async Task HandleInsightsDiscoveryPdfSelectedAsync(InputFileChangeEventArgs eventArgs)
-    {
-        insightsPdfErrorMessage = null;
-        insightsPdfWarnings = Array.Empty<string>();
-
-        var file = eventArgs.File;
-        if (file is null)
-        {
-            return;
-        }
-
-        if (!Workspace.IsLlmReady)
-        {
-            insightsPdfErrorMessage = "Choose the session LLM settings before uploading an Insights Discovery PDF.";
-            return;
-        }
-
-        if (!string.Equals(Path.GetExtension(file.Name), ".pdf", StringComparison.OrdinalIgnoreCase))
-        {
-            insightsPdfErrorMessage = "Only PDF files are supported for Insights Discovery upload.";
-            return;
-        }
-
-        if (file.Size > MaxInsightsPdfSizeBytes)
-        {
-            insightsPdfErrorMessage = $"The uploaded PDF is too large. The current limit is {MaxInsightsPdfSizeBytes / (1024 * 1024)} MB.";
-            return;
-        }
-
-        isProcessingInsightsPdf = true;
-        var draftedProfile = ApplicantDifferentiatorProfile.Empty;
-
-        try
-        {
-            using var stream = file.OpenReadStream(MaxInsightsPdfSizeBytes);
-
-            await Operations.RunAsync(
-                InsightsDraftRequestMessage,
-                file.Name,
-                async () =>
-                {
-                    Operations.UpdateCurrent(InsightsExtractionMessage, file.Name);
-                    var importResult = await InsightsDiscoveryPdfImporter.ImportAsync(stream);
-                    insightsPdfWarnings = [.. importResult.Warnings];
-
-                    if (!importResult.HasText)
-                    {
-                        throw new InvalidOperationException("No readable text could be extracted from the uploaded PDF. It may be image-only or scanned.");
-                    }
-
-                    Workspace.MarkLlmWorkStarted();
-                    Operations.UpdateCurrent(
-                        "Drafting applicant differentiators",
-                        $"{importResult.PageCount} pages and {importResult.CharacterCount:N0} extracted characters.");
-
-                    draftedProfile = await InsightsDiscoveryDraftingService.DraftAsync(
-                        importResult.ExtractedText,
-                        Workspace.SelectedLlmModel,
-                        Workspace.SelectedThinkingLevel,
-                        Operations.UpdateCurrent);
-                });
-
-            SyncApplicantDifferentiatorInputs(draftedProfile);
-            Workspace.SetApplicantDifferentiatorProfile(draftedProfile);
-            insightsDraftStatusDetail = $"Latest draft source: {file.Name}. A new upload will replace the current field values only after a successful extract-and-draft pass.";
-        }
-        catch (Exception exception)
-        {
-            insightsPdfErrorMessage = exception.Message;
-        }
-        finally
-        {
-            isProcessingInsightsPdf = false;
-        }
-    }
-
-    private async Task CheckOllamaAsync()
-    {
-        llmErrorMessage = null;
-        isCheckingOllama = true;
-
-        try
-        {
-            availability = await Operations.RunAsync(
-                "Checking Ollama access",
-                OllamaOptions.BaseUrl,
-                () => LlmClient.VerifyModelAvailabilityAsync());
-
-            Workspace.SetOllamaAvailability(availability);
-            selectedModel = Workspace.SelectedLlmModel;
-            selectedThinkingLevel = Workspace.SelectedThinkingLevel;
-            Operations.Success(
-                "Ollama is reachable.",
-                $"Discovered {availability.AvailableModels.Count} models; loaded now: {availability.EffectiveRunningModels.Count}.");
-        }
-        catch (Exception exception)
-        {
-            llmErrorMessage = exception.Message;
-            Operations.Error("Ollama access check failed.", exception.Message);
-        }
-        finally
-        {
-            isCheckingOllama = false;
-        }
-    }
-
-    private Task UseSessionLlmSettingsAsync()
-    {
-        llmErrorMessage = null;
-
-        try
-        {
-            Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
-            Operations.Success(
-                "Session LLM settings updated.",
-                $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking");
-        }
-        catch (Exception exception)
-        {
-            llmErrorMessage = exception.Message;
-            Operations.Error("Session LLM settings were not updated.", exception.Message);
-            return Task.CompletedTask;
-        }
-
-        if (OllamaOptions.RunCapacityProbeOnModelSelect)
-        {
-            _ = RunCapacityProbeAsync(Workspace.SelectedLlmModel);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    private async Task RunCapacityProbeAsync(string model)
-    {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            return;
-        }
-
-        try
-        {
-            var verdict = await CapacityProbe.ProbeAsync(model);
-            Workspace.SetCapacityVerdict(verdict);
-            await InvokeAsync(StateHasChanged);
-            Operations.Info(
-                $"Hardware fit for {model}: {verdict.Fit}.",
-                verdict.Headline);
-        }
-        catch (Exception exception)
-        {
-            Operations.Info(
-                $"Could not measure hardware fit for {model}.",
-                exception.Message);
-        }
-    }
-
-    private async Task LoadDmaMemberSnapshotAsync()
-    {
-        profileErrorMessage = null;
-        profileWarningMessage = null;
-
-        try
-        {
-            isImportingProfile = true;
-            importProgressStatus = "Starting import";
-            var imported = await Operations.RunAsync(
-                "Importing LinkedIn DMA member snapshot",
-                LinkedInOptions.PortabilityScope,
-                () => ExportImporter.ImportMemberSnapshotAsync(
-                    LinkedInOptions.HasAccessToken ? LinkedInOptions.AccessToken : dmaAccessToken,
-                    status => { importProgressStatus = status; _ = InvokeAsync(StateHasChanged); }));
-
-            result = imported;
-            Workspace.SetImportResult(Workspace.ExportPath, imported);
-            isProfileExpanded = true;
-            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
-                true,
-                "LinkedIn DMA member snapshot imported with the provided portability token.",
-                DateTimeOffset.UtcNow,
-                null,
-                LinkedInOptions.PortabilityScope));
-            dmaAccessToken = string.Empty;
-            Operations.Success("LinkedIn DMA member snapshot loaded.", $"{result.SourceDescription}: {result.Profile.Name.FullName}. Review the profile details below, then continue in the job workbench when ready.");
-        }
-        catch (Exception exception)
-        {
-            profileErrorMessage = exception.Message;
-            Operations.Error("LinkedIn DMA member snapshot could not be loaded.", exception.Message);
-        }
-        finally
-        {
-            isImportingProfile = false;
-            importProgressStatus = null;
-        }
-    }
-
-    private void SyncApplicantDifferentiatorInputs(ApplicantDifferentiatorProfile differentiatorProfile)
-    {
-        workStyle = differentiatorProfile.WorkStyle ?? string.Empty;
-        communicationStyle = differentiatorProfile.CommunicationStyle ?? string.Empty;
-        leadershipStyle = differentiatorProfile.LeadershipStyle ?? string.Empty;
-        stakeholderStyle = differentiatorProfile.StakeholderStyle ?? string.Empty;
-        motivators = differentiatorProfile.Motivators ?? string.Empty;
-        targetNarrative = differentiatorProfile.TargetNarrative ?? string.Empty;
-        watchouts = differentiatorProfile.Watchouts ?? string.Empty;
-        aboutApplicantBasis = differentiatorProfile.AboutApplicantBasis ?? string.Empty;
-    }
-
-    private ApplicantDifferentiatorProfile BuildApplicantDifferentiatorProfileFromInputs()
-        => new()
-        {
-            WorkStyle = NullIfWhiteSpace(workStyle),
-            CommunicationStyle = NullIfWhiteSpace(communicationStyle),
-            LeadershipStyle = NullIfWhiteSpace(leadershipStyle),
-            StakeholderStyle = NullIfWhiteSpace(stakeholderStyle),
-            Motivators = NullIfWhiteSpace(motivators),
-            TargetNarrative = NullIfWhiteSpace(targetNarrative),
-            Watchouts = NullIfWhiteSpace(watchouts),
-            AboutApplicantBasis = NullIfWhiteSpace(aboutApplicantBasis)
+            LlmProviderKind.Foundry => "Microsoft Foundry Local",
+            _ => "Ollama"
         };
 
-    private string GetInsightsDraftStatusClass()
+    private string GetLlmStatusMessage()
     {
-        if (IsInsightsDraftActive())
+        if (Workspace.IsLlmReady)
         {
-            return "status-pending";
+            return $"Ready: {FormatProviderLabel(Workspace.SelectedLlmProvider)} using {Workspace.SelectedLlmModel}.";
         }
 
-        return Workspace.ApplicantDifferentiatorProfile.HasContent && !string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
-            ? "status-ok"
-            : "status-pending";
+        var availability = GetSelectedAvailability();
+        if (availability is null)
+        {
+            return $"{FormatProviderLabel(Workspace.SelectedLlmProvider)} catalog is still pending.";
+        }
+
+        return availability.AvailableModels.Count == 0
+            ? $"{FormatProviderLabel(Workspace.SelectedLlmProvider)} has no ready models yet."
+            : "Choose and save the session model to continue.";
     }
 
-    private string GetInsightsDraftStatusMessage()
-    {
-        if (IsInsightsDraftActive())
-        {
-            return "Insights Discovery PDF is being processed. The fields below will only be replaced if extraction and drafting both succeed.";
-        }
+    private int GetSelectedAvailabilityModelCount()
+        => GetSelectedAvailability()?.AvailableModels.Count ?? 0;
 
-        if (!Workspace.IsLlmReady)
-        {
-            return "Choose the session LLM settings before uploading an Insights Discovery PDF.";
-        }
-
-        return string.IsNullOrWhiteSpace(insightsDraftStatusDetail)
-            ? "Upload an Insights Discovery PDF to auto-draft these fields, or fill them in manually."
-            : "Insights Discovery draft applied to the applicant differentiator fields.";
-    }
+    private LlmModelAvailability? GetSelectedAvailability()
+        => Workspace.SelectedLlmProvider == LlmProviderKind.Foundry
+            ? Workspace.FoundryAvailability
+            : Workspace.OllamaAvailability;
 
     private string GetWorkbenchReadinessMessage()
     {
         if (!Workspace.IsLlmReady)
         {
-            return "Complete Ollama setup first.";
+            return Workspace.SelectedLlmProvider == LlmProviderKind.Ollama
+                ? "Complete Ollama setup first."
+                : "Load the Foundry catalog, choose a cached model, and apply it to the session first.";
         }
 
         if (Workspace.CandidateProfile is null)
@@ -1038,18 +239,24 @@
             return "Load the DMA member snapshot next.";
         }
 
-        if (Workspace.JobSets.All(j => j.JobPosting is null))
+        if (Workspace.JobSets.All(jobSet => jobSet.JobPosting is null))
         {
-            return "Open the job workbench next. Add or select a jobset, then analyze a target role when you are ready.";
+            return "The setup foundation is ready. Add or select a jobset next.";
         }
 
-        return "The session, profile, and job context are ready. Run fit review, technology gap, or draft generation when you want the app to start deeper analysis.";
+        return "The session, profile, and job context are ready for deeper work.";
     }
 
     private static string FormatThinkingLevel(string value)
         => string.IsNullOrWhiteSpace(value)
             ? "Pending"
             : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private int GetJobSetCount(JobSetProgressState state)
+        => Workspace.JobSets.Count(jobSet => jobSet.ProgressState == state);
+
+    private int GetPendingJobSetCount()
+        => Workspace.JobSets.Count(jobSet => jobSet.ProgressState == JobSetProgressState.NotStarted);
 
     private static string CapacityChipClass(OllamaCapacityFit fit) => fit switch
     {
@@ -1061,386 +268,29 @@
         _ => "status-pending"
     };
 
-    private static string FormatRunningModels(OllamaModelAvailability availability)
-        => availability.EffectiveRunningModels.Count == 0
-            ? "none reported"
-            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
-
-    private static string FormatLoadedState(OllamaModelAvailability availability, string? selectedModel)
+    private static string GetProgressChipClass(JobSetProgressState state) => state switch
     {
-        var model = string.IsNullOrWhiteSpace(selectedModel) ? availability.Model : selectedModel.Trim();
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            return "Unknown";
-        }
+        JobSetProgressState.Done => "status-ok",
+        JobSetProgressState.Running => "status-pending",
+        JobSetProgressState.Failed => "status-warning",
+        _ => "status-neutral"
+    };
 
-        return availability.IsModelLoaded(model) ? "Yes" : "No";
-    }
-
-    private LlmOperationTelemetry? GetInsightsDraftTelemetry()
-        => IsInsightsDraftTelemetryActive() ? Operations.ActiveLlmTelemetry : null;
-
-    private bool IsInsightsDraftActive()
-        => isProcessingInsightsPdf
-            || IsCurrentInsightsOperation(InsightsDraftRequestMessage)
-            || IsCurrentInsightsOperation(InsightsExtractionMessage)
-            || IsCurrentInsightsOperation(InsightsDraftTelemetryMessage)
-            || IsInsightsDraftTelemetryActive();
-
-    private bool IsInsightsDraftTelemetryActive()
-        => string.Equals(Operations.ActiveLlmTelemetry?.Message, InsightsDraftTelemetryMessage, StringComparison.Ordinal);
-
-    private bool IsCurrentInsightsOperation(string message)
-        => Operations.IsBusy && string.Equals(Operations.CurrentMessage, message, StringComparison.Ordinal);
-
-    private string? GetInsightsDraftStatusDetail()
-        => IsInsightsDraftActive() ? Operations.CurrentDetail : insightsDraftStatusDetail;
-
-    private static string FormatDuration(TimeSpan? duration)
+    private static string GetSubtaskStatusClass(JobSetSubtaskStatus status) => status switch
     {
-        if (duration is null)
-        {
-            return "Pending";
-        }
+        JobSetSubtaskStatus.Done => "done",
+        JobSetSubtaskStatus.Running => "running",
+        _ => "not-started"
+    };
 
-        var value = duration.Value;
-        return value.TotalMinutes >= 1
-            ? value.ToString(@"m\:ss")
-            : value.ToString(@"s\.f\s");
-    }
-
-    private static string FormatTokenCount(long? tokens)
-        => tokens?.ToString("N0") ?? "Pending";
-
-    private static string? NullIfWhiteSpace(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private void SaveExperienceField(int index, string field)
+    private static string FormatSubtaskLabel(JobSetSubtask subtask) => subtask switch
     {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null || index >= profile.Experience.Count) return;
-
-        var value = NullIfWhiteSpace(editingValue);
-        var entry = profile.Experience[index];
-        var updated = field switch
-        {
-            nameof(ExperienceEntry.Title) => entry with { Title = value ?? entry.Title },
-            nameof(ExperienceEntry.CompanyName) => entry with { CompanyName = value ?? entry.CompanyName },
-            nameof(ExperienceEntry.Description) => entry with { Description = value },
-            _ => entry
-        };
-
-        if (updated != entry)
-        {
-            var list = profile.Experience.ToList();
-            list[index] = updated;
-            Workspace.UpdateCandidateProfile(profile with { Experience = list });
-            ShowSaved(editingField!);
-        }
-
-        editingField = null;
-    }
-
-    private void SaveEducationField(int index, string field)
-    {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null || index >= profile.Education.Count) return;
-
-        var value = NullIfWhiteSpace(editingValue);
-        var entry = profile.Education[index];
-        var updated = field switch
-        {
-            nameof(EducationEntry.SchoolName) => entry with { SchoolName = value ?? entry.SchoolName },
-            nameof(EducationEntry.DegreeName) => entry with { DegreeName = value },
-            nameof(EducationEntry.Notes) => entry with { Notes = value },
-            _ => entry
-        };
-
-        if (updated != entry)
-        {
-            var list = profile.Education.ToList();
-            list[index] = updated;
-            Workspace.UpdateCandidateProfile(profile with { Education = list });
-            ShowSaved(editingField!);
-        }
-
-        editingField = null;
-    }
-
-    private void SaveCertificationField(int index, string field)
-    {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null || index >= profile.Certifications.Count) return;
-
-        var value = NullIfWhiteSpace(editingValue);
-        var entry = profile.Certifications[index];
-        var updated = field switch
-        {
-            nameof(CertificationEntry.Name) => entry with { Name = value ?? entry.Name },
-            nameof(CertificationEntry.Authority) => entry with { Authority = value },
-            _ => entry
-        };
-
-        if (updated != entry)
-        {
-            var list = profile.Certifications.ToList();
-            list[index] = updated;
-            Workspace.UpdateCandidateProfile(profile with { Certifications = list });
-            ShowSaved(editingField!);
-        }
-
-        editingField = null;
-    }
-
-    private void SaveProjectField(int index, string field)
-    {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null || index >= profile.Projects.Count) return;
-
-        var value = NullIfWhiteSpace(editingValue);
-        var entry = profile.Projects[index];
-        var updated = field switch
-        {
-            nameof(ProjectEntry.Title) => entry with { Title = value ?? entry.Title },
-            nameof(ProjectEntry.Description) => entry with { Description = value },
-            _ => entry
-        };
-
-        if (updated != entry)
-        {
-            var list = profile.Projects.ToList();
-            list[index] = updated;
-            Workspace.UpdateCandidateProfile(profile with { Projects = list });
-            ShowSaved(editingField!);
-        }
-
-        editingField = null;
-    }
-
-    private Task RemoveExperienceAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "experience",
-            static profile => profile.Experience,
-            static (profile, values) => profile with { Experience = values },
-            static entry => entry.Title);
-
-    private Task RemoveEducationAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "education",
-            static profile => profile.Education,
-            static (profile, values) => profile with { Education = values },
-            static entry => string.IsNullOrWhiteSpace(entry.DegreeName) ? entry.SchoolName : entry.DegreeName!);
-
-    private Task RemoveSkillAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "skill",
-            static profile => profile.Skills,
-            static (profile, values) => profile with { Skills = values },
-            static entry => entry.Name);
-
-    private Task RemoveCertificationAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "certification",
-            static profile => profile.Certifications,
-            static (profile, values) => profile with { Certifications = values },
-            static entry => entry.Name);
-
-    private Task RemoveProjectAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "project",
-            static profile => profile.Projects,
-            static (profile, values) => profile with { Projects = values },
-            static entry => entry.Title);
-
-    private Task RemoveRecommendationAsync(int index)
-        => RemoveProfileItemAsync(
-            index,
-            "recommendation",
-            static profile => profile.Recommendations,
-            static (profile, values) => profile with { Recommendations = values },
-            static entry => entry.Author.FullName);
-
-    private async Task RemoveManualSignalAsync(string key)
-    {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null || !profile.ManualSignals.ContainsKey(key))
-        {
-            return;
-        }
-
-        if (!await ConfirmProfileRemovalAsync($"note '{key}'"))
-        {
-            return;
-        }
-
-        profile = Workspace.CandidateProfile;
-        if (profile is null || !profile.ManualSignals.ContainsKey(key))
-        {
-            return;
-        }
-
-        var manualSignals = new Dictionary<string, string>(profile.ManualSignals, StringComparer.OrdinalIgnoreCase);
-        manualSignals.Remove(key);
-        Workspace.UpdateCandidateProfile(profile with { ManualSignals = manualSignals });
-        ClearProfileEditState();
-        Operations.Info("Imported profile note removed.", $"'{key}' was removed from the current profile.");
-    }
-
-    private async Task RemoveProfileItemAsync<T>(
-        int index,
-        string itemKind,
-        Func<CandidateProfile, IReadOnlyList<T>> getItems,
-        Func<CandidateProfile, IReadOnlyList<T>, CandidateProfile> updateProfile,
-        Func<T, string> getLabel)
-    {
-        var profile = Workspace.CandidateProfile;
-        if (profile is null)
-        {
-            return;
-        }
-
-        var items = getItems(profile);
-        if (index < 0 || index >= items.Count)
-        {
-            return;
-        }
-
-        var label = getLabel(items[index]);
-        if (!await ConfirmProfileRemovalAsync($"{itemKind} '{label}'"))
-        {
-            return;
-        }
-
-        profile = Workspace.CandidateProfile;
-        if (profile is null)
-        {
-            return;
-        }
-
-        items = getItems(profile);
-        if (index < 0 || index >= items.Count)
-        {
-            return;
-        }
-
-        var updatedProfile = updateProfile(profile, RemoveAt(items, index));
-        Workspace.UpdateCandidateProfile(updatedProfile);
-        ClearProfileEditState();
-        Operations.Info("Imported profile item removed.", $"{itemKind} '{label}' was removed from the current profile.");
-    }
-
-    private async Task<bool> ConfirmProfileRemovalAsync(string itemDescription)
-        => await JS.InvokeAsync<bool>(
-            "confirm",
-            $"Remove {itemDescription} from the current profile? This only changes the current profile and can be restored by re-importing LinkedIn data.");
-
-    private void ClearProfileEditState()
-    {
-        editingField = null;
-        savedField = null;
-    }
-
-    private static IReadOnlyList<T> RemoveAt<T>(IReadOnlyList<T> values, int index)
-        => values.Where((_, candidateIndex) => candidateIndex != index).ToArray();
-
-    private void StartEdit(string fieldKey, string? currentValue)
-    {
-        editingField = fieldKey;
-        editingValue = currentValue ?? string.Empty;
-    }
-
-    private void ShowSaved(string fieldKey)
-    {
-        savedFieldCts?.Cancel();
-        savedFieldCts = new CancellationTokenSource();
-        savedField = fieldKey;
-        var cts = savedFieldCts;
-
-        _ = Task.Delay(1500, cts.Token).ContinueWith(_ =>
-        {
-            if (!cts.IsCancellationRequested)
-            {
-                savedField = null;
-                _ = InvokeAsync(StateHasChanged);
-            }
-        }, TaskScheduler.Default);
-    }
+        JobSetSubtask.JobContext => "Context",
+        JobSetSubtask.FitReview => "Fit",
+        JobSetSubtask.TechnologyGap => "Gap",
+        JobSetSubtask.DraftGeneration => "Drafts",
+        _ => subtask.ToString()
+    };
 
     private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
-
-    private bool CanStartBenchmark =>
-        !BenchmarkCoordinator.IsRunning
-        && availability is not null
-        && availability.AvailableModels.Count > 0;
-
-    private async Task StartBenchmarkAsync()
-    {
-        if (availability is null || availability.AvailableModels.Count == 0)
-        {
-            return;
-        }
-
-        var models = availability.AvailableModels
-            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        try
-        {
-            Operations.Info($"Benchmarking {models.Length} installed model(s). This can take a long time.");
-            await BenchmarkCoordinator.StartAsync(models);
-            var completed = BenchmarkCoordinator.Last;
-            if (completed is null)
-            {
-                return;
-            }
-            if (completed.IsCancelled)
-            {
-                Operations.Info("Model benchmark cancelled.", $"Captured {completed.Results.Count} partial result(s).");
-            }
-            else
-            {
-                var top = completed.Results.FirstOrDefault();
-                Operations.Success(
-                    "Model benchmark complete.",
-                    top is null ? null : $"Top model: {top.Model} (overall {top.OverallScore:0.00}).");
-            }
-        }
-        catch (Exception exception)
-        {
-            Operations.Error("Model benchmark failed to start.", exception.Message);
-        }
-    }
-
-    private void CancelBenchmark()
-    {
-        BenchmarkCoordinator.Cancel();
-    }
-
-    private async Task UseBenchmarkedModelAsync(string model)
-    {
-        if (string.IsNullOrWhiteSpace(model) || availability is null)
-        {
-            return;
-        }
-
-        try
-        {
-            selectedModel = model;
-            Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
-            Operations.Success($"Session model set to {model}.");
-            if (OllamaOptions.RunCapacityProbeOnModelSelect)
-            {
-                await RunCapacityProbeAsync(model);
-            }
-        }
-        catch (Exception exception)
-        {
-            Operations.Error($"Could not switch session model to {model}.", exception.Message);
-        }
-    }
 }

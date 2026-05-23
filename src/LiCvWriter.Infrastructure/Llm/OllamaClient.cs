@@ -16,7 +16,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
     private const int RepetitionMaxCycleLength = 300;
     private const int RepetitionRequiredRepeats = 3;
 
-    public async Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+    public async Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
     {
         using var versionDocument = JsonDocument.Parse(await GetRequiredStatusPayloadAsync("version", cancellationToken));
         var version = versionDocument.RootElement.GetProperty("version").GetString() ?? string.Empty;
@@ -31,15 +31,16 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
 
         var runningModels = await TryGetRunningModelsAsync(cancellationToken);
 
-        return new OllamaModelAvailability(
+        return new LlmModelAvailability(
             version,
             options.Model,
             availableModels.Contains(options.Model, StringComparer.OrdinalIgnoreCase),
             availableModels,
-            runningModels);
+            runningModels,
+            LlmProviderKind.Ollama);
     }
 
-    public async Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+    public async Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(model))
         {
@@ -51,7 +52,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         var payload = await TryPostShowAsync(model, cancellationToken);
         if (payload is null)
         {
-            return new OllamaModelInfo(model, fileSizeBytes, null, null, null, null);
+            return new LlmModelInfo(model, fileSizeBytes, null, null, null, null, LlmProviderKind.Ollama);
         }
 
         using var document = JsonDocument.Parse(payload);
@@ -82,7 +83,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             }
         }
 
-        return new OllamaModelInfo(model, fileSizeBytes, parameterSize, quantization, family, contextLength);
+        return new LlmModelInfo(model, fileSizeBytes, parameterSize, quantization, family, contextLength, LlmProviderKind.Ollama);
     }
 
     private async Task<long?> TryGetTagFileSizeAsync(string model, CancellationToken cancellationToken)
@@ -349,27 +350,28 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         return trimmed;
     }
 
-    private async Task<IReadOnlyList<OllamaRunningModel>> TryGetRunningModelsAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<LlmRunningModel>> TryGetRunningModelsAsync(CancellationToken cancellationToken)
     {
         var payload = await TryGetOptionalStatusPayloadAsync("ps", cancellationToken);
         if (string.IsNullOrWhiteSpace(payload))
         {
-            return Array.Empty<OllamaRunningModel>();
+            return Array.Empty<LlmRunningModel>();
         }
 
         using var document = JsonDocument.Parse(payload);
         if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
         {
-            return Array.Empty<OllamaRunningModel>();
+            return Array.Empty<LlmRunningModel>();
         }
 
         return models.EnumerateArray()
-            .Select(static element => new OllamaRunningModel(
+            .Select(static element => new LlmRunningModel(
                 ReadString(element, "name") ?? string.Empty,
                 ReadString(element, "model") ?? string.Empty,
                 ReadDateTimeOffset(element, "expires_at"),
                 ReadLong(element, "size_vram"),
-                ReadLong(element, "size")))
+                ReadLong(element, "size"),
+                LlmProviderKind.Ollama))
             .Where(static runningModel => !string.IsNullOrWhiteSpace(runningModel.Name) || !string.IsNullOrWhiteSpace(runningModel.Model))
             .ToArray();
     }

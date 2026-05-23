@@ -27,23 +27,6 @@
                     </div>
                 </div>
             </section>
-
-            <section class="sidebar-panel sidebar-monitor-panel sidebar-status-monitor-panel">
-                <div class="field-label">Status Monitor</div>
-                <div class="crt-monitor sidebar-crt-monitor sidebar-status-crt-monitor">
-                    <div class="crt-monitor-bezel sidebar-crt-bezel">
-                        <div class="crt-monitor-header">
-                            <span class="crt-monitor-led" aria-hidden="true"></span>
-                            <div class="crt-monitor-badge">@GetStatusMonitorBadgeText()</div>
-                        </div>
-                        <pre class="crt-monitor-screen sidebar-status-crt-screen @(HasStatusMonitorText() ? null : "crt-monitor-screen-placeholder")">@GetStatusMonitorText()</pre>
-                        <div class="crt-monitor-footer">
-                            <span class="crt-monitor-model-label">HN - Status 202020</span>
-                            <span class="crt-monitor-vent" aria-hidden="true"></span>
-                        </div>
-                    </div>
-                </div>
-            </section>
         </div>
 
         <section class="sidebar-panel">
@@ -81,8 +64,6 @@
 @code {
     private ElementReference reasoningMonitorScreen;
     private string? lastScrolledThinkingText;
-    private System.Threading.Timer? sidebarElapsedTimer;
-    private DateTimeOffset? sidebarOperationStartedAt;
 
     protected override void OnInitialized()
     {
@@ -91,8 +72,6 @@
 
     public void Dispose()
     {
-        sidebarElapsedTimer?.Dispose();
-        sidebarElapsedTimer = null;
         Operations.Changed -= HandleChanged;
     }
 
@@ -150,70 +129,6 @@
         => GetSidebarThinkingRawText()
             ?? "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.";
 
-    private string? GetStatusMonitorRawText()
-    {
-        if (Operations.CurrentLlmTelemetry is { } current)
-        {
-            return BuildTelemetryStatusText(current);
-        }
-
-        if (Operations.LastCompletedLlmTelemetry is { } last)
-        {
-            return BuildTelemetryStatusText(last);
-        }
-
-        return Operations.IsBusy ? BuildBusyFallbackStatus() : null;
-    }
-
-    private static string BuildTelemetryStatusText(LlmOperationTelemetry telemetry)
-        => string.IsNullOrWhiteSpace(telemetry.Detail)
-            ? telemetry.Message
-            : $"{telemetry.Message}\n{telemetry.Detail}";
-
-    private bool HasStatusMonitorText()
-        => !string.IsNullOrWhiteSpace(GetStatusMonitorRawText());
-
-    private string GetStatusMonitorText()
-        => GetStatusMonitorRawText()
-            ?? "No streaming status captured yet. Run a streamed LLM operation to light up this monitor.";
-
-    private string GetStatusMonitorBadgeText()
-    {
-        if (!HasStatusMonitorText())
-        {
-            return "Standby";
-        }
-
-        if (Operations.CurrentLlmTelemetry is not null || Operations.IsBusy)
-        {
-            return GetLiveBadgeWithTimer("Live status");
-        }
-
-        return "Last status";
-    }
-
-    private string GetLiveBadgeWithTimer(string label)
-    {
-        if (sidebarOperationStartedAt is null)
-        {
-            return label;
-        }
-
-        return $"{label} · {FormatSidebarDuration(DateTimeOffset.Now - sidebarOperationStartedAt.Value)}";
-    }
-
-    private static string FormatSidebarDuration(TimeSpan duration)
-        => duration.TotalMinutes >= 1
-            ? duration.ToString(@"m\:ss")
-            : duration.ToString(@"s\.f\s");
-
-    private string? BuildBusyFallbackStatus()
-        => string.IsNullOrWhiteSpace(Operations.CurrentMessage)
-            ? null
-            : string.IsNullOrWhiteSpace(Operations.CurrentDetail)
-                ? Operations.CurrentMessage
-                : $"{Operations.CurrentMessage}\n{Operations.CurrentDetail}";
-
     private string GetSidebarMonitorBadgeText()
     {
         if (!HasSidebarThinkingText())
@@ -227,27 +142,6 @@
             : "Last capture";
     }
 
-    private void HandleChanged()
-    {
-        var isLive = Operations.IsBusy || Operations.CurrentLlmTelemetry is not null;
-
-        if (isLive && sidebarElapsedTimer is null)
-        {
-            sidebarOperationStartedAt = DateTimeOffset.Now;
-            sidebarElapsedTimer = new System.Threading.Timer(
-                _ => _ = InvokeAsync(StateHasChanged),
-                null,
-                TimeSpan.FromSeconds(1),
-                TimeSpan.FromSeconds(1));
-        }
-        else if (!isLive && sidebarElapsedTimer is not null)
-        {
-            sidebarElapsedTimer.Dispose();
-            sidebarElapsedTimer = null;
-            sidebarOperationStartedAt = null;
-        }
-
-        _ = InvokeAsync(StateHasChanged);
-    }
+    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
 }
 

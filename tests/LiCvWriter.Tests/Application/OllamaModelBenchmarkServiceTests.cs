@@ -34,7 +34,7 @@ public sealed class OllamaModelBenchmarkServiceTests
             // Quality call.
             new LlmResponse("m:test", perfectJson, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
         ]);
-        llmClient.Running = new OllamaRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var probe = new OllamaCapacityProbe(llmClient, Options);
         var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
@@ -63,7 +63,7 @@ public sealed class OllamaModelBenchmarkServiceTests
             // Repair attempt also fails.
             new LlmResponse("m:test", "still not json", null, true, 5, 5, TimeSpan.FromSeconds(0.5))
         ]);
-        llmClient.Running = new OllamaRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var probe = new OllamaCapacityProbe(llmClient, Options);
         var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
@@ -88,7 +88,7 @@ public sealed class OllamaModelBenchmarkServiceTests
         {
             ThrowOnCall = 2 // throw on second GenerateAsync (the quality call)
         };
-        llmClient.Running = new OllamaRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var probe = new OllamaCapacityProbe(llmClient, Options);
         var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
@@ -111,7 +111,7 @@ public sealed class OllamaModelBenchmarkServiceTests
                 PromptEvalDuration: TimeSpan.FromSeconds(0.1),
                 EvalDuration: TimeSpan.FromSeconds(1.0))
         ]);
-        llmClient.Running = new OllamaRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
         var probe = new OllamaCapacityProbe(llmClient, Options);
         var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
@@ -139,13 +139,13 @@ public sealed class OllamaModelBenchmarkServiceTests
     private sealed class ScriptedLlmClient(LlmResponse[] responses) : ILlmClient
     {
         private int callIndex;
-        public OllamaRunningModel? Running { get; set; }
+        public LlmRunningModel? Running { get; set; }
         public int ThrowOnCall { get; set; } = -1;
 
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
         {
-            var running = Running is null ? Array.Empty<OllamaRunningModel>() : new[] { Running };
-            return Task.FromResult(new OllamaModelAvailability(
+            var running = Running is null ? Array.Empty<LlmRunningModel>() : new[] { Running };
+            return Task.FromResult(new LlmModelAvailability(
                 Version: "0.0.0",
                 Model: Running?.Name ?? string.Empty,
                 Installed: true,
@@ -166,7 +166,7 @@ public sealed class OllamaModelBenchmarkServiceTests
             return Task.FromResult(responses[responseIndex]);
         }
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
     }
 }

@@ -36,7 +36,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -115,7 +115,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -179,7 +179,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -216,7 +216,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -260,7 +260,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -301,7 +301,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -342,7 +342,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -394,7 +394,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -441,7 +441,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -485,7 +485,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -525,7 +525,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -575,7 +575,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -628,7 +628,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -695,7 +695,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -763,7 +763,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -836,7 +836,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -902,7 +902,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -982,7 +982,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1063,7 +1063,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1100,7 +1100,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1138,7 +1138,7 @@ public sealed class LlmOperationBrokerTests
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
         var operations = serviceProvider.GetRequiredService<OperationStatusService>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1191,7 +1191,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1234,7 +1234,7 @@ public sealed class LlmOperationBrokerTests
         await using var serviceProvider = services.BuildServiceProvider();
         var workspace = serviceProvider.GetRequiredService<WorkspaceSession>();
 
-        workspace.SetOllamaAvailability(new OllamaModelAvailability(
+        workspace.SetOllamaAvailability(new LlmModelAvailability(
             "0.19.0",
             "configured-model",
             true,
@@ -1299,15 +1299,15 @@ public sealed class LlmOperationBrokerTests
 
     private sealed class FakeCompositeLlmClient : ILlmClient
     {
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new OllamaModelAvailability(
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
                 "0.19.0",
                 "configured-model",
                 true,
                 ["configured-model"]));
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {
@@ -1554,11 +1554,11 @@ public sealed class LlmOperationBrokerTests
 
     private sealed class FakeTechnologyGapLlmClient : ILlmClient
     {
-        public Task<OllamaModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<OllamaModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
-            => Task.FromResult<OllamaModelInfo?>(null);
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
 
         public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
         {

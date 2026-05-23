@@ -91,7 +91,7 @@ graph TB
     I --> J[workspace-recovery.json]
 ```
 
-The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, status monitor, and completed-activity list in sync while long-running work streams in. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery.
+The two main pages share `WorkspaceSession` for state and `OperationStatusService` for activity telemetry. `MainLayout.razor` subscribes to `OperationStatusService` to keep the floating navigation, reasoning monitor, and completed-activity list in sync while long-running work streams in. Page-specific live status now stays in the page itself, such as the setup benchmark rail. `WorkspaceRecoveryStore` persists the full session snapshot to disk as JSON for cross-restart recovery.
 
 ---
 
@@ -1038,7 +1038,6 @@ graph LR
     A[Page actions + broker progress callbacks] --> B[OperationStatusService]
     B --> C[MainLayout.razor]
     C --> D[Reasoning monitor — live/last thinking text]
-    C --> E[Status monitor — live/last streaming status]
     C --> F[Finished activity list — last 6 entries]
     G[WorkspaceSession] --> H[Local recovery snapshot]
     I[LinkedInImportDiagnosticsFormatter] --> G
@@ -1057,16 +1056,15 @@ The telemetry model (`LlmOperationTelemetry`) carries:
 - Completion flag
 - Event sequence number
 
-### Sidebar Monitors
+### Sidebar And Activity Surfaces
 
-The shared sidebar surfaces operational state continuously through two retro CRT-styled monitors:
+The shared sidebar keeps the reasoning monitor and the activity panel visible while pages render their own live status in-context when needed.
 
 | Monitor | Shows | Badge |
 | --- | --- | --- |
 | **Reasoning Monitor** | Auto-scrolling thinking text from current or last LLM operation | "Live feed" during streaming, "Last capture" after completion, "Standby" when idle |
-| **Status Monitor** | Compact streaming status (model, elapsed, chunk count) | "Live status" during streaming, "Last status" after completion, "Standby" when idle |
 
-The **Activity Panel** below the monitors lists the last 6 completed activity entries with timestamps and durations.
+The **Activity Panel** below the monitor lists the last 6 completed activity entries with timestamps and durations.
 
 ### Current vs. Last Telemetry
 

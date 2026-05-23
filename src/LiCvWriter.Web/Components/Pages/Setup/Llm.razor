@@ -1,0 +1,1378 @@
+@page "/setup/llm"
+@implements IDisposable
+@inject ILlmClient LlmClient
+@inject IFoundryCatalogClient FoundryCatalogClient
+@inject FoundryOptions FoundryOptions
+@inject OllamaOptions OllamaOptions
+@inject OperationStatusService Operations
+@inject WorkspaceSession Workspace
+@inject OllamaCapacityProbe CapacityProbe
+@inject ModelBenchmarkCoordinator BenchmarkCoordinator
+
+<PageTitle>Setup / LLM</PageTitle>
+
+<section class="card-panel setup-header">
+    <div class="setup-header-row">
+        <div>
+            <div class="field-label">Setup</div>
+            <h2>LLM selection and related work</h2>
+            <p class="muted-text">Choose the local provider, keep session model selection separate from batch actions, and run the same selection-driven workflow across providers.</p>
+        </div>
+        <div class="button-row">
+            <a class="secondary-button" href="/">Back to overview</a>
+            <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench -&gt;</a>
+        </div>
+    </div>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">Local LLM setup</div>
+    <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+        @GetStep1StatusMessage()
+    </div>
+
+    @{
+        var capacityVerdict = Workspace.CurrentCapacityVerdict;
+        var availableSessionModels = GetAvailableSessionModels();
+    }
+
+    @if (IsOllamaSelected && capacityVerdict is not null)
+    {
+        <div class="status-chip @CapacityChipClass(capacityVerdict.Fit)" title="@string.Join(" \u2022 ", capacityVerdict.Notes)">
+            Hardware fit: @capacityVerdict.Fit - @capacityVerdict.Headline
+        </div>
+    }
+
+    <p class="muted-text">@GetProviderSetupIntro()</p>
+
+    <label class="field-label" for="llmProvider">Local LLM provider</label>
+    <select id="llmProvider" class="text-input" @bind="selectedProvider" @bind:after="HandleProviderSelectionChangedAsync" disabled="@IsProviderSelectionBusy">
+        @foreach (var provider in AvailableLlmProviders)
+        {
+            <option value="@provider">@FormatProviderLabel(provider)</option>
+        }
+    </select>
+
+    <section class="details-card stack-gap">
+        <div class="field-label">Session model</div>
+        @if (availableSessionModels.Count > 0)
+        {
+            <label class="field-label" for="sessionModel">Session model</label>
+            <select id="sessionModel" class="text-input" @bind="selectedModel" disabled="@IsModelSelectionBusy">
+                @foreach (var model in availableSessionModels)
+                {
+                    <option value="@model">@model</option>
+                }
+            </select>
+
+            <label class="field-label" for="thinkingLevel">Thinking level</label>
+            <select id="thinkingLevel" class="text-input" @bind="selectedThinkingLevel" disabled="@IsModelSelectionBusy">
+                @foreach (var level in ThinkingLevels)
+                {
+                    <option value="@level">@FormatThinkingLevel(level)</option>
+                }
+            </select>
+
+            <div class="button-row">
+                <button class="primary-button" @onclick="UseSessionLlmSettingsAsync" disabled="@(!CanSaveSessionLlmSettings)">Use session LLM settings</button>
+                <button class="secondary-button" @onclick="RefreshSelectedProviderAsync" disabled="@IsProviderRefreshBusy">@GetRefreshInventoryButtonLabel()</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(selectedModel))
+            {
+                <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
+                    Selected @GetSelectedProviderLabel() model: @selectedModel
+                </div>
+            }
+        }
+        else
+        {
+            <p class="muted-text">@GetSessionModelPendingMessage()</p>
+            <div class="button-row">
+                <button class="primary-button" @onclick="RefreshSelectedProviderAsync" disabled="@IsProviderRefreshBusy">@GetRefreshInventoryButtonLabel()</button>
+            </div>
+        }
+    </section>
+
+    @if (IsOllamaSelected)
+    {
+        var visibleOllamaModels = GetVisibleOllamaModels();
+        @if (availability is not null)
+        {
+            <section class="details-card stack-gap">
+                <div class="field-label">Model inventory</div>
+                <dl class="key-value-grid compact-grid">
+                    <dt>Version</dt>
+                    <dd>@availability.Version</dd>
+                    <dt>Configured default</dt>
+                    <dd>@OllamaOptions.Model</dd>
+                    <dt>Available models</dt>
+                    <dd>@availability.AvailableModels.Count</dd>
+                    <dt>Loaded models</dt>
+                    <dd>@availability.EffectiveRunningModels.Count</dd>
+                    <dt>Session model loaded</dt>
+                    <dd>@FormatLoadedState(availability, selectedModel)</dd>
+                </dl>
+
+                <p class="muted-text">Loaded now: @FormatRunningModels(availability)</p>
+
+                @if (visibleOllamaModels.Count > 0)
+                {
+                    <table class="compact-grid setup-list-table">
+                        <thead>
+                            <tr><th></th><th>Model</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in visibleOllamaModels.Select((model, index) => new { model, index }))
+                            {
+                                <tr class="@GetSetupListRowClass(item.index)">
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsModelSelected(item.model)"
+                                               @onchange="args => SetModelSelection(item.model, args.Value is bool isSelected && isSelected)"
+                                               disabled="@IsModelSelectionBusy" />
+                                    </td>
+                                    <td>@item.model</td>
+                                    <td>@GetOllamaModelState(availability, item.model)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p class="muted-text">Ollama responded, but no models were returned from the tags endpoint.</p>
+                }
+            </section>
+        }
+        else
+        {
+            <p class="muted-text">Run the Ollama check to load the local model list before saving the session settings.</p>
+        }
+    }
+    else
+    {
+        var visibleFoundryModels = GetVisibleFoundryModels();
+        @if (foundryCatalog is not null)
+        {
+            <section class="details-card stack-gap">
+                <div class="field-label">Model inventory</div>
+                <dl class="key-value-grid compact-grid">
+                    <dt>SDK version</dt>
+                    <dd>@foundryCatalog.Availability.Version</dd>
+                    <dt>Configured default</dt>
+                    <dd>@FoundryOptions.DefaultModelAlias</dd>
+                    <dt>Catalog models</dt>
+                    <dd>@foundryCatalog.Models.Count</dd>
+                    <dt>Cached models</dt>
+                    <dd>@foundryCatalog.Availability.AvailableModels.Count</dd>
+                    <dt>Loaded models</dt>
+                    <dd>@foundryCatalog.Availability.EffectiveRunningModels.Count</dd>
+                    <dt>Session model loaded</dt>
+                    <dd>@FormatLoadedState(foundryCatalog.Availability, selectedModel)</dd>
+                </dl>
+
+                <p class="muted-text">Cached models are ready for session use. Uncached models can be selected for batch download or selected-model benchmarking.</p>
+
+                @if (ShouldShowFoundryAccelerationSection(foundryCatalog.Acceleration))
+                {
+                    <div class="field-label">Windows ML acceleration</div>
+                    <div class="status-chip @GetFoundryAccelerationChipClass(foundryCatalog.Acceleration)">
+                        @foundryCatalog.Acceleration.StatusMessage
+                    </div>
+
+                    @if (foundryCatalog.Acceleration.ExecutionProviders.Count > 0)
+                    {
+                        <table class="compact-grid setup-list-table">
+                            <thead>
+                                <tr><th>Execution provider</th><th>Status</th></tr>
+                            </thead>
+                            <tbody>
+                                    @foreach (var item in foundryCatalog.Acceleration.ExecutionProviders.Select((executionProvider, index) => new { executionProvider, index }))
+                                {
+                                        <tr class="@GetSetupListRowClass(item.index)">
+                                            <td>@item.executionProvider.DisplayName</td>
+                                            <td>@FormatExecutionProviderState(item.executionProvider)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    else if (foundryCatalog.Acceleration.IsEnabled)
+                    {
+                        <p class="muted-text">No execution providers are currently reported by the installed Foundry runtime.</p>
+                    }
+
+                    @if (foundryCatalog.Acceleration.CanManageExecutionProviders)
+                    {
+                        <div class="button-row">
+                            <button class="secondary-button" @onclick="RegisterFoundryExecutionProvidersAsync" disabled="@IsFoundryBusy">
+                                @(isRegisteringFoundryExecutionProviders ? "Registering..." : GetFoundryExecutionProviderButtonLabel())
+                            </button>
+                        </div>
+                    }
+                }
+
+                <label class="field-label" for="foundryModelFilter">Filter catalog</label>
+                <input id="foundryModelFilter" class="text-input" @bind="foundryModelFilter" placeholder="Filter by alias or display name" disabled="@IsModelSelectionBusy" />
+
+                @if (visibleFoundryModels.Count == 0)
+                {
+                    <p class="muted-text">No Foundry catalog models match the current filter.</p>
+                }
+                else
+                {
+                    <table class="compact-grid setup-list-table">
+                        <thead>
+                            <tr><th></th><th>Model</th><th>Alias</th><th>Size (GB)</th><th>Status</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in visibleFoundryModels.Select((model, index) => new { model, index }))
+                            {
+                                <tr class="@GetSetupListRowClass(item.index)">
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@IsModelSelected(item.model.Alias)"
+                                               @onchange="args => SetModelSelection(item.model.Alias, args.Value is bool isSelected && isSelected)"
+                                               disabled="@IsModelSelectionBusy" />
+                                    </td>
+                                    <td>
+                                        <strong>@item.model.DisplayName</strong>
+                                        <div class="setup-list-detail">@GetFoundryModelDetail(item.model)</div>
+                                    </td>
+                                    <td>@item.model.Alias</td>
+                                    <td>@FormatFoundryModelSize(item.model)</td>
+                                    <td>@GetFoundryModelState(item.model)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        }
+        else
+        {
+            <p class="muted-text">Load the Foundry catalog to see cached models and the full list of selectable aliases.</p>
+        }
+    }
+
+    <section class="details-card stack-gap">
+        <div class="field-label">Model actions</div>
+        <p class="muted-text">Model selection happens above. Batch actions below always work from the current checkbox selection, so the layout stays consistent across providers.</p>
+
+        <div class="button-row">
+            <button class="secondary-button" @onclick="SelectAllVisibleModels" disabled="@(!CanSelectVisibleModels)">Select all visible</button>
+            <button class="secondary-button" @onclick="ClearSelectedModels" disabled="@(!HasSelectedModels)">Select none</button>
+            <button class="secondary-button" @onclick="DownloadSelectedModelsAsync" disabled="@(!CanDownloadSelectedModels)">@(isDownloadingFoundryModel ? "Downloading..." : "Download selected")</button>
+            <button class="primary-button" @onclick="StartBenchmarkSelectedAsync" disabled="@(!CanBenchmarkSelectedModels)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking..." : "Benchmark selected")</button>
+            @if (BenchmarkCoordinator.IsRunning)
+            {
+                <button class="link-button" @onclick="CancelBenchmark">Cancel benchmark</button>
+            }
+        </div>
+
+        <div class="status-chip @(HasSelectedModels ? "status-ok" : "status-pending")">
+            @GetSelectedModelsStatusMessage()
+        </div>
+
+        @if (IsOllamaSelected)
+        {
+            <p class="muted-text">Ollama model installation and removal stay outside the app, but the same selection and selected-model benchmark flow applies here.</p>
+        }
+        else
+        {
+            <label>
+                <input type="checkbox" @bind="removeTooLargeFoundryModelsAfterBenchmark" disabled="@IsModelSelectionBusy" />
+                Remove models classified as too large for interactive use after benchmark.
+            </label>
+            <p class="muted-text">The benchmark result stays visible even if a Foundry model is removed from the local cache after benchmarking.</p>
+            @if (!FoundryOptions.AllowDownloads)
+            {
+                <p class="muted-text">Foundry downloads are disabled in configuration, so only already cached models can be benchmarked or used.</p>
+            }
+        }
+    </section>
+
+    @if (!IsOllamaSelected && foundryCatalog is not null)
+    {
+        <section class="details-card stack-gap foundry-guidance-panel">
+            <div class="field-label">Foundry performance notes</div>
+            <div class="benchmark-guidance-grid">
+                <article class="benchmark-guidance-card">
+                    <h3>Hardware path</h3>
+                    <p>@GetFoundryHardwareGuidance(foundryCatalog)</p>
+                </article>
+                <article class="benchmark-guidance-card">
+                    <h3>Alias behavior</h3>
+                    <p>@GetFoundryAliasGuidance()</p>
+                </article>
+                <article class="benchmark-guidance-card">
+                    <h3>Tuning in this app</h3>
+                    <p>@GetFoundryTuningGuidance(foundryCatalog)</p>
+                </article>
+            </div>
+        </section>
+    }
+
+    @if (BenchmarkCoordinator.Current is { IsRunning: true } liveBenchmark)
+    {
+        var recentBenchmarkEntries = GetRecentBenchmarkActivityEntries();
+        <section class="details-card benchmark-live-rail stack-gap">
+            <div class="benchmark-live-header">
+                <div>
+                    <div class="field-label">Live benchmark run</div>
+                    <h3>@GetBenchmarkLiveHeadline(liveBenchmark)</h3>
+                    <p class="muted-text">@GetBenchmarkLiveDetail(liveBenchmark)</p>
+                </div>
+                <div class="benchmark-stage-pill">@GetBenchmarkStageLabel()</div>
+            </div>
+
+            <div class="benchmark-progress-track" aria-hidden="true">
+                <div class="benchmark-progress-fill benchmark-progress-fill-live" style="@GetBenchmarkProgressStyle(liveBenchmark)"></div>
+            </div>
+
+            <div class="benchmark-live-grid">
+                <article class="benchmark-live-card">
+                    <span class="benchmark-live-label">Current model</span>
+                    <strong>@(liveBenchmark.CurrentModel ?? "Wrapping up")</strong>
+                    <div class="benchmark-live-detail">@GetBenchmarkOperationSummary()</div>
+                </article>
+                <article class="benchmark-live-card">
+                    <span class="benchmark-live-label">Queue progress</span>
+                    <strong>@liveBenchmark.CompletedCount / @liveBenchmark.TotalCount complete</strong>
+                    <div class="benchmark-live-detail">@GetBenchmarkProgressCaption(liveBenchmark)</div>
+                </article>
+                <article class="benchmark-live-card">
+                    <span class="benchmark-live-label">Cleanup policy</span>
+                    <strong>@GetBenchmarkCleanupPolicyLabel(liveBenchmark)</strong>
+                    <div class="benchmark-live-detail">@GetBenchmarkCleanupPolicyDetail(liveBenchmark)</div>
+                </article>
+            </div>
+
+            @if (recentBenchmarkEntries.Count > 0)
+            {
+                <div class="benchmark-event-strip">
+                    @foreach (var entry in recentBenchmarkEntries)
+                    {
+                        <article class="benchmark-event-pill benchmark-event-pill-@entry.Level">
+                            <div class="benchmark-event-message">@entry.Message</div>
+                            @if (!string.IsNullOrWhiteSpace(entry.Detail))
+                            {
+                                <div class="benchmark-event-detail">@entry.Detail</div>
+                            }
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    }
+    else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
+    {
+        var topBenchmarkResult = GetTopBenchmarkResult(lastBenchmark);
+        <section class="details-card benchmark-summary-shell stack-gap">
+            <div class="benchmark-live-header">
+                <div>
+                    <div class="field-label">Benchmark snapshot</div>
+                    <h3>@GetBenchmarkSummaryHeadline(lastBenchmark)</h3>
+                    <p class="muted-text">@GetBenchmarkSummaryDetail(lastBenchmark)</p>
+                </div>
+                <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
+                    Last benchmark: @FormatProviderLabel(lastBenchmark.Provider) - @lastBenchmark.Results.Count model(s)
+                    @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
+                    - completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
+                </div>
+            </div>
+
+            <div class="benchmark-summary-grid">
+                <article class="benchmark-highlight-card">
+                    <span class="benchmark-live-label">Top model</span>
+                    @if (topBenchmarkResult is not null)
+                    {
+                        <strong>@topBenchmarkResult.Model</strong>
+                        @if (topBenchmarkResult.Succeeded)
+                        {
+                            <div class="benchmark-score-line">
+                                <span>Overall @topBenchmarkResult.OverallScore.ToString("0.00")</span>
+                                <span>Quality @topBenchmarkResult.QualityScore.ToString("0.00")</span>
+                                <span>Decode @FormatDecodeSpeed(topBenchmarkResult)</span>
+                            </div>
+                            <div class="benchmark-live-detail">Fit: @topBenchmarkResult.Fit</div>
+                        }
+                        else
+                        {
+                            <div class="benchmark-live-detail">@topBenchmarkResult.FailedReason</div>
+                        }
+                    }
+                </article>
+
+                <article class="benchmark-stat-card">
+                    <span class="benchmark-live-label">Usable results</span>
+                    <strong>@CountSucceededBenchmarks(lastBenchmark)</strong>
+                    <div class="benchmark-live-detail">models returned benchmark data without a hard failure.</div>
+                </article>
+
+                <article class="benchmark-stat-card">
+                    <span class="benchmark-live-label">Cleanup actions</span>
+                    <strong>@CountRemovedBenchmarkedModels(lastBenchmark)</strong>
+                    <div class="benchmark-live-detail">model(s) removed, @CountCleanupWarningBenchmarks(lastBenchmark) warning(s) preserved in notes.</div>
+                </article>
+            </div>
+        </section>
+
+        <table class="compact-grid setup-list-table">
+            <thead>
+                <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var item in lastBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
+                {
+                    <tr class="@GetSetupListRowClass(item.index)">
+                        <td>@item.benchmarkRow.Rank</td>
+                        <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
+                        <td>@item.benchmarkRow.Model</td>
+                        <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.OverallScore.ToString("0.00") : "-")</td>
+                        <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.QualityScore.ToString("0.00") : "-")</td>
+                        <td>@(item.benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "-")</td>
+                        <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@(item.benchmarkRow.Succeeded ? item.benchmarkRow.Fit.ToString() : (item.benchmarkRow.FailedReason ?? "failed"))</td>
+                        <td>
+                            @if (item.benchmarkRow.Succeeded && CanUseBenchmarkedModel(item.benchmarkRow))
+                            {
+                                <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(item.benchmarkRow)">Use</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (Workspace.HasStartedLlmWork)
+    {
+        <p class="muted-text">Updated session model and thinking changes apply to future LLM operations. Re-run any completed analysis or draft generation that you want refreshed with the new settings.</p>
+    }
+
+    @if (GetFoundrySetupDiagnostic() is { } foundrySetupDiagnostic)
+    {
+        <div class="message error foundry-setup-error">
+            <strong>@foundrySetupDiagnostic.Summary</strong>
+            <p class="foundry-setup-error-guidance">@foundrySetupDiagnostic.Guidance</p>
+            <ol class="foundry-setup-error-steps">
+                @foreach (var nextStep in foundrySetupDiagnostic.NextSteps)
+                {
+                    <li>@nextStep</li>
+                }
+            </ol>
+            <details class="foundry-setup-error-details">
+                <summary>Technical detail</summary>
+                <pre>@llmErrorMessage</pre>
+            </details>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(llmErrorMessage))
+    {
+        <div class="message error">@llmErrorMessage</div>
+    }
+</section>
+
+@code {
+    private static readonly string[] ThinkingLevels = ["low", "medium", "high"];
+    private static readonly LlmProviderKind[] AvailableLlmProviders = [LlmProviderKind.Ollama, LlmProviderKind.Foundry];
+
+    private readonly HashSet<string> selectedActionModels = new(StringComparer.OrdinalIgnoreCase);
+    private bool isCheckingOllama;
+    private bool isCheckingFoundry;
+    private bool isDownloadingFoundryModel;
+    private bool isRegisteringFoundryExecutionProviders;
+    private bool removeTooLargeFoundryModelsAfterBenchmark = true;
+    private string? llmErrorMessage;
+    private LlmModelAvailability? availability;
+    private FoundryCatalogSnapshot? foundryCatalog;
+    private LlmProviderKind selectedProvider = LlmProviderKind.Ollama;
+    private string selectedModel = string.Empty;
+    private string selectedThinkingLevel = "medium";
+    private string downloadingFoundryAlias = string.Empty;
+    private string foundryModelFilter = string.Empty;
+
+    private bool CanSaveSessionLlmSettings => !IsModelSelectionBusy
+        && GetAvailableSessionModels().Count > 0
+        && !string.IsNullOrWhiteSpace(selectedModel);
+
+    private bool IsOllamaSelected => selectedProvider == LlmProviderKind.Ollama;
+
+    private bool IsProviderSelectionBusy => isCheckingOllama
+        || isCheckingFoundry
+        || isDownloadingFoundryModel
+        || isRegisteringFoundryExecutionProviders
+        || BenchmarkCoordinator.IsRunning;
+
+    private bool IsModelSelectionBusy => IsProviderSelectionBusy;
+
+    private bool IsProviderRefreshBusy => IsOllamaSelected ? isCheckingOllama : isCheckingFoundry;
+
+    private bool IsFoundryBusy => isCheckingFoundry || isDownloadingFoundryModel || isRegisteringFoundryExecutionProviders;
+
+    private bool HasSelectedModels => GetSelectedActionModels().Count > 0;
+
+    private bool CanSelectVisibleModels => !IsModelSelectionBusy && GetVisibleSelectableModelKeys().Count > 0;
+
+    private bool CanDownloadSelectedModels => !IsOllamaSelected
+        && !IsModelSelectionBusy
+        && FoundryOptions.AllowDownloads
+        && GetSelectedFoundryDownloadCandidates().Count > 0;
+
+    private bool CanBenchmarkSelectedModels => !IsModelSelectionBusy
+        && HasSelectedModels
+        && (IsOllamaSelected || FoundryOptions.AllowDownloads || GetSelectedFoundryDownloadCandidates().Count == 0);
+
+    protected override void OnInitialized()
+    {
+        Operations.Changed += HandleChanged;
+        BenchmarkCoordinator.Changed += HandleChanged;
+        selectedProvider = Workspace.SelectedLlmProvider;
+        availability = Workspace.OllamaAvailability;
+        selectedModel = Workspace.SelectedLlmModel;
+        selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+    }
+
+    public void Dispose()
+    {
+        Operations.Changed -= HandleChanged;
+        BenchmarkCoordinator.Changed -= HandleChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && IsOllamaSelected && availability is null)
+        {
+            await CheckOllamaAsync();
+            StateHasChanged();
+        }
+        else if (firstRender && !IsOllamaSelected && foundryCatalog is null)
+        {
+            await CheckFoundryAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleProviderSelectionChangedAsync()
+    {
+        llmErrorMessage = null;
+        availability = Workspace.OllamaAvailability;
+        selectedActionModels.Clear();
+        Workspace.SetLlmProviderSelection(selectedProvider);
+        selectedModel = Workspace.SelectedLlmModel;
+        selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+
+        if (IsOllamaSelected)
+        {
+            if (availability is null)
+            {
+                await CheckOllamaAsync();
+                return;
+            }
+
+            Operations.Info("Ollama selected.", "Choose a session model, then use the shared action section to benchmark the checked models.");
+        }
+        else
+        {
+            if (foundryCatalog is null)
+            {
+                await CheckFoundryAsync();
+                return;
+            }
+
+            Operations.Info("Microsoft Foundry Local selected.", "Choose a cached session model, then use the shared action section to download or benchmark the checked models.");
+        }
+    }
+
+    private async Task CheckOllamaAsync()
+    {
+        if (!IsOllamaSelected)
+        {
+            return;
+        }
+
+        llmErrorMessage = null;
+        isCheckingOllama = true;
+
+        try
+        {
+            availability = await Operations.RunAsync(
+                "Checking Ollama access",
+                OllamaOptions.BaseUrl,
+                () => LlmClient.VerifyModelAvailabilityAsync());
+
+            Workspace.SetOllamaAvailability(availability);
+            selectedModel = Workspace.SelectedLlmModel;
+            selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+            ReconcileSelectedActionModels();
+            Operations.Success(
+                "Ollama is reachable.",
+                $"Discovered {availability.AvailableModels.Count} models; loaded now: {availability.EffectiveRunningModels.Count}.");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Ollama access check failed.", exception.Message);
+        }
+        finally
+        {
+            isCheckingOllama = false;
+        }
+    }
+
+    private async Task CheckFoundryAsync()
+    {
+        if (IsOllamaSelected)
+        {
+            return;
+        }
+
+        llmErrorMessage = null;
+        isCheckingFoundry = true;
+
+        try
+        {
+            foundryCatalog = await Operations.RunAsync(
+                "Loading Foundry Local catalog",
+                FoundryOptions.DefaultModelAlias,
+                () => FoundryCatalogClient.GetSnapshotAsync());
+
+            Workspace.SetFoundryAvailability(foundryCatalog.Availability);
+            selectedModel = Workspace.SelectedLlmModel;
+            selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+            ReconcileSelectedActionModels();
+
+            if (await TryAutoRegisterFoundryExecutionProvidersAsync(foundryCatalog.Acceleration))
+            {
+                Workspace.SetFoundryAvailability(foundryCatalog.Availability);
+                selectedModel = Workspace.SelectedLlmModel;
+                selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+                ReconcileSelectedActionModels();
+            }
+
+            var accelerationDetail = ShouldShowFoundryAccelerationSection(foundryCatalog.Acceleration)
+                ? $" {foundryCatalog.Acceleration.StatusMessage}"
+                : string.Empty;
+            Operations.Success(
+                "Foundry Local catalog loaded.",
+                $"Catalog: {foundryCatalog.Models.Count} models; cached: {foundryCatalog.Availability.AvailableModels.Count}; loaded: {foundryCatalog.Availability.EffectiveRunningModels.Count}.{accelerationDetail}");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Foundry Local catalog load failed.", exception.Message);
+        }
+        finally
+        {
+            isCheckingFoundry = false;
+        }
+    }
+
+    private Task RefreshSelectedProviderAsync()
+        => IsOllamaSelected ? CheckOllamaAsync() : CheckFoundryAsync();
+
+    private Task UseSessionLlmSettingsAsync()
+    {
+        llmErrorMessage = null;
+
+        try
+        {
+            Workspace.SetLlmSessionSettings(selectedModel, selectedThinkingLevel);
+            Operations.Success(
+                $"{GetSelectedProviderLabel()} session settings updated.",
+                $"{Workspace.SelectedLlmModel} / {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Session LLM settings were not updated.", exception.Message);
+            return Task.CompletedTask;
+        }
+
+        if (IsOllamaSelected && OllamaOptions.RunCapacityProbeOnModelSelect)
+        {
+            _ = RunCapacityProbeAsync(Workspace.SelectedLlmModel);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task DownloadSelectedModelsAsync()
+    {
+        if (IsOllamaSelected)
+        {
+            return;
+        }
+
+        var selectedAliases = GetSelectedFoundryDownloadCandidates();
+        if (selectedAliases.Count == 0)
+        {
+            return;
+        }
+
+        llmErrorMessage = null;
+        isDownloadingFoundryModel = true;
+
+        try
+        {
+            for (var index = 0; index < selectedAliases.Count; index++)
+            {
+                var alias = selectedAliases[index];
+                downloadingFoundryAlias = alias;
+                await Operations.RunAsync(
+                    "Downloading Foundry models",
+                    $"{alias} ({index + 1}/{selectedAliases.Count})",
+                    () => FoundryCatalogClient.DownloadModelAsync(
+                        alias,
+                        progress => Operations.UpdateCurrent(
+                            "Downloading Foundry models",
+                            $"{alias} ({index + 1}/{selectedAliases.Count}): {progress:0.0}%")));
+            }
+
+            await RefreshFoundrySnapshotAsync();
+            Operations.Success(
+                "Selected Foundry models downloaded.",
+                $"Downloaded {selectedAliases.Count} selected model(s) into the local Foundry cache.");
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Selected Foundry models could not be downloaded.", exception.Message);
+        }
+        finally
+        {
+            isDownloadingFoundryModel = false;
+            downloadingFoundryAlias = string.Empty;
+        }
+    }
+
+    private async Task RegisterFoundryExecutionProvidersAsync()
+    {
+        if (IsOllamaSelected || !OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        llmErrorMessage = null;
+        isRegisteringFoundryExecutionProviders = true;
+
+        try
+        {
+            var providerNames = GetPreferredExecutionProviders();
+            var detail = providerNames.Count == 0
+                ? "All available providers"
+                : string.Join(", ", providerNames);
+
+            await Operations.RunAsync(
+                "Registering Windows ML execution providers",
+                detail,
+                () => FoundryCatalogClient.RegisterExecutionProvidersAsync(
+                    providerNames,
+                    (providerName, percent) => Operations.UpdateCurrent(
+                        "Registering Windows ML execution providers",
+                        $"{providerName}: {percent:0.0}%")));
+
+            await RefreshFoundrySnapshotAsync();
+            Operations.Success(
+                "Windows ML execution providers updated.",
+                foundryCatalog?.Acceleration.StatusMessage);
+        }
+        catch (Exception exception)
+        {
+            llmErrorMessage = exception.Message;
+            Operations.Error("Windows ML execution provider registration failed.", exception.Message);
+        }
+        finally
+        {
+            isRegisteringFoundryExecutionProviders = false;
+        }
+    }
+
+    private async Task StartBenchmarkSelectedAsync()
+    {
+        var models = GetSelectedActionModels();
+        if (models.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var isFoundryRun = !IsOllamaSelected;
+            var selectedDownloadCandidates = isFoundryRun ? GetSelectedFoundryDownloadCandidates().Count : 0;
+
+            Operations.Info(
+                $"Benchmarking {models.Count} selected {GetSelectedProviderLabel()} model(s).",
+                isFoundryRun && selectedDownloadCandidates > 0
+                    ? $"{selectedDownloadCandidates} selected model(s) will be downloaded first."
+                    : "This can take a long time.");
+
+            await BenchmarkCoordinator.StartAsync(
+                selectedProvider,
+                models,
+                downloadMissingModels: isFoundryRun,
+                removeTooLargeModelsAfterBenchmark: isFoundryRun && removeTooLargeFoundryModelsAfterBenchmark);
+
+            if (isFoundryRun)
+            {
+                await RefreshFoundrySnapshotAsync();
+            }
+
+            var completed = BenchmarkCoordinator.Last;
+            if (completed is null)
+            {
+                return;
+            }
+
+            if (completed.IsCancelled)
+            {
+                Operations.Info("Model benchmark cancelled.", $"Captured {completed.Results.Count} partial result(s) for {FormatProviderLabel(completed.Provider)}.");
+            }
+            else
+            {
+                var top = completed.Results.FirstOrDefault();
+                Operations.Success(
+                    "Model benchmark complete.",
+                    top is null ? null : $"Top {FormatProviderLabel(completed.Provider)} model: {top.Model} (overall {top.OverallScore:0.00}).");
+            }
+        }
+        catch (Exception exception)
+        {
+            Operations.Error("Model benchmark failed to start.", exception.Message);
+        }
+    }
+
+    private async Task RefreshFoundrySnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        foundryCatalog = await FoundryCatalogClient.GetSnapshotAsync(cancellationToken);
+        Workspace.SetFoundryAvailability(foundryCatalog.Availability);
+        selectedModel = Workspace.SelectedLlmModel;
+        selectedThinkingLevel = Workspace.SelectedThinkingLevel;
+        ReconcileSelectedActionModels();
+    }
+
+    private async Task RunCapacityProbeAsync(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return;
+        }
+
+        try
+        {
+            var verdict = await CapacityProbe.ProbeAsync(model);
+            Workspace.SetCapacityVerdict(verdict);
+            await InvokeAsync(StateHasChanged);
+            Operations.Info(
+                $"Hardware fit for {model}: {verdict.Fit}.",
+                verdict.Headline);
+        }
+        catch (Exception exception)
+        {
+            Operations.Info(
+                $"Could not measure hardware fit for {model}.",
+                exception.Message);
+        }
+    }
+
+    private static string FormatThinkingLevel(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? "Pending"
+            : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private string GetSelectedProviderLabel()
+        => FormatProviderLabel(selectedProvider);
+
+    private FoundrySetupDiagnostic? GetFoundrySetupDiagnostic()
+        => IsOllamaSelected
+            ? null
+            : FoundrySetupDiagnosticFormatter.Create(llmErrorMessage);
+
+    private string GetStep1StatusMessage()
+    {
+        if (GetFoundrySetupDiagnostic() is { } foundrySetupDiagnostic)
+        {
+            return foundrySetupDiagnostic.StatusMessage;
+        }
+
+        if (Workspace.IsLlmReady)
+        {
+            return $"Ready: {GetSelectedProviderLabel()} using {Workspace.SelectedLlmModel} with {FormatThinkingLevel(Workspace.SelectedThinkingLevel)} thinking.";
+        }
+
+        return IsOllamaSelected
+            ? "Choose a session model and any benchmark candidates."
+            : foundryCatalog is null
+                ? "Foundry catalog is still pending."
+                : foundryCatalog.Availability.AvailableModels.Count == 0
+                    ? "Download or benchmark selected Foundry models to cache a session model."
+                    : "Choose a cached Foundry session model and any batch action candidates.";
+    }
+
+    private string GetProviderSetupIntro()
+        => IsOllamaSelected
+            ? "Discover locally available Ollama models, choose the session model separately, then benchmark any checked models from the shared action section."
+            : "Browse the Foundry Local catalog, choose a cached session model separately, then download or benchmark any checked models from the shared action section.";
+
+    private static string FormatProviderLabel(LlmProviderKind provider)
+        => provider switch
+        {
+            LlmProviderKind.Foundry => "Microsoft Foundry Local",
+            _ => "Ollama"
+        };
+
+    private static string CapacityChipClass(OllamaCapacityFit fit) => fit switch
+    {
+        OllamaCapacityFit.Comfortable => "status-ok",
+        OllamaCapacityFit.Usable => "status-ok",
+        OllamaCapacityFit.PartialOffload => "status-pending",
+        OllamaCapacityFit.CpuOnly => "status-pending",
+        OllamaCapacityFit.TooLargeForInteractive => "status-error",
+        _ => "status-pending"
+    };
+
+    private static string FormatRunningModels(LlmModelAvailability availability)
+        => availability.EffectiveRunningModels.Count == 0
+            ? "none reported"
+            : string.Join(", ", availability.EffectiveRunningModels.Select(static model => model.Name));
+
+    private IReadOnlyList<string> GetAvailableSessionModels()
+        => (IsOllamaSelected ? availability?.AvailableModels : foundryCatalog?.Availability.AvailableModels)?
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+            ?? Array.Empty<string>();
+
+    private IReadOnlyList<string> GetVisibleOllamaModels()
+        => availability?.AvailableModels
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+            ?? Array.Empty<string>();
+
+    private string GetRefreshInventoryButtonLabel()
+        => IsOllamaSelected
+            ? (isCheckingOllama ? "Checking..." : "Check Ollama and load models")
+            : (isCheckingFoundry ? "Refreshing..." : "Load Foundry catalog");
+
+    private string GetSessionModelPendingMessage()
+    {
+        if (IsOllamaSelected)
+        {
+            return availability is null
+                ? "Run the Ollama check to load the local model list before saving the session settings."
+                : "Ollama responded, but no models were returned from the tags endpoint.";
+        }
+
+        return foundryCatalog is null
+            ? "Load the Foundry catalog to see cached models and choose a session model."
+            : "Download or benchmark selected Foundry models to cache a model before saving the session settings.";
+    }
+
+    private IReadOnlyList<string> GetSelectableModelKeys()
+        => IsOllamaSelected
+            ? GetVisibleOllamaModels()
+            : foundryCatalog?.Models.Select(static model => model.Alias).ToArray() ?? Array.Empty<string>();
+
+    private IReadOnlyList<string> GetVisibleSelectableModelKeys()
+        => IsOllamaSelected
+            ? GetVisibleOllamaModels()
+            : GetVisibleFoundryModels().Select(static model => model.Alias).ToArray();
+
+    private IReadOnlyList<string> GetSelectedActionModels()
+    {
+        var validKeys = GetSelectableModelKeys().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return selectedActionModels
+            .Where(validKeys.Contains)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> GetSelectedFoundryDownloadCandidates()
+    {
+        if (foundryCatalog is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return GetSelectedActionModels()
+            .Where(alias => foundryCatalog.Models.Any(model => model.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !model.IsCached))
+            .ToArray();
+    }
+
+    private void ReconcileSelectedActionModels()
+    {
+        var validKeys = GetSelectableModelKeys().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        selectedActionModels.RemoveWhere(model => !validKeys.Contains(model));
+    }
+
+    private bool IsModelSelected(string model)
+        => selectedActionModels.Contains(model);
+
+    private void SetModelSelection(string model, bool isSelected)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return;
+        }
+
+        if (isSelected)
+        {
+            selectedActionModels.Add(model);
+        }
+        else
+        {
+            selectedActionModels.Remove(model);
+        }
+    }
+
+    private void SelectAllVisibleModels()
+    {
+        foreach (var model in GetVisibleSelectableModelKeys())
+        {
+            selectedActionModels.Add(model);
+        }
+    }
+
+    private void ClearSelectedModels()
+    {
+        foreach (var model in GetSelectableModelKeys())
+        {
+            selectedActionModels.Remove(model);
+        }
+    }
+
+    private string GetSelectedModelsStatusMessage()
+    {
+        var selected = GetSelectedActionModels();
+        if (selected.Count == 0)
+        {
+            return "No models selected for batch actions.";
+        }
+
+        if (IsOllamaSelected)
+        {
+            return $"Selected models: {selected.Count}.";
+        }
+
+        var downloadCandidates = GetSelectedFoundryDownloadCandidates().Count;
+        return downloadCandidates == 0
+            ? $"Selected models: {selected.Count}. All selected Foundry models are already cached."
+            : $"Selected models: {selected.Count}. {downloadCandidates} selected model(s) will be downloaded before use.";
+    }
+
+    private IReadOnlyList<FoundryCatalogModel> GetVisibleFoundryModels()
+    {
+        if (foundryCatalog is null)
+        {
+            return Array.Empty<FoundryCatalogModel>();
+        }
+
+        if (string.IsNullOrWhiteSpace(foundryModelFilter))
+        {
+            return foundryCatalog.Models;
+        }
+
+        var filter = foundryModelFilter.Trim();
+        return foundryCatalog.Models
+            .Where(model => model.Alias.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || model.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    private static string GetOllamaModelState(LlmModelAvailability availability, string model)
+        => availability.IsModelLoaded(model) ? "Loaded" : "Installed";
+
+    private static string GetFoundryModelState(FoundryCatalogModel model)
+        => model.IsLoaded
+            ? "Loaded"
+            : model.IsCached
+                ? "Cached"
+                : "Available to download";
+
+    private static string GetFoundryModelDetail(FoundryCatalogModel model)
+        => string.IsNullOrWhiteSpace(model.Description)
+            ? $"Model ID: {model.ModelId}"
+            : model.Description;
+
+    private IReadOnlyList<OperationStatusEntry> GetRecentBenchmarkActivityEntries()
+        => Operations.Entries
+            .Where(static entry => !string.Equals(entry.Level, "busy", StringComparison.OrdinalIgnoreCase))
+            .Take(4)
+            .ToArray();
+
+    private string GetBenchmarkLiveHeadline(ModelBenchmarkSession liveBenchmark)
+        => string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel)
+            ? $"{FormatProviderLabel(liveBenchmark.Provider)} benchmark is wrapping up."
+            : $"{FormatProviderLabel(liveBenchmark.Provider)} benchmark is currently pressure-testing {liveBenchmark.CurrentModel}.";
+
+    private string GetBenchmarkLiveDetail(ModelBenchmarkSession liveBenchmark)
+        => $"{liveBenchmark.CompletedCount} of {liveBenchmark.TotalCount} complete in {FormatElapsedTime(DateTimeOffset.UtcNow - liveBenchmark.StartedUtc)}. {GetBenchmarkOperationSummary()}";
+
+    private string GetBenchmarkStageLabel()
+    {
+        var statusText = $"{Operations.CurrentMessage} {Operations.CurrentDetail}";
+        if (statusText.Contains("Downloading model before benchmark", StringComparison.OrdinalIgnoreCase)
+            || statusText.Contains("Preparing ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Downloading";
+        }
+
+        if (statusText.Contains("Removing non-fitting model", StringComparison.OrdinalIgnoreCase)
+            || statusText.Contains("remove Foundry model", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cleanup";
+        }
+
+        if (statusText.Contains("Registering Windows ML execution providers", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Acceleration";
+        }
+
+        return statusText.Contains("Benchmarking ", StringComparison.OrdinalIgnoreCase)
+            ? "Benchmarking"
+            : "Working";
+    }
+
+    private string GetBenchmarkOperationSummary()
+        => string.IsNullOrWhiteSpace(Operations.CurrentMessage)
+            ? "Queue is moving through the selected models."
+            : string.IsNullOrWhiteSpace(Operations.CurrentDetail)
+                ? Operations.CurrentMessage
+                : $"{Operations.CurrentMessage} {Operations.CurrentDetail}";
+
+    private static string GetBenchmarkProgressStyle(ModelBenchmarkSession liveBenchmark)
+        => $"width: {GetBenchmarkProgressPercent(liveBenchmark):0.##}%";
+
+    private static double GetBenchmarkProgressPercent(ModelBenchmarkSession liveBenchmark)
+    {
+        if (liveBenchmark.TotalCount <= 0)
+        {
+            return 0.0;
+        }
+
+        var inFlightBias = string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel) ? 0.0 : 0.45;
+        return Math.Clamp(((liveBenchmark.CompletedCount + inFlightBias) / liveBenchmark.TotalCount) * 100.0, 0.0, 100.0);
+    }
+
+    private static string GetBenchmarkProgressCaption(ModelBenchmarkSession liveBenchmark)
+    {
+        var remainingAfterCurrent = Math.Max(liveBenchmark.TotalCount - liveBenchmark.CompletedCount - (string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel) ? 0 : 1), 0);
+        return string.IsNullOrWhiteSpace(liveBenchmark.CurrentModel)
+            ? "Final ranking and notes are being locked in."
+            : remainingAfterCurrent == 0
+                ? "This is the last model in the queue."
+                : $"Current pass plus {remainingAfterCurrent} more model(s) still queued.";
+    }
+
+    private string GetBenchmarkCleanupPolicyLabel(ModelBenchmarkSession liveBenchmark)
+        => liveBenchmark.Provider == LlmProviderKind.Foundry
+            ? removeTooLargeFoundryModelsAfterBenchmark
+                ? "Delete too-large models"
+                : "Keep large models"
+            : "No in-app cleanup";
+
+    private string GetBenchmarkCleanupPolicyDetail(ModelBenchmarkSession liveBenchmark)
+        => liveBenchmark.Provider == LlmProviderKind.Foundry
+            ? removeTooLargeFoundryModelsAfterBenchmark
+                ? "Foundry models tagged as too large are removed only after their benchmark row is finalized."
+                : "Foundry cache cleanup is off for this run, so all benchmarked models stay available."
+            : "Ollama installs and removals stay outside the app.";
+
+    private static string GetBenchmarkSummaryHeadline(ModelBenchmarkSession session)
+        => $"{CountSucceededBenchmarks(session)} of {session.Results.Count} model(s) produced usable benchmark results.";
+
+    private string GetBenchmarkSummaryDetail(ModelBenchmarkSession session)
+    {
+        var removed = CountRemovedBenchmarkedModels(session);
+        var warnings = CountCleanupWarningBenchmarks(session);
+        return removed == 0 && warnings == 0
+            ? $"{FormatProviderLabel(session.Provider)} results are ready to compare by quality, speed, and interactive fit."
+            : $"{removed} model(s) were removed after benchmarking and {warnings} cleanup warning(s) were preserved in the notes instead of hiding the result.";
+    }
+
+    private static int CountSucceededBenchmarks(ModelBenchmarkSession session)
+        => session.Results.Count(static result => result.Succeeded);
+
+    private static int CountRemovedBenchmarkedModels(ModelBenchmarkSession session)
+        => session.Results.Count(result => result.Notes.Any(static note => note.Contains("Removed from the local Foundry cache after benchmark", StringComparison.OrdinalIgnoreCase)));
+
+    private static int CountCleanupWarningBenchmarks(ModelBenchmarkSession session)
+        => session.Results.Count(result => result.Notes.Any(static note => note.Contains("could not be removed from the local Foundry cache", StringComparison.OrdinalIgnoreCase)
+            || note.Contains("Foundry catalog refresh failed afterward", StringComparison.OrdinalIgnoreCase)));
+
+    private static ModelBenchmarkResult? GetTopBenchmarkResult(ModelBenchmarkSession session)
+        => session.Results.FirstOrDefault(static result => result.Succeeded) ?? session.Results.FirstOrDefault();
+
+    private static string FormatDecodeSpeed(ModelBenchmarkResult result)
+        => result.DecodeTokensPerSecond is { } tps ? $"{tps:0.0} tok/s" : "speed n/a";
+
+    private static string FormatElapsedTime(TimeSpan elapsed)
+        => elapsed.TotalMinutes >= 1
+            ? elapsed.ToString(@"m\:ss")
+            : elapsed.ToString(@"s\.f\s");
+
+    private string GetFoundryHardwareGuidance(FoundryCatalogSnapshot catalog)
+    {
+        var acceleration = catalog.Acceleration;
+        if (!ShouldShowFoundryAccelerationSection(acceleration))
+        {
+            return "This runtime path does not expose Windows ML acceleration details, so expect more generic local-runtime behavior than the WinML path can provide.";
+        }
+
+        var registeredCount = acceleration.ExecutionProviders.Count(static executionProvider => executionProvider.IsRegistered);
+        if (registeredCount == 0 && acceleration.CanManageExecutionProviders)
+        {
+            return "No execution providers are registered yet. Foundry can fall back to a weaker CPU-style path, which often makes a good model look disappointing.";
+        }
+
+        return registeredCount == 0
+            ? acceleration.StatusMessage
+            : $"{registeredCount} execution provider(s) are registered. Benchmarks should reflect the best compatible hardware path the local runtime can actually use on this machine.";
+    }
+
+    private static string GetFoundryAliasGuidance()
+        => "Benchmark model aliases, not full variant IDs, so Foundry can pick the best hardware-specific local variant automatically for the current machine.";
+
+    private string GetFoundryTuningGuidance(FoundryCatalogSnapshot catalog)
+    {
+        var preferredProviders = GetPreferredExecutionProviders();
+        var autoLoadLabel = FoundryOptions.AutoLoadSelectedModel ? "on" : "off";
+        var providerLabel = preferredProviders.Count == 0
+            ? "No preferred execution providers are pinned yet."
+            : $"Preferred providers: {string.Join(", ", preferredProviders)}.";
+
+        return $"Auto-load is {autoLoadLabel}. {providerLabel} WinML still performs best with device-appropriate converted models and current drivers, so weak output can be a hardware path issue as much as a prompt issue.";
+    }
+
+    private static string GetSetupListRowClass(int index)
+        => index % 2 == 0 ? "setup-list-row" : "setup-list-row setup-list-row-accent";
+
+    private static string FormatFoundryModelSize(FoundryCatalogModel model)
+        => model.FileSizeMb is > 0
+            ? $"{model.FileSizeMb.Value / 1024d:0.0}"
+            : "n/a";
+
+    private static string GetFoundryAccelerationChipClass(FoundryAccelerationSnapshot acceleration)
+        => acceleration.CanManageExecutionProviders
+            ? "status-ok"
+            : acceleration.IsSupported && acceleration.IsEnabled
+                ? "status-pending"
+                : "status-neutral";
+
+    private static bool ShouldShowFoundryAccelerationSection(FoundryAccelerationSnapshot acceleration)
+        => OperatingSystem.IsWindows() || acceleration.IsSupported;
+
+    private static string FormatExecutionProviderState(FoundryExecutionProviderInfo executionProvider)
+        => executionProvider.IsRegistered ? "Registered" : "Discovered";
+
+    private string GetFoundryExecutionProviderButtonLabel()
+        => GetPreferredExecutionProviders().Count == 0
+            ? "Register execution providers"
+            : "Register preferred execution providers";
+
+    private IReadOnlyList<string> GetPreferredExecutionProviders()
+        => FoundryOptions.PreferredExecutionProviders
+            .Where(static providerName => !string.IsNullOrWhiteSpace(providerName))
+            .Select(static providerName => providerName.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private async Task<bool> TryAutoRegisterFoundryExecutionProvidersAsync(FoundryAccelerationSnapshot acceleration)
+    {
+        var preferredProviders = GetPreferredExecutionProviders();
+        if (!FoundryOptions.AutoRegisterExecutionProviders
+            || !OperatingSystem.IsWindows()
+            || !acceleration.CanManageExecutionProviders
+            || preferredProviders.Count == 0
+            || preferredProviders.All(providerName => acceleration.ExecutionProviders.Any(executionProvider => executionProvider.IsRegistered && executionProvider.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        await Operations.RunAsync(
+            "Registering Windows ML execution providers",
+            string.Join(", ", preferredProviders),
+            () => FoundryCatalogClient.RegisterExecutionProvidersAsync(
+                preferredProviders,
+                (providerName, percent) => Operations.UpdateCurrent(
+                    "Registering Windows ML execution providers",
+                    $"{providerName}: {percent:0.0}%")));
+
+        await RefreshFoundrySnapshotAsync();
+        return true;
+    }
+
+    private static string FormatLoadedState(LlmModelAvailability availability, string? selectedModel)
+    {
+        var model = string.IsNullOrWhiteSpace(selectedModel) ? availability.Model : selectedModel.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return "Unknown";
+        }
+
+        return availability.IsModelLoaded(model) ? "Yes" : "No";
+    }
+
+    private bool CanUseBenchmarkedModel(ModelBenchmarkResult benchmarkResult)
+    {
+        var benchmarkAvailability = benchmarkResult.Provider == LlmProviderKind.Foundry
+            ? Workspace.FoundryAvailability
+            : Workspace.OllamaAvailability;
+
+        return benchmarkAvailability is not null
+            && benchmarkAvailability.AvailableModels.Any(model => model.Equals(benchmarkResult.Model, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task UseBenchmarkedModelAsync(ModelBenchmarkResult benchmarkResult)
+    {
+        if (string.IsNullOrWhiteSpace(benchmarkResult.Model))
+        {
+            return;
+        }
+
+        try
+        {
+            if (selectedProvider != benchmarkResult.Provider)
+            {
+                selectedProvider = benchmarkResult.Provider;
+                selectedActionModels.Clear();
+                Workspace.SetLlmProviderSelection(selectedProvider);
+
+                if (selectedProvider == LlmProviderKind.Foundry)
+                {
+                    await CheckFoundryAsync();
+                }
+                else
+                {
+                    await CheckOllamaAsync();
+                }
+            }
+
+            if (!CanUseBenchmarkedModel(benchmarkResult))
+            {
+                Operations.Error(
+                    $"Could not switch session model to {benchmarkResult.Model}.",
+                    $"The {FormatProviderLabel(benchmarkResult.Provider)} model is no longer available locally.");
+                return;
+            }
+
+            selectedModel = benchmarkResult.Model;
+            await UseSessionLlmSettingsAsync();
+            if (benchmarkResult.Provider == LlmProviderKind.Ollama && OllamaOptions.RunCapacityProbeOnModelSelect)
+            {
+                await RunCapacityProbeAsync(benchmarkResult.Model);
+            }
+        }
+        catch (Exception exception)
+        {
+            Operations.Error($"Could not switch session model to {benchmarkResult.Model}.", exception.Message);
+        }
+    }
+
+    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void CancelBenchmark()
+    {
+        BenchmarkCoordinator.Cancel();
+    }
+}

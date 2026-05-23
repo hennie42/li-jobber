@@ -1,0 +1,712 @@
+@page "/setup/linkedin"
+@implements IDisposable
+@inject ILinkedInExportImporter ExportImporter
+@inject LinkedInAuthOptions LinkedInOptions
+@inject OperationStatusService Operations
+@inject WorkspaceSession Workspace
+@inject IJSRuntime JS
+
+<PageTitle>Setup / LinkedIn</PageTitle>
+
+<section class="card-panel setup-header">
+    <div class="setup-header-row">
+        <div>
+            <div class="field-label">Setup</div>
+            <h2>LinkedIn-related</h2>
+            <p class="muted-text">Import your DMA member snapshot, review the recovered profile, and edit the current session profile details.</p>
+        </div>
+        <div class="button-row">
+            <a class="secondary-button" href="/">Back to overview</a>
+            <a class="primary-button setup-header-cta" href="/workspace/job-workbench">Open Job Workbench →</a>
+        </div>
+    </div>
+</section>
+
+<section class="card-panel stack-gap">
+    <div class="field-label">LinkedIn DMA import</div>
+    <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
+        @Workspace.LinkedInAuthorizationStatus.Message
+    </div>
+
+    <dl class="key-value-grid compact-grid">
+        <dt>Required scope</dt>
+        <dd>@LinkedInOptions.PortabilityScope</dd>
+        <dt>LinkedIn-Version</dt>
+        <dd>`YYYYMM` with automatic monthly fallback</dd>
+        <dt>Import mode</dt>
+        <dd>DMA member snapshot only</dd>
+    </dl>
+
+    @if (!LinkedInOptions.HasAccessToken)
+    {
+        <label class="field-label" for="dmaAccessToken">DMA portability access token</label>
+        <textarea id="dmaAccessToken" class="prompt-box compact-prompt" @bind="dmaAccessToken" placeholder="Paste your LinkedIn DMA portability access token here."></textarea>
+        <p class="muted-text">Paste the DMA portability token from LinkedIn. It is used once for the import and is not stored.</p>
+    }
+    else
+    {
+        <p class="muted-text">Access token loaded from user secrets.</p>
+    }
+
+    <div class="button-row">
+        <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">@(isImportingProfile ? "Importing..." : hasProfile ? "Refresh profile" : "Load LinkedIn profile")</button>
+    </div>
+
+    @if (isImportingProfile)
+    {
+        <div class="import-progress"></div>
+    }
+
+    @if (isImportingProfile && !string.IsNullOrWhiteSpace(importProgressStatus))
+    {
+        <div class="status-chip status-pending">@importProgressStatus</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(profileWarningMessage))
+    {
+        <div class="message warning">@profileWarningMessage</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(profileErrorMessage))
+    {
+        <div class="message error">@profileErrorMessage</div>
+    }
+</section>
+
+@if (Workspace.CandidateProfile is not null)
+{
+    <section class="card-panel stack-gap">
+        <div>
+            <div class="field-label">Imported profile</div>
+            <h3>@Workspace.CandidateProfile.Name.FullName</h3>
+            <p class="muted-text">
+                @(Workspace.CandidateProfile.Experience.Count) roles
+                @if (Workspace.CandidateProfile.Education.Count > 0)
+                {
+                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Education.Count) education</text>
+                }
+                @if (Workspace.CandidateProfile.Projects.Count > 0)
+                {
+                    <span class="meta-sep">·</span> <text>@(Workspace.CandidateProfile.Projects.Count) projects</text>
+                }
+            </p>
+        </div>
+
+        @if (result?.Warnings.Count > 0)
+        {
+            <details class="details-card">
+                <summary>Import warnings (@result.Warnings.Count)</summary>
+                <ul class="feature-list">
+                    @foreach (var warning in result.Warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </details>
+        }
+
+        <div class="profile-tabs">
+            <button class="profile-tab @(activeProfileTab == "experience" ? "active" : "")" @onclick='() => activeProfileTab = "experience"'>Experience <span class="tab-count">@Workspace.CandidateProfile.Experience.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "education" ? "active" : "")" @onclick='() => activeProfileTab = "education"'>Education <span class="tab-count">@Workspace.CandidateProfile.Education.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "skills" ? "active" : "")" @onclick='() => activeProfileTab = "skills"'>Skills <span class="tab-count">@Workspace.CandidateProfile.Skills.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "certifications" ? "active" : "")" @onclick='() => activeProfileTab = "certifications"'>Certifications <span class="tab-count">@Workspace.CandidateProfile.Certifications.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "projects" ? "active" : "")" @onclick='() => activeProfileTab = "projects"'>Projects <span class="tab-count">@Workspace.CandidateProfile.Projects.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "recommendations" ? "active" : "")" @onclick='() => activeProfileTab = "recommendations"'>Recommendations <span class="tab-count">@Workspace.CandidateProfile.Recommendations.Count</span></button>
+            <button class="profile-tab @(activeProfileTab == "signals" ? "active" : "")" @onclick='() => activeProfileTab = "signals"'>Notes <span class="tab-count">@Workspace.CandidateProfile.ManualSignals.Count</span></button>
+        </div>
+
+        @if (activeProfileTab == "experience")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Experience.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Experience[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"exp-title-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Title))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"exp-title-{index}", entry.Title)'>@entry.Title</span>
+                            }
+                            @if (savedField == $"exp-title-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveExperienceAsync(index)">Remove</button>
+                        </div>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"exp-company-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.CompanyName))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable" @onclick='() => StartEdit($"exp-company-{index}", entry.CompanyName)'>@entry.CompanyName</span>
+                        }
+                        @if (savedField == $"exp-company-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"exp-desc-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveExperienceField(index, nameof(entry.Description))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"exp-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
+                        }
+                        @if (savedField == $"exp-desc-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "education")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Education.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Education[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"edu-school-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.SchoolName))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"edu-school-{index}", entry.SchoolName)'>@entry.SchoolName</span>
+                            }
+                            @if (savedField == $"edu-school-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveEducationAsync(index)">Remove</button>
+                        </div>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"edu-degree-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.DegreeName))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.DegreeName) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-degree-{index}", entry.DegreeName)'>@(string.IsNullOrWhiteSpace(entry.DegreeName) ? "(click to add degree)" : entry.DegreeName)</span>
+                        }
+                        @if (savedField == $"edu-degree-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"edu-notes-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveEducationField(index, nameof(entry.Notes))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Notes) ? "placeholder" : "")" @onclick='() => StartEdit($"edu-notes-{index}", entry.Notes)'>@(string.IsNullOrWhiteSpace(entry.Notes) ? "(click to add notes)" : entry.Notes)</span>
+                        }
+                        @if (savedField == $"edu-notes-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "skills")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Skills.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Skills[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Name</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveSkillAsync(index)">Remove</button>
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "certifications")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Certifications.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Certifications[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"cert-name-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Name))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"cert-name-{index}", entry.Name)'>@entry.Name</span>
+                            }
+                            @if (savedField == $"cert-name-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveCertificationAsync(index)">Remove</button>
+                        </div>
+                    </div>
+                    <div class="profile-entry-sub">
+                        @if (editingField == $"cert-authority-{index}")
+                        {
+                            <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveCertificationField(index, nameof(entry.Authority))" autofocus />
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Authority) ? "placeholder" : "")" @onclick='() => StartEdit($"cert-authority-{index}", entry.Authority)'>@(string.IsNullOrWhiteSpace(entry.Authority) ? "(click to add authority)" : entry.Authority)</span>
+                        }
+                        @if (savedField == $"cert-authority-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "projects")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Projects.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Projects[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>
+                            @if (editingField == $"proj-title-{index}")
+                            {
+                                <input class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Title))" autofocus />
+                            }
+                            else
+                            {
+                                <span class="inline-editable" @onclick='() => StartEdit($"proj-title-{index}", entry.Title)'>@entry.Title</span>
+                            }
+                            @if (savedField == $"proj-title-{index}") { <span class="save-flash">Saved</span> }
+                        </h4>
+                        <div class="profile-entry-actions">
+                            <span class="profile-entry-period">@entry.Period.DisplayValue</span>
+                            <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveProjectAsync(index)">Remove</button>
+                        </div>
+                    </div>
+                    <div class="profile-entry-body">
+                        @if (editingField == $"proj-desc-{index}")
+                        {
+                            <textarea class="inline-edit-input" @bind="editingValue" @bind:event="oninput" @onblur="() => SaveProjectField(index, nameof(entry.Description))" autofocus></textarea>
+                        }
+                        else
+                        {
+                            <span class="inline-editable @(string.IsNullOrWhiteSpace(entry.Description) ? "placeholder" : "")" @onclick='() => StartEdit($"proj-desc-{index}", entry.Description)'>@(string.IsNullOrWhiteSpace(entry.Description) ? "(click to add description)" : entry.Description)</span>
+                        }
+                        @if (savedField == $"proj-desc-{index}") { <span class="save-flash">Saved</span> }
+                    </div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "recommendations")
+        {
+            @for (var i = 0; i < Workspace.CandidateProfile.Recommendations.Count; i++)
+            {
+                var index = i;
+                var entry = Workspace.CandidateProfile.Recommendations[index];
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Author.FullName</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveRecommendationAsync(index)">Remove</button>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(entry.Company) || !string.IsNullOrWhiteSpace(entry.JobTitle))
+                    {
+                        <div class="profile-entry-sub">@entry.JobTitle @(!string.IsNullOrWhiteSpace(entry.Company) ? $"at {entry.Company}" : "")</div>
+                    }
+                    <div class="profile-entry-body">@entry.Text</div>
+                </div>
+            }
+        }
+
+        @if (activeProfileTab == "signals")
+        {
+            @foreach (var entry in Workspace.CandidateProfile.ManualSignals.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var key = entry.Key;
+                <div class="profile-entry">
+                    <div class="profile-entry-header">
+                        <h4>@entry.Key</h4>
+                        <button class="link-button destructive-button profile-remove-button" @onclick="() => RemoveManualSignalAsync(key)">Remove</button>
+                    </div>
+                    <div class="profile-entry-body">@entry.Value</div>
+                </div>
+            }
+        }
+    </section>
+}
+
+@code {
+    private bool isImportingProfile;
+    private string? importProgressStatus;
+    private string? profileErrorMessage;
+    private string? profileWarningMessage;
+    private string activeProfileTab = "experience";
+    private string? editingField;
+    private string editingValue = string.Empty;
+    private string? savedField;
+    private CancellationTokenSource? savedFieldCts;
+    private string dmaAccessToken = string.Empty;
+    private LinkedInExportImportResult? result;
+
+    private bool hasProfile => Workspace.CandidateProfile is not null;
+
+    protected override void OnInitialized()
+    {
+        result = Workspace.ImportResult;
+
+        if (result is not null)
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                $"LinkedIn profile ready from {result.SourceDescription}.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+        else if (Workspace.CandidateProfile is not null)
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                "LinkedIn profile loaded from recovered session.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+        else
+        {
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                false,
+                "DMA member snapshot not loaded.",
+                null,
+                null,
+                LinkedInOptions.PortabilityScope));
+        }
+    }
+
+    public void Dispose()
+    {
+        savedFieldCts?.Cancel();
+        savedFieldCts?.Dispose();
+    }
+
+    private async Task LoadDmaMemberSnapshotAsync()
+    {
+        profileErrorMessage = null;
+        profileWarningMessage = null;
+
+        try
+        {
+            isImportingProfile = true;
+            importProgressStatus = "Starting import";
+            var imported = await Operations.RunAsync(
+                "Importing LinkedIn DMA member snapshot",
+                LinkedInOptions.PortabilityScope,
+                () => ExportImporter.ImportMemberSnapshotAsync(
+                    LinkedInOptions.HasAccessToken ? LinkedInOptions.AccessToken : dmaAccessToken,
+                    status => { importProgressStatus = status; _ = InvokeAsync(StateHasChanged); }));
+
+            result = imported;
+            Workspace.SetImportResult(Workspace.ExportPath, imported);
+            Workspace.SetLinkedInAuthorizationStatus(new LinkedInAuthorizationStatus(
+                true,
+                "LinkedIn DMA member snapshot imported with the provided portability token.",
+                DateTimeOffset.UtcNow,
+                null,
+                LinkedInOptions.PortabilityScope));
+            dmaAccessToken = string.Empty;
+            Operations.Success("LinkedIn DMA member snapshot loaded.", $"{result.SourceDescription}: {result.Profile.Name.FullName}. Review the profile details below, then continue in the job workbench when ready.");
+        }
+        catch (Exception exception)
+        {
+            profileErrorMessage = exception.Message;
+            Operations.Error("LinkedIn DMA member snapshot could not be loaded.", exception.Message);
+        }
+        finally
+        {
+            isImportingProfile = false;
+            importProgressStatus = null;
+        }
+    }
+
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private void SaveExperienceField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Experience.Count)
+        {
+            return;
+        }
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Experience[index];
+        var updated = field switch
+        {
+            nameof(ExperienceEntry.Title) => entry with { Title = value ?? entry.Title },
+            nameof(ExperienceEntry.CompanyName) => entry with { CompanyName = value ?? entry.CompanyName },
+            nameof(ExperienceEntry.Description) => entry with { Description = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Experience.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Experience = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveEducationField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Education.Count)
+        {
+            return;
+        }
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Education[index];
+        var updated = field switch
+        {
+            nameof(EducationEntry.SchoolName) => entry with { SchoolName = value ?? entry.SchoolName },
+            nameof(EducationEntry.DegreeName) => entry with { DegreeName = value },
+            nameof(EducationEntry.Notes) => entry with { Notes = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Education.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Education = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveCertificationField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Certifications.Count)
+        {
+            return;
+        }
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Certifications[index];
+        var updated = field switch
+        {
+            nameof(CertificationEntry.Name) => entry with { Name = value ?? entry.Name },
+            nameof(CertificationEntry.Authority) => entry with { Authority = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Certifications.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Certifications = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private void SaveProjectField(int index, string field)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || index >= profile.Projects.Count)
+        {
+            return;
+        }
+
+        var value = NullIfWhiteSpace(editingValue);
+        var entry = profile.Projects[index];
+        var updated = field switch
+        {
+            nameof(ProjectEntry.Title) => entry with { Title = value ?? entry.Title },
+            nameof(ProjectEntry.Description) => entry with { Description = value },
+            _ => entry
+        };
+
+        if (updated != entry)
+        {
+            var list = profile.Projects.ToList();
+            list[index] = updated;
+            Workspace.UpdateCandidateProfile(profile with { Projects = list });
+            ShowSaved(editingField!);
+        }
+
+        editingField = null;
+    }
+
+    private Task RemoveExperienceAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "experience",
+            static profile => profile.Experience,
+            static (profile, values) => profile with { Experience = values },
+            static entry => entry.Title);
+
+    private Task RemoveEducationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "education",
+            static profile => profile.Education,
+            static (profile, values) => profile with { Education = values },
+            static entry => string.IsNullOrWhiteSpace(entry.DegreeName) ? entry.SchoolName : entry.DegreeName!);
+
+    private Task RemoveSkillAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "skill",
+            static profile => profile.Skills,
+            static (profile, values) => profile with { Skills = values },
+            static entry => entry.Name);
+
+    private Task RemoveCertificationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "certification",
+            static profile => profile.Certifications,
+            static (profile, values) => profile with { Certifications = values },
+            static entry => entry.Name);
+
+    private Task RemoveProjectAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "project",
+            static profile => profile.Projects,
+            static (profile, values) => profile with { Projects = values },
+            static entry => entry.Title);
+
+    private Task RemoveRecommendationAsync(int index)
+        => RemoveProfileItemAsync(
+            index,
+            "recommendation",
+            static profile => profile.Recommendations,
+            static (profile, values) => profile with { Recommendations = values },
+            static entry => entry.Author.FullName);
+
+    private async Task RemoveManualSignalAsync(string key)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null || !profile.ManualSignals.ContainsKey(key))
+        {
+            return;
+        }
+
+        if (!await ConfirmProfileRemovalAsync($"note '{key}'"))
+        {
+            return;
+        }
+
+        profile = Workspace.CandidateProfile;
+        if (profile is null || !profile.ManualSignals.ContainsKey(key))
+        {
+            return;
+        }
+
+        var manualSignals = new Dictionary<string, string>(profile.ManualSignals, StringComparer.OrdinalIgnoreCase);
+        manualSignals.Remove(key);
+        Workspace.UpdateCandidateProfile(profile with { ManualSignals = manualSignals });
+        ClearProfileEditState();
+        Operations.Info("Imported profile note removed.", $"'{key}' was removed from the current profile.");
+    }
+
+    private async Task RemoveProfileItemAsync<T>(
+        int index,
+        string itemKind,
+        Func<CandidateProfile, IReadOnlyList<T>> getItems,
+        Func<CandidateProfile, IReadOnlyList<T>, CandidateProfile> updateProfile,
+        Func<T, string> getLabel)
+    {
+        var profile = Workspace.CandidateProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        var items = getItems(profile);
+        if (index < 0 || index >= items.Count)
+        {
+            return;
+        }
+
+        var label = getLabel(items[index]);
+        if (!await ConfirmProfileRemovalAsync($"{itemKind} '{label}'"))
+        {
+            return;
+        }
+
+        profile = Workspace.CandidateProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        items = getItems(profile);
+        if (index < 0 || index >= items.Count)
+        {
+            return;
+        }
+
+        var updatedProfile = updateProfile(profile, RemoveAt(items, index));
+        Workspace.UpdateCandidateProfile(updatedProfile);
+        ClearProfileEditState();
+        Operations.Info("Imported profile item removed.", $"{itemKind} '{label}' was removed from the current profile.");
+    }
+
+    private async Task<bool> ConfirmProfileRemovalAsync(string itemDescription)
+        => await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Remove {itemDescription} from the current profile? This only changes the current profile and can be restored by re-importing LinkedIn data.");
+
+    private void ClearProfileEditState()
+    {
+        editingField = null;
+        savedField = null;
+    }
+
+    private static IReadOnlyList<T> RemoveAt<T>(IReadOnlyList<T> values, int index)
+        => values.Where((_, candidateIndex) => candidateIndex != index).ToArray();
+
+    private void StartEdit(string fieldKey, string? currentValue)
+    {
+        editingField = fieldKey;
+        editingValue = currentValue ?? string.Empty;
+    }
+
+    private void ShowSaved(string fieldKey)
+    {
+        savedFieldCts?.Cancel();
+        savedFieldCts?.Dispose();
+        savedFieldCts = new CancellationTokenSource();
+        savedField = fieldKey;
+        var cts = savedFieldCts;
+
+        _ = Task.Delay(1500, cts.Token).ContinueWith(_ =>
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                savedField = null;
+                _ = InvokeAsync(StateHasChanged);
+            }
+        }, TaskScheduler.Default);
+    }
+}

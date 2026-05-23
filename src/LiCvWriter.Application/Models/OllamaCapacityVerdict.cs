@@ -29,7 +29,7 @@ public sealed record OllamaCapacityVerdict(
     long? VramBytes,
     long? ResidentSizeBytes,
     double? GpuOffloadRatio,
-    OllamaModelInfo? ModelInfo,
+    LlmModelInfo? ModelInfo,
     DateTimeOffset MeasuredAtUtc)
 {
     public static OllamaCapacityVerdict Unknown(string model, string reason)
