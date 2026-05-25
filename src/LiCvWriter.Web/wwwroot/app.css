@@ -874,6 +874,10 @@ details.card-panel summary .status-chip {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.benchmark-live-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .benchmark-live-card,
 .benchmark-guidance-card,
 .benchmark-stat-card,

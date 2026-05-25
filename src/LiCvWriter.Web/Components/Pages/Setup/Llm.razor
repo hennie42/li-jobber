@@ -219,10 +219,16 @@
 
                 <label class="field-label" for="foundryModelFilter">Filter catalog</label>
                 <input id="foundryModelFilter" class="text-input" @bind="foundryModelFilter" placeholder="Filter by alias or display name" disabled="@IsModelSelectionBusy" />
+                <label class="checkbox-row">
+                    <input type="checkbox" @bind="showAllFoundryModels" @bind:after="ReconcileSelectedActionModels" disabled="@IsModelSelectionBusy" />
+                    <span>Show all models</span>
+                </label>
 
                 @if (visibleFoundryModels.Count == 0)
                 {
-                    <p class="muted-text">No Foundry catalog models match the current filter.</p>
+                    <p class="muted-text">@(showAllFoundryModels
+                        ? "No Foundry catalog models match the current filter."
+                        : "No suitable Foundry catalog models match the current filter. Turn on Show all models to include models unsuitable for text extraction and text benchmark work.")</p>
                 }
                 else
                 {
@@ -554,6 +560,7 @@
     private string selectedThinkingLevel = "medium";
     private string downloadingFoundryAlias = string.Empty;
     private string foundryModelFilter = string.Empty;
+    private bool showAllFoundryModels;
     private bool isRefreshingLiveFoundrySnapshot;
     private string? lastLiveFoundryRefreshKey;
     private ModelInventorySortColumn modelInventorySortColumn = ModelInventorySortColumn.Name;
@@ -1130,7 +1137,7 @@
     private IReadOnlyList<string> GetSelectableModelKeys()
         => IsOllamaSelected
             ? GetVisibleOllamaModels()
-            : foundryCatalog?.Models.Select(static model => model.Alias).ToArray() ?? Array.Empty<string>();
+            : GetVisibleFoundryModels().Select(static model => model.Alias).ToArray();
 
     private IReadOnlyList<string> GetVisibleBulkSelectableModelKeys()
         => IsOllamaSelected
@@ -1261,6 +1268,11 @@
             var filter = foundryModelFilter.Trim();
             filtered = filtered.Where(model => model.Alias.Contains(filter, StringComparison.OrdinalIgnoreCase)
                 || model.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!showAllFoundryModels)
+        {
+            filtered = filtered.Where(static model => model.IsTextBenchmarkUsable);
         }
 
         var ordered = modelInventorySortColumn switch

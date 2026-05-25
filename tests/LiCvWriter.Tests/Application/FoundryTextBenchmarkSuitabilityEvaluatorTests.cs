@@ -40,4 +40,16 @@ public sealed class FoundryTextBenchmarkSuitabilityEvaluatorTests
         Assert.True(assessment.IsUsable);
         Assert.Null(assessment.Reason);
     }
+
+    [Fact]
+    public void Evaluate_Phi4Alias_ReturnsExtractionConstraint()
+    {
+        var assessment = FoundryTextBenchmarkSuitabilityEvaluator.Evaluate(
+            "phi-4-mini",
+            "Phi 4 Mini Instruct",
+            "Compact instruct model for local structured extraction.");
+
+        Assert.False(assessment.IsUsable);
+        Assert.Equal("Phi-4 model; structured text extraction can repeat instead of reliably returning clean JSON.", assessment.Reason);
+    }
 }

@@ -11,6 +11,13 @@ internal static class FoundryOpenAiResponseMapper
 {
     private const string JsonObjectResponseFormatType = "json_object";
 
+    public static bool ShouldCaptureThinking(LlmRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return !IsStructuredJsonResponse(request.ResponseFormat);
+    }
+
     public static void ConfigureChatClient(OpenAIChatClient chatClient, LlmRequest request)
     {
         if (request.Temperature is { } temperature)
@@ -30,7 +37,7 @@ internal static class FoundryOpenAiResponseMapper
         }
     }
 
-    public static LlmResponse MapChatCompletion(string modelAlias, ChatCompletionCreateResponse response, TimeSpan duration)
+    public static LlmResponse MapChatCompletion(string modelAlias, ChatCompletionCreateResponse response, TimeSpan duration, bool captureThinking)
     {
         var message = response.Choices?.FirstOrDefault()?.Message;
         var (promptTokens, completionTokens) = ExtractUsage(response);
@@ -38,7 +45,7 @@ internal static class FoundryOpenAiResponseMapper
         return new LlmResponse(
             modelAlias,
             ExtractContent(message),
-            ExtractThinking(message),
+            captureThinking ? ExtractThinking(message) : null,
             Completed: response.Successful || response.Choices?.Count > 0,
             PromptTokens: promptTokens,
             CompletionTokens: completionTokens,
@@ -55,8 +62,7 @@ internal static class FoundryOpenAiResponseMapper
             return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(responseFormat.SchemaJson)
-            || string.Equals(responseFormat.Format, "json", StringComparison.OrdinalIgnoreCase))
+        if (IsStructuredJsonResponse(responseFormat))
         {
             // Foundry's OpenAI-compatible surface expects OpenAI response_format values.
             // json_object is sufficient for the app's current structured-output flows.
@@ -128,7 +134,8 @@ internal static class FoundryOpenAiResponseMapper
         StringBuilder responseBuffer,
         StringBuilder thinkingBuffer,
         ref long? promptTokens,
-        ref long? completionTokens)
+        ref long? completionTokens,
+        bool captureThinking)
     {
         ArgumentNullException.ThrowIfNull(chunk);
         ArgumentNullException.ThrowIfNull(responseBuffer);
@@ -141,7 +148,7 @@ internal static class FoundryOpenAiResponseMapper
             AppendStreamingText(responseBuffer, contentDelta);
         }
 
-        var thinkingDelta = ExtractThinking(message);
+        var thinkingDelta = captureThinking ? ExtractThinking(message) : null;
         if (!string.IsNullOrEmpty(thinkingDelta))
         {
             AppendStreamingText(thinkingBuffer, thinkingDelta);
@@ -179,4 +186,9 @@ internal static class FoundryOpenAiResponseMapper
 
         aggregate.Append(incoming);
     }
+
+    private static bool IsStructuredJsonResponse(LlmResponseFormat? responseFormat)
+        => responseFormat is not null
+           && (!string.IsNullOrWhiteSpace(responseFormat.SchemaJson)
+               || string.Equals(responseFormat.Format, "json", StringComparison.OrdinalIgnoreCase));
 }

@@ -20,6 +20,7 @@ public sealed class HttpJobResearchService(HttpClient httpClient, ILlmClient llm
     private const int ExtractionNumPredict = 4_096;
     private const int InferenceNumPredict = 2_048;
     private const string AcceptLanguageHeader = "en-US,en;q=0.9";
+    private const string UnsupportedExtractionModelMessage = "Phi-4 models are not supported for structured job and company extraction. Choose another model for parsing text into JSON.";
     private static readonly HashSet<string> GenericRequirementPhrases = new(StringComparer.OrdinalIgnoreCase)
     {
         "links",
@@ -961,7 +962,19 @@ What implicit requirements are likely expected but unstated for this role?
     }
 
     private string ResolveModel(string? selectedModel)
-        => string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
+    {
+        var resolvedModel = string.IsNullOrWhiteSpace(selectedModel) ? ollamaOptions.Model : selectedModel.Trim();
+        if (IsUnsupportedExtractionModel(resolvedModel))
+        {
+            throw new InvalidOperationException(UnsupportedExtractionModelMessage);
+        }
+
+        return resolvedModel;
+    }
+
+    private static bool IsUnsupportedExtractionModel(string model)
+        => model.Contains("phi-4", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("phi 4", StringComparison.OrdinalIgnoreCase);
 
     private string ResolveThinkingLevel(string? selectedThinkingLevel)
         => string.IsNullOrWhiteSpace(selectedThinkingLevel) ? ollamaOptions.Think : selectedThinkingLevel.Trim();

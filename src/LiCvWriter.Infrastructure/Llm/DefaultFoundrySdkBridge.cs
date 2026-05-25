@@ -213,6 +213,7 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
         CancellationToken cancellationToken = default)
     {
         var modelAlias = ResolveModelAlias(request.Model);
+        var captureThinking = FoundryOpenAiResponseMapper.ShouldCaptureThinking(request);
         var availability = await VerifyModelAvailabilityAsync(cancellationToken);
         if (!availability.AvailableModels.Any(model => model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)))
         {
@@ -236,13 +237,13 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
 
         if (request.Stream || progress is not null)
         {
-            return await CompleteStreamingAsync(chatClient, modelAlias, messages, progress, stopwatch, cancellationToken);
+            return await CompleteStreamingAsync(chatClient, modelAlias, messages, progress, stopwatch, captureThinking, cancellationToken);
         }
 
         var response = await chatClient.CompleteChatAsync(messages);
         stopwatch.Stop();
 
-        return FoundryOpenAiResponseMapper.MapChatCompletion(modelAlias, response, stopwatch.Elapsed);
+        return FoundryOpenAiResponseMapper.MapChatCompletion(modelAlias, response, stopwatch.Elapsed, captureThinking);
     }
 
     private static string GetSdkVersion()
@@ -510,6 +511,7 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
         IReadOnlyList<ChatMessage> messages,
         Action<LlmProgressUpdate>? progress,
         Stopwatch stopwatch,
+        bool captureThinking,
         CancellationToken cancellationToken)
     {
         var responseBuffer = new StringBuilder();
@@ -520,9 +522,9 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
 
         await foreach (var chunk in chatClient.CompleteChatStreamingAsync(messages, cancellationToken))
         {
-            FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+            FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking);
 
-            if (StreamingRepetitionDetector.DetectRepetitionLoop(thinkingBuffer, FoundryThinkingRepetitionMinLength))
+            if (captureThinking && StreamingRepetitionDetector.DetectRepetitionLoop(thinkingBuffer, FoundryThinkingRepetitionMinLength))
             {
                 throw new TimeoutException(
                     $"Foundry thinking output entered a repetition loop after {thinkingBuffer.Length} characters. " +
@@ -537,7 +539,7 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
             }
 
             var responseContent = responseBuffer.ToString();
-            var thinkingContent = thinkingBuffer.Length == 0 ? null : thinkingBuffer.ToString();
+            var thinkingContent = captureThinking && thinkingBuffer.Length > 0 ? thinkingBuffer.ToString() : null;
 
             progress?.Invoke(new LlmProgressUpdate(
                 "Generating response",
@@ -555,7 +557,7 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
 
         stopwatch.Stop();
         var finalResponseContent = responseBuffer.ToString();
-        var finalThinkingContent = thinkingBuffer.Length == 0 ? null : thinkingBuffer.ToString();
+        var finalThinkingContent = captureThinking && thinkingBuffer.Length > 0 ? thinkingBuffer.ToString() : null;
 
         progress?.Invoke(new LlmProgressUpdate(
             "Generating response",

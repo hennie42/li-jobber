@@ -973,6 +973,22 @@ public sealed class HttpJobResearchServiceTests : IDisposable
           Assert.Equal(4_096, llmClient.LastRequest.NumPredict);
       }
 
+    [Fact]
+    public async Task AnalyzeTextAsync_WhenPhi4Selected_ThrowsUnsupportedModelError()
+    {
+      var llmClient = new FakeLlmClient("{}");
+      var service = new HttpJobResearchService(
+        new HttpClient(new StubHttpMessageHandler(_ => throw new InvalidOperationException("HTTP should not be called in text mode"))),
+        llmClient,
+        new OllamaOptions());
+
+      var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        service.AnalyzeTextAsync("Engineer at Acme. Build things.", "phi-4-mini", "low"));
+
+      Assert.Equal("Phi-4 models are not supported for structured job and company extraction. Choose another model for parsing text into JSON.", exception.Message);
+      Assert.Empty(llmClient.AllRequests);
+    }
+
       [Fact]
       public async Task AnalyzeTextAsync_WhenJsonOmitsRequirements_FallsBackToSignalExtraction()
       {

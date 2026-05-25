@@ -39,6 +39,12 @@ public static class FoundryTextBenchmarkSuitabilityEvaluator
         "visual"
     ];
 
+    private static readonly string[] Phi4Markers =
+    [
+        "phi-4",
+        "phi 4"
+    ];
+
     public static (bool IsUsable, string? Reason) Evaluate(
         string alias,
         string displayName,
@@ -65,6 +71,11 @@ public static class FoundryTextBenchmarkSuitabilityEvaluator
         if (ContainsAny(descriptors, VisionMarkers) && !Contains(descriptors, "instruct"))
         {
             return (false, "Vision-focused model; text JSON benchmark is not a good fit.");
+        }
+
+        if (ContainsAny(descriptors, Phi4Markers))
+        {
+            return (false, "Phi-4 model; structured text extraction can repeat instead of reliably returning clean JSON.");
         }
 
         return (true, null);

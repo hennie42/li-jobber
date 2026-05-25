@@ -117,6 +117,9 @@ builder.Services.AddHttpClient<IJobDiscoveryService, HttpJobDiscoveryService>(cl
     });
 
 var app = builder.Build();
+var lifetimeLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LiCvWriter.Web.HostLifetime");
+
+RegisterHostLifetimeDiagnostics(app, lifetimeLogger);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -349,6 +352,53 @@ static Uri NormalizeApiBase(string baseUrl)
     }
 
     return new Uri(normalized, UriKind.Absolute);
+}
+
+static void RegisterHostLifetimeDiagnostics(WebApplication app, ILogger logger)
+{
+    var lifetime = app.Lifetime;
+    var processId = Environment.ProcessId;
+
+    lifetime.ApplicationStarted.Register(() =>
+        logger.LogInformation("Application started. ProcessId={ProcessId} Environment={EnvironmentName} ContentRoot={ContentRoot}",
+            processId,
+            app.Environment.EnvironmentName,
+            app.Environment.ContentRootPath));
+
+    lifetime.ApplicationStopping.Register(() =>
+        logger.LogWarning("Application stopping. ProcessId={ProcessId}", processId));
+
+    lifetime.ApplicationStopped.Register(() =>
+        logger.LogWarning("Application stopped. ProcessId={ProcessId}", processId));
+
+    AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        logger.LogWarning("Process exit raised. ProcessId={ProcessId}", processId);
+
+    AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+    {
+        if (eventArgs.ExceptionObject is Exception exception)
+        {
+            logger.LogCritical(exception,
+                "Unhandled exception reached AppDomain. ProcessId={ProcessId} IsTerminating={IsTerminating}",
+                processId,
+                eventArgs.IsTerminating);
+            return;
+        }
+
+        logger.LogCritical(
+            "Unhandled non-exception object reached AppDomain. ProcessId={ProcessId} IsTerminating={IsTerminating} PayloadType={PayloadType}",
+            processId,
+            eventArgs.IsTerminating,
+            eventArgs.ExceptionObject?.GetType().FullName ?? "<null>");
+    };
+
+    TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+    {
+        logger.LogError(eventArgs.Exception,
+            "Unobserved task exception captured. ProcessId={ProcessId}",
+            processId);
+        eventArgs.SetObserved();
+    };
 }
 
 static void TryEnableStaticWebAssets(WebApplicationBuilder builder)

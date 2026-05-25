@@ -299,6 +299,48 @@ public sealed class ModelBenchmarkCoordinatorTests
     }
 
     [Fact]
+    public async Task StartAsync_WhenFoundryDownloadIsQuietDuringPreparation_UsesPreparationHangBudget()
+    {
+        var preparationAwarePolicy = new ModelBenchmarkHangClockPolicy(
+            WarningAfter: TimeSpan.FromMilliseconds(120),
+            GracePeriod: TimeSpan.FromMilliseconds(160),
+            PollInterval: TimeSpan.FromMilliseconds(20),
+            PreparationWarningAfter: TimeSpan.FromMilliseconds(300),
+            PreparationGracePeriod: TimeSpan.FromMilliseconds(220));
+        var foundryCatalogClient = new SlowProgressFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: Array.Empty<string>(), isCached: false),
+            [0.0, 100.0],
+            TimeSpan.FromMilliseconds(180));
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("phi-foundry"), ["phi-foundry"]);
+        var (coordinator, _) = BuildCoordinator(
+            new ScriptedLlmClient(),
+            foundryBridge,
+            foundryCatalogClient,
+            hangClockPolicy: preparationAwarePolicy);
+        var warningObserved = false;
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { CurrentPhase: ModelBenchmarkRunPhase.Preparing, HangState: ModelBenchmarkHangState.Warning })
+            {
+                warningObserved = true;
+            }
+        };
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.False(warningObserved);
+        Assert.True(result.Succeeded);
+        Assert.Equal(ModelBenchmarkHangState.None, coordinator.Last.HangState);
+    }
+
+    [Fact]
     public async Task StartAsync_WhenFixtureStreamsRealInnerProgress_DoesNotClassifyModelAsHung()
     {
         var llmClient = new StreamingDelayedLlmClient(

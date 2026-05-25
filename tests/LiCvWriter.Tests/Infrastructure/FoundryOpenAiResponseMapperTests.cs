@@ -70,13 +70,44 @@ public sealed class FoundryOpenAiResponseMapperTests
             }
         };
 
-        var mapped = FoundryOpenAiResponseMapper.MapChatCompletion("deepseek-r1-14b", response, TimeSpan.FromSeconds(2));
+        var mapped = FoundryOpenAiResponseMapper.MapChatCompletion("deepseek-r1-14b", response, TimeSpan.FromSeconds(2), captureThinking: true);
 
         Assert.Equal(8, mapped.PromptTokens);
         Assert.Equal(24, mapped.CompletionTokens);
         Assert.Equal(TimeSpan.FromSeconds(2), mapped.EvalDuration);
         Assert.Equal("trace", mapped.Thinking);
         Assert.Contains("\"roleTitle\": \"Senior Backend Engineer\"", mapped.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MapChatCompletion_WhenJsonModeDoesNotCaptureThinking_SuppressesReasoningContent()
+    {
+        var response = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Content = "{\"roleTitle\":\"Senior Backend Engineer\"}",
+                        ReasoningContent = "trace"
+                    }
+                }
+            ],
+            Usage = new UsageResponse
+            {
+                PromptTokens = 6,
+                CompletionTokens = 12
+            }
+        };
+
+        var mapped = FoundryOpenAiResponseMapper.MapChatCompletion("phi-4", response, TimeSpan.FromSeconds(1), captureThinking: false);
+
+        Assert.Equal("{\"roleTitle\":\"Senior Backend Engineer\"}", mapped.Content);
+        Assert.Null(mapped.Thinking);
+        Assert.Equal(6, mapped.PromptTokens);
+        Assert.Equal(12, mapped.CompletionTokens);
     }
 
     [Fact]
@@ -111,13 +142,76 @@ public sealed class FoundryOpenAiResponseMapperTests
         long? promptTokens = null;
         long? completionTokens = null;
 
-        FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking: true);
 
         Assert.Equal("{\"roleTitle\":\"Senior Backend Engineer\"}", responseBuffer.ToString());
         Assert.Equal("step one", thinkingBuffer.ToString());
         Assert.Equal(9, promptTokens);
         Assert.Equal(21, completionTokens);
         Assert.Equal("step one", FoundryOpenAiResponseMapper.BuildThinkingPreview(thinkingBuffer.ToString()));
+    }
+
+    [Fact]
+    public void MergeStreamingChunk_WhenJsonModeDoesNotCaptureThinking_PreservesContentOnly()
+    {
+        var chunk = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Content = "{\"roleTitle\":\"Senior Backend Engineer\"}",
+                        ReasoningContent = "step one"
+                    }
+                }
+            ],
+            Usage = new UsageResponse
+            {
+                PromptTokens = 5,
+                CompletionTokens = 11
+            }
+        };
+
+        var responseBuffer = new StringBuilder();
+        var thinkingBuffer = new StringBuilder();
+        long? promptTokens = null;
+        long? completionTokens = null;
+
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking: false);
+
+        Assert.Equal("{\"roleTitle\":\"Senior Backend Engineer\"}", responseBuffer.ToString());
+        Assert.Empty(thinkingBuffer.ToString());
+        Assert.Equal(5, promptTokens);
+        Assert.Equal(11, completionTokens);
+    }
+
+    [Fact]
+    public void ShouldCaptureThinking_WhenStructuredJsonRequested_ReturnsFalse()
+    {
+        var request = new LlmRequest(
+            Model: "phi-4",
+            SystemPrompt: null,
+            Messages: [new LlmChatMessage("user", "Return JSON")],
+            ResponseFormat: LlmResponseFormat.Json);
+
+        var captureThinking = FoundryOpenAiResponseMapper.ShouldCaptureThinking(request);
+
+        Assert.False(captureThinking);
+    }
+
+    [Fact]
+    public void ShouldCaptureThinking_WhenPlainTextRequested_ReturnsTrue()
+    {
+        var request = new LlmRequest(
+            Model: "phi-4",
+            SystemPrompt: null,
+            Messages: [new LlmChatMessage("user", "Explain your reasoning")]);
+
+        var captureThinking = FoundryOpenAiResponseMapper.ShouldCaptureThinking(request);
+
+        Assert.True(captureThinking);
     }
 
     [Fact]
@@ -173,9 +267,9 @@ public sealed class FoundryOpenAiResponseMapperTests
         long? promptTokens = null;
         long? completionTokens = null;
 
-        FoundryOpenAiResponseMapper.MergeStreamingChunk(firstChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
-        FoundryOpenAiResponseMapper.MergeStreamingChunk(secondChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
-        FoundryOpenAiResponseMapper.MergeStreamingChunk(thirdChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(firstChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking: true);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(secondChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking: true);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(thirdChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking: true);
 
         Assert.Equal("Engineer Engineer Engineer", responseBuffer.ToString());
         Assert.Equal("Engineer Engineer Engineer", thinkingBuffer.ToString());

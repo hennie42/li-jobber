@@ -1035,6 +1035,7 @@ public sealed class ModelBenchmarkCoordinator(
         public ModelHangClockState(ModelBenchmarkHangClockPolicy policy, DateTimeOffset startedAt)
         {
             this.policy = policy;
+            currentPhase = ModelBenchmarkRunPhase.Preparing;
             LastRealProgressUtc = startedAt;
         }
 
@@ -1080,14 +1081,15 @@ public sealed class ModelBenchmarkCoordinator(
         {
             lock (gate)
             {
-                if (HangState == ModelBenchmarkHangState.Warning || (now - LastRealProgressUtc) < policy.WarningAfter)
+                var warningAfter = policy.GetWarningAfter(currentPhase);
+                if (HangState == ModelBenchmarkHangState.Warning || (now - LastRealProgressUtc) < warningAfter)
                 {
                     return false;
                 }
 
                 HangState = ModelBenchmarkHangState.Warning;
                 WarningStartedUtc = now;
-                DeadlineUtc = now + policy.GracePeriod;
+                DeadlineUtc = now + policy.GetGracePeriod(currentPhase);
                 HangDetail = BuildHangDetail(now, prefix: "No benchmark progress detected");
                 return true;
             }
