@@ -1,3 +1,4 @@
+using System.Text;
 using Betalgo.Ranul.OpenAI.ObjectModels.RequestModels;
 using Betalgo.Ranul.OpenAI.ObjectModels.ResponseModels;
 using Betalgo.Ranul.OpenAI.ObjectModels.SharedModels;
@@ -76,5 +77,107 @@ public sealed class FoundryOpenAiResponseMapperTests
         Assert.Equal(TimeSpan.FromSeconds(2), mapped.EvalDuration);
         Assert.Equal("trace", mapped.Thinking);
         Assert.Contains("\"roleTitle\": \"Senior Backend Engineer\"", mapped.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MergeStreamingChunk_WhenChunkCarriesMultipartContentReasoningAndUsage_PopulatesBuffersAndTokenCounts()
+    {
+        var chunk = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Contents =
+                        [
+                            new MessageContent { Type = "text", Text = "{" },
+                            new MessageContent { Type = "text", Text = "\"roleTitle\":\"Senior Backend Engineer\"}" }
+                        ],
+                        ReasoningContent = "step one"
+                    }
+                }
+            ],
+            Usage = new UsageResponse
+            {
+                PromptTokens = 9,
+                CompletionTokens = 21
+            }
+        };
+
+        var responseBuffer = new StringBuilder();
+        var thinkingBuffer = new StringBuilder();
+        long? promptTokens = null;
+        long? completionTokens = null;
+
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+
+        Assert.Equal("{\"roleTitle\":\"Senior Backend Engineer\"}", responseBuffer.ToString());
+        Assert.Equal("step one", thinkingBuffer.ToString());
+        Assert.Equal(9, promptTokens);
+        Assert.Equal(21, completionTokens);
+        Assert.Equal("step one", FoundryOpenAiResponseMapper.BuildThinkingPreview(thinkingBuffer.ToString()));
+    }
+
+    [Fact]
+    public void MergeStreamingChunk_WhenChunkCarriesCumulativeReasoningAndContent_DeduplicatesSnapshots()
+    {
+        var firstChunk = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Content = "Engineer",
+                        ReasoningContent = "Engineer"
+                    }
+                }
+            ]
+        };
+
+        var secondChunk = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Content = "Engineer Engineer",
+                        ReasoningContent = "Engineer Engineer"
+                    }
+                }
+            ]
+        };
+
+        var thirdChunk = new ChatCompletionCreateResponse
+        {
+            Choices =
+            [
+                new ChatChoiceResponse
+                {
+                    Message = new ChatMessage
+                    {
+                        Content = "Engineer Engineer Engineer",
+                        ReasoningContent = "Engineer Engineer Engineer"
+                    }
+                }
+            ]
+        };
+
+        var responseBuffer = new StringBuilder();
+        var thinkingBuffer = new StringBuilder();
+        long? promptTokens = null;
+        long? completionTokens = null;
+
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(firstChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(secondChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+        FoundryOpenAiResponseMapper.MergeStreamingChunk(thirdChunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+
+        Assert.Equal("Engineer Engineer Engineer", responseBuffer.ToString());
+        Assert.Equal("Engineer Engineer Engineer", thinkingBuffer.ToString());
     }
 }

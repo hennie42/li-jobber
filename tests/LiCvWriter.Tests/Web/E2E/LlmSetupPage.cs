@@ -10,17 +10,29 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
     private readonly IPage page = page;
     private readonly string baseUrl = baseUrl.TrimEnd('/');
 
+    private ILocator CatalogRows => page.Locator("table.setup-list-table tbody tr:has(input[type='checkbox'])");
+
     public ILocator ProviderSelect => page.Locator("#llmProvider");
 
     public ILocator FoundryModelFilter => page.Locator("#foundryModelFilter");
 
-    public ILocator SelectAllVisibleButton => page.GetByRole(AriaRole.Button, new() { Name = "Select all visible" });
+    public ILocator SelectVisibleUsableModelsButton => page.GetByRole(AriaRole.Button, new() { Name = "Select visible usable models" });
+
+    public ILocator SelectNoneButton => page.GetByRole(AriaRole.Button, new() { Name = "Select none" });
+
+    public ILocator RemoveSelectedCachedButton => page.GetByRole(AriaRole.Button, new() { Name = "Remove selected cached" });
 
     public ILocator StartBenchmarkButton => page.GetByRole(AriaRole.Button, new() { Name = "Benchmark selected" });
 
     public ILocator RunningBenchmarkButton => page.GetByRole(AriaRole.Button, new() { Name = "Benchmarking..." });
 
+    public ILocator CancelBenchmarkButton => page.GetByRole(AriaRole.Button, new() { Name = "Cancel benchmark" });
+
     public ILocator BenchmarkSnapshotHeading => page.GetByText("Benchmark snapshot");
+
+    public ILocator ReasoningMonitor => page.Locator(".sidebar-crt-screen").First;
+
+    public ILocator ActivityMonitor => page.Locator(".sidebar-crt-screen-activity").First;
 
     public async Task GotoAsync()
     {
@@ -48,23 +60,70 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         await FoundryModelFilter.PressAsync("Tab");
     }
 
-    public async Task SelectAllVisibleModelsAsync()
+    public async Task SelectVisibleUsableModelsAsync()
     {
-        await Expect(SelectAllVisibleButton).ToBeEnabledAsync();
-        await SelectAllVisibleButton.ClickAsync();
+        await Expect(SelectVisibleUsableModelsButton).ToBeEnabledAsync();
+        await SelectVisibleUsableModelsButton.ClickAsync();
+    }
+
+    public async Task ClearSelectedModelsAsync()
+    {
+        if (await SelectNoneButton.IsDisabledAsync())
+        {
+            return;
+        }
+
+        await SelectNoneButton.ClickAsync();
+        await WaitForSelectedModelCountAsync(0);
     }
 
     public async Task SelectFoundryModelAsync(string alias)
     {
-        var row = page.Locator($"tbody tr:has-text('{alias}')").First;
+        var row = CatalogRows.Filter(new LocatorFilterOptions
+        {
+            HasText = alias
+        }).First;
         var checkbox = row.Locator("input[type='checkbox']");
 
         await Expect(row).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
         {
             Timeout = 120_000
         });
-        await checkbox.CheckAsync();
+        await checkbox.ClickAsync();
         await Expect(checkbox).ToBeCheckedAsync();
+    }
+
+    public async Task RemoveSelectedCachedAsync()
+    {
+        await Expect(RemoveSelectedCachedButton).ToBeEnabledAsync();
+        await RemoveSelectedCachedButton.ClickAsync();
+    }
+
+    public async Task WaitForFoundryModelStatusAsync(string alias, string status, TimeSpan? timeout = null)
+    {
+        var row = CatalogRows.Filter(new LocatorFilterOptions
+        {
+            HasText = alias
+        }).First;
+
+        await Expect(row.Locator("td:last-child")).ToContainTextAsync(status, new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = (float)(timeout ?? TimeSpan.FromMinutes(1)).TotalMilliseconds
+        });
+    }
+
+    public async Task AssertFoundryModelSelectedAsync(string alias)
+    {
+        var row = CatalogRows.Filter(new LocatorFilterOptions
+        {
+            HasText = alias
+        }).First;
+        var checkbox = row.Locator("input[type='checkbox']");
+
+        await Expect(checkbox).ToBeCheckedAsync(new LocatorAssertionsToBeCheckedOptions
+        {
+            Timeout = 30_000
+        });
     }
 
     public async Task EnsureVisibleAliasesAsync(params string[] aliases)
@@ -90,6 +149,15 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         });
     }
 
+    public async Task CancelBenchmarkAsync()
+    {
+        await Expect(CancelBenchmarkButton).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 30_000
+        });
+        await CancelBenchmarkButton.ClickAsync();
+    }
+
     public async Task WaitForBenchmarkCompletionAsync()
     {
         await Expect(StartBenchmarkButton).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
@@ -102,12 +170,110 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         });
     }
 
-    public async Task WaitForQueueProgressAsync(int completedCount, int totalCount)
+    public async Task WaitForReasoningMonitorToShowCapturedTextAsync(TimeSpan? timeout = null)
     {
-        await Expect(page.GetByText($"{completedCount} / {totalCount} complete")).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        var resolvedTimeout = (float)(timeout ?? TimeSpan.FromMinutes(5)).TotalMilliseconds;
+
+        await Expect(ReasoningMonitor).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
         {
-            Timeout = 300_000
+            Timeout = resolvedTimeout
         });
+
+        await Expect(ReasoningMonitor).Not.ToContainTextAsync(
+            "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.",
+            new LocatorAssertionsToContainTextOptions
+            {
+                Timeout = resolvedTimeout
+            });
+    }
+
+    public async Task WaitForActivityMonitorTelemetryAsync(string modelAlias, TimeSpan? timeout = null)
+    {
+        var resolvedTimeout = (float)(timeout ?? TimeSpan.FromMinutes(5)).TotalMilliseconds;
+
+        await Expect(ActivityMonitor).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = resolvedTimeout
+        });
+
+        await Expect(ActivityMonitor).ToContainTextAsync($"MODEL : {modelAlias}", new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = resolvedTimeout
+        });
+
+        await Expect(ActivityMonitor).ToContainTextAsync("TOKENS:", new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = resolvedTimeout
+        });
+    }
+
+    public async Task WaitForSelectedModelCountAsync(int count, TimeSpan? timeout = null)
+    {
+        var expectedPattern = count == 0
+            ? new Regex("No models selected for batch actions\\.", RegexOptions.IgnoreCase)
+            : new Regex($@"Selected models:\s*{count}\.", RegexOptions.IgnoreCase);
+
+        await Expect(page.GetByText(expectedPattern)).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = (float)(timeout ?? TimeSpan.FromMinutes(1)).TotalMilliseconds
+        });
+    }
+
+    public async Task WaitForLiveQueueTotalAsync(int totalCount, TimeSpan? timeout = null)
+    {
+        await Expect(page.Locator(".benchmark-live-rail").GetByText(
+            new Regex($@"\b\d+\s*/\s*{totalCount}\s+complete\b", RegexOptions.IgnoreCase))).ToBeVisibleAsync(
+            new LocatorAssertionsToBeVisibleOptions
+            {
+                Timeout = (float)(timeout ?? TimeSpan.FromMinutes(1)).TotalMilliseconds
+            });
+    }
+
+    public async Task WaitForQueueProgressAsync(int completedCount, int totalCount, TimeSpan? timeout = null)
+    {
+        await Expect(page.Locator(".benchmark-live-rail").GetByText($"{completedCount} / {totalCount} complete")).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = (float)(timeout ?? TimeSpan.FromMinutes(5)).TotalMilliseconds
+        });
+    }
+
+    public async Task WaitForCurrentBenchmarkModelAsync(string modelAlias, TimeSpan? timeout = null)
+    {
+        var overallTimeout = timeout ?? TimeSpan.FromMinutes(30);
+        var stallTimeout = TimeSpan.FromMinutes(4);
+        var deadline = DateTimeOffset.UtcNow + overallTimeout;
+        var lastProgressUtc = DateTimeOffset.UtcNow;
+        string? lastSignature = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var currentModelText = await GetCurrentBenchmarkCardTextAsync();
+            if (currentModelText.Contains(modelAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var progressSignature = await GetLiveBenchmarkProgressSignatureAsync();
+            var now = DateTimeOffset.UtcNow;
+
+            if (!string.Equals(progressSignature, lastSignature, StringComparison.Ordinal))
+            {
+                lastSignature = progressSignature;
+                lastProgressUtc = now;
+            }
+            else if (now - lastProgressUtc >= stallTimeout)
+            {
+                throw new TimeoutException(
+                    $"Benchmark progress stalled for {stallTimeout} before current model reached '{modelAlias}'.{Environment.NewLine}"
+                    + await GetBenchmarkProgressDiagnosticsAsync("Benchmark progress snapshot at stall timeout."));
+            }
+
+            await page.WaitForTimeoutAsync(5_000);
+        }
+
+        throw new TimeoutException(
+            $"Benchmark did not reach current model '{modelAlias}' within {overallTimeout}.{Environment.NewLine}"
+            + await GetBenchmarkProgressDiagnosticsAsync("Benchmark progress snapshot at overall timeout."));
     }
 
     public async Task<string> GetBenchmarkRowTextAsync(string modelAlias)
@@ -124,15 +290,70 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         return await row.InnerTextAsync();
     }
 
+    public async Task<string> GetBenchmarkRowDiagnosticsTextAsync(string modelAlias)
+    {
+        var row = page.Locator(".benchmark-summary-shell + table tbody tr").Filter(new LocatorFilterOptions
+        {
+            HasText = modelAlias
+        }).First;
+
+        await Expect(row).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 60_000
+        });
+
+        var diagnostics = row.Locator(".benchmark-row-diagnostics").First;
+        await Expect(diagnostics).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 60_000
+        });
+
+        return FlattenWhitespace(await diagnostics.InnerTextAsync());
+    }
+
+    public async Task<string> GetLiveBenchmarkDiagnosticsCardTextAsync()
+    {
+        var diagnosticsCard = page.Locator(".benchmark-live-card").Filter(new LocatorFilterOptions
+        {
+            HasText = "Diagnostics"
+        }).First;
+
+        await Expect(diagnosticsCard).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 60_000
+        });
+
+        return FlattenWhitespace(await diagnosticsCard.InnerTextAsync());
+    }
+
+    public async Task WaitForLiveBenchmarkDiagnosticsAsync(string expectedText, TimeSpan? timeout = null)
+    {
+        var diagnosticsCard = page.Locator(".benchmark-live-card").Filter(new LocatorFilterOptions
+        {
+            HasText = "Diagnostics"
+        }).First;
+
+        await Expect(diagnosticsCard).ToContainTextAsync(expectedText, new LocatorAssertionsToContainTextOptions
+        {
+            Timeout = (float)(timeout ?? TimeSpan.FromMinutes(5)).TotalMilliseconds
+        });
+    }
+
     public async Task<string> GetBenchmarkDiagnosticsAsync()
     {
         var bodyText = await page.Locator("body").InnerTextAsync();
-        return await BuildBenchmarkDiagnosticsAsync(bodyText);
+        return await BuildBenchmarkDiagnosticsAsync(bodyText, "Disposed runtime text surfaced on the Setup / LLM page.");
+    }
+
+    public async Task<string> GetBenchmarkProgressDiagnosticsAsync(string heading)
+    {
+        var bodyText = await page.Locator("body").InnerTextAsync();
+        return await BuildBenchmarkDiagnosticsAsync(bodyText, heading);
     }
 
     public async Task<IReadOnlyList<string>> GetVisibleAliasesAsync()
     {
-        var aliasCells = page.Locator(".setup-list-table tbody tr td:nth-child(3)");
+        var aliasCells = CatalogRows.Locator("td:nth-child(3)");
         var aliases = await aliasCells.AllInnerTextsAsync();
         return aliases
             .Select(static alias => alias.Trim())
@@ -148,16 +369,16 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         if (bodyText.Contains("Cannot access a disposed object", StringComparison.OrdinalIgnoreCase)
             || bodyText.Contains("SemaphoreSlim", StringComparison.OrdinalIgnoreCase))
         {
-            throw new XunitException(await BuildBenchmarkDiagnosticsAsync(bodyText));
+            throw new XunitException(await BuildBenchmarkDiagnosticsAsync(bodyText, "Disposed runtime text surfaced on the Setup / LLM page."));
         }
     }
 
-    private async Task<string> BuildBenchmarkDiagnosticsAsync(string bodyText)
+    private async Task<string> BuildBenchmarkDiagnosticsAsync(string bodyText, string heading)
     {
         var benchmarkRows = await GetBenchmarkRowsAsync();
         var diagnostics = new List<string>
         {
-            "Disposed runtime text surfaced on the Setup / LLM page."
+            heading
         };
 
         if (TryExtractQueueProgress(bodyText) is { } queueProgress)
@@ -182,6 +403,31 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
             .Select(FlattenWhitespace)
             .Where(static row => !string.IsNullOrWhiteSpace(row))
             .ToArray();
+    }
+
+    private async Task<string> GetCurrentBenchmarkCardTextAsync()
+    {
+        var currentModelCard = page.Locator(".benchmark-live-card").Filter(new LocatorFilterOptions
+        {
+            HasText = "Current model"
+        }).First;
+
+        await Expect(currentModelCard).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 30_000
+        });
+
+        return FlattenWhitespace(await currentModelCard.InnerTextAsync());
+    }
+
+    private async Task<string> GetLiveBenchmarkProgressSignatureAsync()
+    {
+        var liveRailText = FlattenWhitespace(await page.Locator(".benchmark-live-rail").InnerTextAsync());
+        var benchmarkRows = await GetBenchmarkRowsAsync();
+
+        return benchmarkRows.Count == 0
+            ? liveRailText
+            : string.Join(" || ", new[] { liveRailText }.Concat(benchmarkRows));
     }
 
     private static string? TryExtractQueueProgress(string bodyText)

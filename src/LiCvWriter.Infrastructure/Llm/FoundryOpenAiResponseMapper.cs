@@ -1,3 +1,4 @@
+using System.Text;
 using Betalgo.Ranul.OpenAI.ObjectModels.RequestModels;
 using Betalgo.Ranul.OpenAI.ObjectModels.ResponseModels;
 using LiCvWriter.Application.Models;
@@ -32,8 +33,7 @@ internal static class FoundryOpenAiResponseMapper
     public static LlmResponse MapChatCompletion(string modelAlias, ChatCompletionCreateResponse response, TimeSpan duration)
     {
         var message = response.Choices?.FirstOrDefault()?.Message;
-        var promptTokens = response.Usage is null ? null : (long?)response.Usage.PromptTokens;
-        var completionTokens = response.Usage?.CompletionTokens is { } tokenCount ? (long?)tokenCount : null;
+        var (promptTokens, completionTokens) = ExtractUsage(response);
 
         return new LlmResponse(
             modelAlias,
@@ -69,6 +69,15 @@ internal static class FoundryOpenAiResponseMapper
         return null;
     }
 
+    internal static (long? PromptTokens, long? CompletionTokens) ExtractUsage(ChatCompletionCreateResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        return (
+            response.Usage is null ? null : (long?)response.Usage.PromptTokens,
+            response.Usage?.CompletionTokens is { } tokenCount ? (long?)tokenCount : null);
+    }
+
     internal static string ExtractContent(ChatMessage? message)
     {
         if (!string.IsNullOrWhiteSpace(message?.Content))
@@ -94,6 +103,80 @@ internal static class FoundryOpenAiResponseMapper
             : string.Empty;
     }
 
-    private static string? ExtractThinking(ChatMessage? message)
+    internal static string? ExtractThinking(ChatMessage? message)
         => string.IsNullOrWhiteSpace(message?.ReasoningContent) ? null : message.ReasoningContent;
+
+    internal static string? BuildThinkingPreview(string? thinking)
+    {
+        if (string.IsNullOrWhiteSpace(thinking))
+        {
+            return null;
+        }
+
+        const int maxCharacters = 320;
+        var trimmed = thinking.Trim();
+        if (trimmed.Length <= maxCharacters)
+        {
+            return trimmed;
+        }
+
+        return $"...{trimmed[^maxCharacters..]}";
+    }
+
+    internal static void MergeStreamingChunk(
+        ChatCompletionCreateResponse chunk,
+        StringBuilder responseBuffer,
+        StringBuilder thinkingBuffer,
+        ref long? promptTokens,
+        ref long? completionTokens)
+    {
+        ArgumentNullException.ThrowIfNull(chunk);
+        ArgumentNullException.ThrowIfNull(responseBuffer);
+        ArgumentNullException.ThrowIfNull(thinkingBuffer);
+
+        var message = chunk.Choices?.FirstOrDefault()?.Message;
+        var contentDelta = ExtractContent(message);
+        if (!string.IsNullOrEmpty(contentDelta))
+        {
+            AppendStreamingText(responseBuffer, contentDelta);
+        }
+
+        var thinkingDelta = ExtractThinking(message);
+        if (!string.IsNullOrEmpty(thinkingDelta))
+        {
+            AppendStreamingText(thinkingBuffer, thinkingDelta);
+        }
+
+        var usage = ExtractUsage(chunk);
+        promptTokens = usage.PromptTokens ?? promptTokens;
+        completionTokens = usage.CompletionTokens ?? completionTokens;
+    }
+
+    private static void AppendStreamingText(StringBuilder aggregate, string incoming)
+    {
+        if (string.IsNullOrEmpty(incoming))
+        {
+            return;
+        }
+
+        if (aggregate.Length == 0)
+        {
+            aggregate.Append(incoming);
+            return;
+        }
+
+        var existing = aggregate.ToString();
+        if (incoming.Equals(existing, StringComparison.Ordinal) || existing.StartsWith(incoming, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (incoming.StartsWith(existing, StringComparison.Ordinal))
+        {
+            aggregate.Append(incoming.AsSpan(existing.Length));
+            return;
+        }
+
+        aggregate.Append(incoming);
+    }
 }

@@ -57,7 +57,7 @@ public sealed class LlmJsonInvoker(ILlmClient llmClient)
             PromptId: LlmPromptCatalog.JsonRepair,
             PromptVersion: LlmPromptCatalog.Version1);
 
-        var repairResponse = await llmClient.GenerateAsync(repairRequest, progress: null, cancellationToken);
+        var repairResponse = await llmClient.GenerateAsync(repairRequest, progress, cancellationToken);
         attempts.Add(new("repair", repairResponse.Content));
 
         var repairParsed = TryParseStrict(parse, repairResponse.Content)

@@ -56,4 +56,44 @@ public sealed record ModelBenchmarkSession(
     /// Gets how many fixtures are configured for the current model benchmark.
     /// </summary>
     public int TotalFixtureCount { get; init; }
+
+    /// <summary>
+    /// Gets when the live benchmark snapshot itself was most recently updated.
+    /// </summary>
+    public DateTimeOffset UpdatedUtc { get; init; }
+
+    /// <summary>
+    /// Gets when the benchmark last observed real worker-side progress.
+    /// </summary>
+    public DateTimeOffset? LastRealProgressUtc { get; init; }
+
+    /// <summary>
+    /// Gets the current hang-monitoring state for the active model.
+    /// </summary>
+    public ModelBenchmarkHangState HangState { get; init; } = ModelBenchmarkHangState.None;
+
+    /// <summary>
+    /// Gets the current hang-monitoring detail shown to the live UI.
+    /// </summary>
+    public string? HangDetail { get; init; }
+
+    /// <summary>
+    /// Gets when the current hang warning was first raised.
+    /// </summary>
+    public DateTimeOffset? HangWarningStartedUtc { get; init; }
+
+    /// <summary>
+    /// Gets when the current hang warning will escalate to a model failure if progress does not resume.
+    /// </summary>
+    public DateTimeOffset? HangDeadlineUtc { get; init; }
+
+    /// <summary>
+    /// Gets the typed diagnostics collected for the active or most recently completed model.
+    /// </summary>
+    public ModelBenchmarkDiagnostics Diagnostics { get; init; } = ModelBenchmarkDiagnostics.Empty;
+
+    /// <summary>
+    /// Gets when the current benchmark phase started for the active model.
+    /// </summary>
+    public DateTimeOffset? CurrentPhaseStartedUtc { get; init; }
 }

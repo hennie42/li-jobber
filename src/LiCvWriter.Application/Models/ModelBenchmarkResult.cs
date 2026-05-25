@@ -59,5 +59,7 @@ public sealed record ModelBenchmarkResult
 
     public IReadOnlyList<ModelBenchmarkFixtureResult> FixtureResults { get; init; }
 
+    public ModelBenchmarkDiagnostics Diagnostics { get; init; } = ModelBenchmarkDiagnostics.Empty;
+
     public bool Succeeded => FailedReason is null;
 }

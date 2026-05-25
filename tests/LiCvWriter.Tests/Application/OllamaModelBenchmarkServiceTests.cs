@@ -117,6 +117,68 @@ public sealed class OllamaModelBenchmarkServiceTests
     }
 
     [Fact]
+    public async Task RunSingleAsync_QualityResponsesWrappedInReasoningTags_UsesExtractedJsonForScoring()
+    {
+        const string wrappedJobExtract = """
+            <think>
+            I should extract the role, company, and themes.
+            </think>
+            ```json
+            {
+              "roleTitle": "Senior Backend Engineer",
+              "companyName": "Acme Robotics",
+              "mustHaveThemes": ["go", "kubernetes", "distributed systems"]
+            }
+            ```
+            """;
+
+        const string wrappedCompanyExtract = """
+            <think>
+            I should extract the company profile values.
+            </think>
+            ```json
+            {
+              "name": "Nordic Cloud Guild",
+              "guidingPrinciples": ["trust", "mentoring", "pragmatic delivery"],
+              "differentiators": ["knowledge sharing", "platform modernization"]
+            }
+            ```
+            """;
+
+        const string wrappedTechnologyGap = """
+            <think>
+            I should return the technology gap JSON only.
+            </think>
+            ```json
+            {
+              "detectedTechnologies": ["RAG", "vector search", "Kubernetes", "LLM evaluation"],
+              "possiblyUnderrepresentedTechnologies": ["Kubernetes", "LLM evaluation"]
+            }
+            ```
+            """;
+
+        var llmClient = new ScriptedLlmClient([
+            new LlmResponse("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
+                LoadDuration: TimeSpan.FromSeconds(0.5),
+                PromptEvalDuration: TimeSpan.FromSeconds(0.1),
+                EvalDuration: TimeSpan.FromSeconds(1.0)),
+            new LlmResponse("m:test", wrappedJobExtract, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+            new LlmResponse("m:test", wrappedCompanyExtract, null, true, 50, 30, TimeSpan.FromSeconds(1.0)),
+            new LlmResponse("m:test", wrappedTechnologyGap, null, true, 50, 30, TimeSpan.FromSeconds(1.0))
+        ]);
+        llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
+
+        var probe = new OllamaCapacityProbe(llmClient, Options);
+        var benchmark = new OllamaModelBenchmarkService(probe, llmClient, Options);
+
+        var result = await benchmark.RunSingleAsync("m:test");
+
+        Assert.True(result.Succeeded);
+        Assert.InRange(result.QualityScore, 0.99, 1.0);
+        Assert.All(result.FixtureResults, fixture => Assert.True(fixture.Score > 0.99));
+    }
+
+    [Fact]
     public async Task RunSingleAsync_QualityCallThrows_ReturnsFailedResultWithReason()
     {
         var llmClient = new ScriptedLlmClient([

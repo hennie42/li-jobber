@@ -324,6 +324,101 @@ public sealed class OllamaClientTests
     }
 
     [Fact]
+    public async Task GenerateAsync_PayloadSerializesThinkingLevelAsBoolean()
+    {
+        string? capturedBody = null;
+        using var httpClient = CreateClient(request =>
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/chat")
+            {
+                capturedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"model":"session-model","message":{"content":"ok"},"done":true,"total_duration":1000000000}""",
+                        Encoding.UTF8,
+                        "application/x-ndjson")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions
+        {
+            Model = "session-model",
+            Think = "high"
+        });
+
+        await client.GenerateAsync(new LlmRequest(
+            "session-model",
+            null,
+            [new LlmChatMessage("user", "hi")],
+            UseChatEndpoint: true,
+            Stream: true));
+
+        Assert.NotNull(capturedBody);
+        using var doc = System.Text.Json.JsonDocument.Parse(capturedBody!);
+        Assert.True(doc.RootElement.GetProperty("think").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WhenModelDoesNotSupportThinking_RetriesWithoutThinkField()
+    {
+        var capturedBodies = new List<string>();
+        using var httpClient = CreateClient(request =>
+        {
+            if (request.RequestUri?.AbsolutePath != "/api/chat")
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            capturedBodies.Add(body);
+
+            return capturedBodies.Count switch
+            {
+                1 => new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent(
+                        """{"error":"\"qwen2.5-coder:14b\" does not support thinking"}""",
+                        Encoding.UTF8,
+                        "application/json")
+                },
+                _ => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"model":"qwen2.5-coder:14b","message":{"content":"ok"},"done":true,"total_duration":1000000000}""",
+                        Encoding.UTF8,
+                        "application/json")
+                }
+            };
+        });
+
+        var client = new OllamaClient(httpClient, new OllamaOptions
+        {
+            Model = "qwen2.5-coder:14b",
+            Think = "high"
+        });
+
+        var response = await client.GenerateAsync(new LlmRequest(
+            "qwen2.5-coder:14b",
+            null,
+            [new LlmChatMessage("user", "hi")],
+            UseChatEndpoint: true,
+            Stream: false));
+
+        Assert.Equal("ok", response.Content);
+        Assert.Equal(2, capturedBodies.Count);
+
+        using var firstRequest = System.Text.Json.JsonDocument.Parse(capturedBodies[0]);
+        using var retryRequest = System.Text.Json.JsonDocument.Parse(capturedBodies[1]);
+
+        Assert.True(firstRequest.RootElement.GetProperty("think").GetBoolean());
+        Assert.False(retryRequest.RootElement.TryGetProperty("think", out _));
+    }
+
+    [Fact]
     public async Task GenerateAsync_PayloadOmitsFormat_WhenResponseFormatIsNull()
     {
         string? capturedBody = null;

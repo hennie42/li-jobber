@@ -15,7 +15,10 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
 {
     private const string WarmupPrompt = "Respond with the single word: ready";
 
-    public async Task<OllamaCapacityVerdict> ProbeAsync(string model, CancellationToken cancellationToken = default)
+    public async Task<OllamaCapacityVerdict> ProbeAsync(
+        string model,
+        Action<LlmProgressUpdate>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(model))
         {
@@ -46,7 +49,7 @@ public sealed class OllamaCapacityProbe(ILlmClient llmClient, OllamaOptions opti
                     KeepAlive: options.KeepAlive,
                     Temperature: 0.0,
                     NumPredict: options.CapacityWarmupNumPredict > 0 ? options.CapacityWarmupNumPredict : 64),
-                progress: null,
+                progress,
                 cancellationToken);
         }
         catch (Exception exception)

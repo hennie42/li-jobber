@@ -20,6 +20,11 @@ internal sealed class UnavailableFoundrySdkBridge(string message) : IFoundrySdkB
         CancellationToken cancellationToken = default)
         => Task.FromException(BuildException());
 
+    public Task UnloadModelAsync(
+        string alias,
+        CancellationToken cancellationToken = default)
+        => Task.FromException(BuildException());
+
     public Task RemoveModelAsync(
         string alias,
         CancellationToken cancellationToken = default)

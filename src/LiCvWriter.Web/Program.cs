@@ -38,6 +38,7 @@ builder.Services.AddSingleton(jobDiscoveryOptions);
 builder.Services.AddSingleton(foundryOptions);
 builder.Services.AddSingleton(ollamaOptions);
 builder.Services.AddSingleton(storageOptions);
+builder.Services.AddSingleton(ModelBenchmarkHangClockPolicy.Default);
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddSingleton<SimpleCsvParser>();
@@ -81,7 +82,10 @@ builder.Services.AddSingleton<IFoundrySdkBridge>(provider =>
         provider.GetRequiredService<FoundryOptions>(),
         provider.GetRequiredService<ILoggerFactory>(),
         provider.GetRequiredService<DefaultFoundrySdkBridge>()));
-builder.Services.AddSingleton<IFoundryCatalogClient, FoundryCatalogClient>();
+builder.Services.AddSingleton<FoundryCatalogClient>();
+builder.Services.AddSingleton<PlaywrightFoundryCatalogClient>();
+builder.Services.AddSingleton<IFoundryCatalogClient>(provider =>
+    provider.GetRequiredService<PlaywrightFoundryCatalogClient>());
 builder.Services.AddScoped<FoundryLlmClient>();
 builder.Services.AddScoped<WorkspaceLlmClient>();
 builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
@@ -160,6 +164,41 @@ app.MapGet("/api/health/foundry/acceleration", async (IFoundryCatalogClient cata
 {
     var result = await catalogClient.GetSnapshotAsync(cancellationToken);
     return Results.Ok(result.Acceleration);
+});
+
+app.MapPost("/api/benchmarks/model-queue", (StartModelBenchmarkRequest request, ModelBenchmarkCoordinator coordinator) =>
+{
+    try
+    {
+        _ = coordinator.StartAsync(
+            request.Provider,
+            request.Models,
+            request.DownloadMissingModels,
+            request.RemoveTooLargeModelsAfterBenchmark);
+
+        return Results.Accepted("/api/benchmarks/model-queue", coordinator.Current ?? coordinator.Last);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(exception.Message);
+    }
+});
+
+app.MapGet("/api/benchmarks/model-queue", (ModelBenchmarkCoordinator coordinator) =>
+{
+    var session = coordinator.Current ?? coordinator.Last;
+    return session is null ? Results.NotFound() : Results.Ok(session);
+});
+
+app.MapPost("/api/benchmarks/model-queue/cancel", (ModelBenchmarkCoordinator coordinator) =>
+{
+    if (!coordinator.IsRunning)
+    {
+        return Results.NotFound();
+    }
+
+    coordinator.Cancel();
+    return Results.Accepted("/api/benchmarks/model-queue", coordinator.Current ?? coordinator.Last);
 });
 
 app.MapPost("/api/llm/operations/generate-drafts", (StartDraftGenerationOperationRequest request, LlmOperationBroker broker) =>
@@ -261,10 +300,16 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
         WorkspaceSession workspace,
         OllamaClient llmClient,
         JobFitWorkspaceRefreshService fitRefreshService,
+        PlaywrightFoundryCatalogClient playwrightFoundryCatalogClient,
         OllamaOptions options,
         HttpContext httpContext,
         CancellationToken cancellationToken) =>
     {
+        if (IsFoundrySetupRemovePlaywrightDemo(httpContext))
+        {
+            return Results.Ok(SeedPlaywrightFoundrySetupRemoveDemo(workspace, playwrightFoundryCatalogClient));
+        }
+
         var availability = await llmClient.VerifyModelAvailabilityAsync(cancellationToken);
         if (!availability.Installed || availability.AvailableModels.Count == 0)
         {
@@ -340,6 +385,27 @@ static string SelectDemoModel(LlmModelAvailability availability, string configur
 
 static bool IsFullPlaywrightDemo(HttpContext httpContext)
     => string.Equals(httpContext.Request.Query["scope"].ToString(), "full", StringComparison.OrdinalIgnoreCase);
+
+static bool IsFoundrySetupRemovePlaywrightDemo(HttpContext httpContext)
+    => string.Equals(httpContext.Request.Query["scope"].ToString(), "foundry-setup-remove", StringComparison.OrdinalIgnoreCase);
+
+static PlaywrightDemoSeedResult SeedPlaywrightFoundrySetupRemoveDemo(
+    WorkspaceSession workspace,
+    PlaywrightFoundryCatalogClient playwrightFoundryCatalogClient)
+{
+    SeedPlaywrightDemoWorkspace(workspace);
+    playwrightFoundryCatalogClient.EnableSetupRemoveDemo();
+
+    var snapshot = playwrightFoundryCatalogClient.GetCurrentPlaywrightSnapshot();
+    workspace.SetFoundryAvailability(snapshot.Availability);
+    workspace.SetLlmProviderSelection(LlmProviderKind.Foundry);
+    workspace.SetLlmSessionSettings(snapshot.Availability.Model, "high");
+
+    return new PlaywrightDemoSeedResult(
+        snapshot.Availability.Model,
+        PlaywrightDemoSeedData.CompanyNames,
+        workspace.JobSets.OrderBy(static jobSet => jobSet.SortOrder).Take(3).Select(static jobSet => jobSet.Id).ToArray());
+}
 
 static void SeedPlaywrightDemoWorkspace(WorkspaceSession workspace)
 {

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -154,6 +155,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
     {
         var messages = new List<object>();
         var useStreamingTransport = request.Stream || progress is not null;
+        var think = ResolveThinkField(request.Think ?? options.Think);
 
         if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
         {
@@ -166,19 +168,31 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             request.Model,
             messages,
             useStreamingTransport,
-            request.Think ?? options.Think,
+            think,
             request.KeepAlive ?? options.KeepAlive,
             request.Temperature ?? options.Temperature,
             request.NumPredict,
             request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
             request.ResponseFormat);
+        var fallbackPayload = think is true
+            ? BuildChatPayload(
+                request.Model,
+                messages,
+                useStreamingTransport,
+                think: null,
+                request.KeepAlive ?? options.KeepAlive,
+                request.Temperature ?? options.Temperature,
+                request.NumPredict,
+                request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
+                request.ResponseFormat)
+            : null;
 
         if (useStreamingTransport)
         {
-            return await SendStreamingAsync("chat", payload, request.Model, ExtractChatChunk, progress, cancellationToken);
+            return await SendStreamingAsync("chat", payload, fallbackPayload, request.Model, ExtractChatChunk, progress, cancellationToken);
         }
 
-        using var response = await httpClient.PostAsJsonAsync("chat", payload, cancellationToken);
+        using var response = await PostJsonWithThinkingFallbackAsync("chat", payload, fallbackPayload, cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
@@ -206,25 +220,39 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
     {
         var prompt = string.Join(Environment.NewLine + Environment.NewLine, request.Messages.Select(static message => $"{message.Role}: {message.Content}"));
         var useStreamingTransport = request.Stream || progress is not null;
+        var think = ResolveThinkField(request.Think ?? options.Think);
 
         var payload = BuildGeneratePayload(
             request.Model,
             prompt,
             request.SystemPrompt,
             useStreamingTransport,
-            request.Think ?? options.Think,
+            think,
             request.KeepAlive ?? options.KeepAlive,
             request.Temperature ?? options.Temperature,
             request.NumPredict,
             request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
             request.ResponseFormat);
+        var fallbackPayload = think is true
+            ? BuildGeneratePayload(
+                request.Model,
+                prompt,
+                request.SystemPrompt,
+                useStreamingTransport,
+                think: null,
+                request.KeepAlive ?? options.KeepAlive,
+                request.Temperature ?? options.Temperature,
+                request.NumPredict,
+                request.NumCtx ?? (options.NumCtx > 0 ? options.NumCtx : (int?)null),
+                request.ResponseFormat)
+            : null;
 
         if (useStreamingTransport)
         {
-            return await SendStreamingAsync("generate", payload, request.Model, ExtractGenerateChunk, progress, cancellationToken);
+            return await SendStreamingAsync("generate", payload, fallbackPayload, request.Model, ExtractGenerateChunk, progress, cancellationToken);
         }
 
-        using var response = await httpClient.PostAsJsonAsync("generate", payload, cancellationToken);
+        using var response = await PostJsonWithThinkingFallbackAsync("generate", payload, fallbackPayload, cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
@@ -248,7 +276,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         string model,
         List<object> messages,
         bool stream,
-        string think,
+        bool? think,
         string keepAlive,
         double temperature,
         int? numPredict,
@@ -274,7 +302,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         string prompt,
         string? system,
         bool stream,
-        string think,
+        bool? think,
         string keepAlive,
         double temperature,
         int? numPredict,
@@ -332,6 +360,20 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
         return responseFormat.Format;
     }
 
+    private static bool? ResolveThinkField(string? think)
+    {
+        if (string.IsNullOrWhiteSpace(think))
+        {
+            return null;
+        }
+
+        return think.Trim().ToLowerInvariant() switch
+        {
+            "0" or "false" or "no" or "none" or "off" or "disabled" => false,
+            _ => true
+        };
+    }
+
     private static object BuildPayload(IDictionary<string, object?> fields)
     {
         // Strip null entries so we never emit them on the wire (Ollama treats some
@@ -379,16 +421,12 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
     private async Task<LlmResponse> SendStreamingAsync(
         string relativePath,
         object payload,
+        object? fallbackPayload,
         string fallbackModel,
         Func<JsonElement, StreamingChunk> readChunk,
         Action<LlmProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
-        {
-            Content = JsonContent.Create(payload)
-        };
-
         ReportProgress(
             progress,
             "Waiting for Ollama response",
@@ -398,7 +436,7 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             completed: false,
             sequence: 1);
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await SendJsonWithThinkingFallbackAsync(relativePath, payload, fallbackPayload, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -558,6 +596,52 @@ public sealed class OllamaClient(HttpClient httpClient, OllamaOptions options) :
             loadDuration,
             promptEvalDuration,
             evalDuration);
+    }
+
+    private async Task<HttpResponseMessage> PostJsonWithThinkingFallbackAsync(
+        string relativePath,
+        object payload,
+        object? fallbackPayload,
+        CancellationToken cancellationToken)
+        => await SendJsonWithThinkingFallbackAsync(relativePath, payload, fallbackPayload, HttpCompletionOption.ResponseContentRead, cancellationToken);
+
+    private async Task<HttpResponseMessage> SendJsonWithThinkingFallbackAsync(
+        string relativePath,
+        object payload,
+        object? fallbackPayload,
+        HttpCompletionOption completionOption,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, relativePath)
+        {
+            Content = JsonContent.Create(payload)
+        };
+
+        var response = await httpClient.SendAsync(request, completionOption, cancellationToken);
+        if (fallbackPayload is null || !ShouldRetryWithoutThinking(response))
+        {
+            return response;
+        }
+
+        response.Dispose();
+
+        using var retryRequest = new HttpRequestMessage(HttpMethod.Post, relativePath)
+        {
+            Content = JsonContent.Create(fallbackPayload)
+        };
+
+        return await httpClient.SendAsync(retryRequest, completionOption, cancellationToken);
+    }
+
+    private static bool ShouldRetryWithoutThinking(HttpResponseMessage response)
+    {
+        if (response.StatusCode != HttpStatusCode.BadRequest)
+        {
+            return false;
+        }
+
+        var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        return body.Contains("does not support thinking", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string?> ReadStreamingLineAsync(StreamReader reader, CancellationToken cancellationToken)

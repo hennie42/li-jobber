@@ -174,7 +174,7 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
         throw new TimeoutException($"The LI-CV-Writer web app did not respond within {timeout}.\n\nApp output:\n{GetRecentOutput()}");
     }
 
-    private string GetRecentOutput()
+    public string GetRecentOutput()
         => string.Join(Environment.NewLine, outputLines.TakeLast(80));
 
     private void AppendOutput(string? line)

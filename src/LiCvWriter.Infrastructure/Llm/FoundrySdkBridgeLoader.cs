@@ -84,6 +84,11 @@ public static class FoundrySdkBridgeLoader
             CancellationToken cancellationToken = default)
             => innerBridge.DownloadModelAsync(alias, progress, cancellationToken);
 
+        public Task UnloadModelAsync(
+            string alias,
+            CancellationToken cancellationToken = default)
+            => innerBridge.UnloadModelAsync(alias, cancellationToken);
+
         public Task RemoveModelAsync(
             string alias,
             CancellationToken cancellationToken = default)

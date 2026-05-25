@@ -12,4 +12,6 @@ public sealed record ModelBenchmarkProgress(
     int CurrentFixtureNumber = 0,
     string? CurrentFixtureId = null,
     string? CurrentFixtureDisplayName = null,
-    string? CurrentPromptId = null);
+    string? CurrentPromptId = null,
+    LlmProgressUpdate? LlmTelemetry = null,
+    ModelBenchmarkDiagnostics? Diagnostics = null);

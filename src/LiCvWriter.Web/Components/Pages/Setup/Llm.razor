@@ -261,9 +261,10 @@
         <p class="muted-text">Model selection happens above. Batch actions below always work from the current checkbox selection, so the layout stays consistent across providers.</p>
 
         <div class="button-row">
-            <button class="secondary-button" @onclick="SelectAllVisibleModels" disabled="@(!CanSelectVisibleModels)">Select all visible</button>
+            <button class="secondary-button" @onclick="SelectVisibleUsableModels" disabled="@(!CanSelectVisibleModels)">Select visible usable models</button>
             <button class="secondary-button" @onclick="ClearSelectedModels" disabled="@(!HasSelectedModels)">Select none</button>
             <button class="secondary-button" @onclick="DownloadSelectedModelsAsync" disabled="@(!CanDownloadSelectedModels)">@(isDownloadingFoundryModel ? "Downloading..." : "Download selected")</button>
+            <button class="secondary-button" @onclick="RemoveSelectedCachedModelsAsync" disabled="@(!CanRemoveSelectedModels)">@(isRemovingFoundryModel ? "Removing..." : "Remove selected cached")</button>
             <button class="primary-button" @onclick="StartBenchmarkSelectedAsync" disabled="@(!CanBenchmarkSelectedModels)">@(BenchmarkCoordinator.IsRunning ? "Benchmarking..." : "Benchmark selected")</button>
             @if (BenchmarkCoordinator.IsRunning)
             {
@@ -323,6 +324,10 @@
                     <div class="field-label">Live benchmark run</div>
                     <h3>@GetBenchmarkLiveHeadline(liveBenchmark)</h3>
                     <p class="muted-text">@GetBenchmarkLiveDetail(liveBenchmark)</p>
+                    @if (liveBenchmark.HangState == ModelBenchmarkHangState.Warning)
+                    {
+                        <div class="status-chip status-pending">@GetBenchmarkHangWarning(liveBenchmark)</div>
+                    }
                 </div>
                 <div class="benchmark-stage-pill">@GetBenchmarkStageLabel(liveBenchmark)</div>
             </div>
@@ -346,6 +351,11 @@
                     <span class="benchmark-live-label">Cleanup policy</span>
                     <strong>@GetBenchmarkCleanupPolicyLabel(liveBenchmark)</strong>
                     <div class="benchmark-live-detail">@GetBenchmarkCleanupPolicyDetail(liveBenchmark)</div>
+                </article>
+                <article class="benchmark-live-card">
+                    <span class="benchmark-live-label">Diagnostics</span>
+                    <strong>@GetBenchmarkDiagnosticsHeadline(liveBenchmark)</strong>
+                    <div class="benchmark-live-detail">@GetBenchmarkDiagnosticsDetail(liveBenchmark)</div>
                 </article>
             </div>
 
@@ -382,7 +392,7 @@
 
                 <table class="compact-grid setup-list-table">
                     <thead>
-                        <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+                            <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Status</th><th>Fit</th><th></th></tr>
                     </thead>
                     <tbody>
                         @foreach (var item in liveBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
@@ -390,11 +400,15 @@
                             <tr class="@GetSetupListRowClass(item.index)">
                                 <td>@item.benchmarkRow.Rank</td>
                                 <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
-                                <td>@item.benchmarkRow.Model</td>
+                                <td>
+                                    <strong>@item.benchmarkRow.Model</strong>
+                                    <div class="setup-list-detail benchmark-row-diagnostics">@GetBenchmarkRowDiagnosticsSummary(item.benchmarkRow)</div>
+                                </td>
                                 <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.OverallScore.ToString("0.00") : "-")</td>
                                 <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.QualityScore.ToString("0.00") : "-")</td>
                                 <td>@(item.benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "-")</td>
-                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@(item.benchmarkRow.Succeeded ? item.benchmarkRow.Fit.ToString() : (item.benchmarkRow.FailedReason ?? "failed"))</td>
+                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkStatusLabel(item.benchmarkRow)</td>
+                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkFitLabel(item.benchmarkRow)</td>
                                 <td>
                                     @if (item.benchmarkRow.Succeeded && CanUseBenchmarkedModel(item.benchmarkRow))
                                     {
@@ -439,10 +453,12 @@
                                 <span>Decode @FormatDecodeSpeed(topBenchmarkResult)</span>
                             </div>
                             <div class="benchmark-live-detail">Fit: @topBenchmarkResult.Fit</div>
+                            <div class="benchmark-live-detail">@GetBenchmarkRowDiagnosticsSummary(topBenchmarkResult)</div>
                         }
                         else
                         {
                             <div class="benchmark-live-detail">@topBenchmarkResult.FailedReason</div>
+                            <div class="benchmark-live-detail">@GetBenchmarkRowDiagnosticsSummary(topBenchmarkResult)</div>
                         }
                     }
                 </article>
@@ -463,7 +479,7 @@
 
         <table class="compact-grid setup-list-table">
             <thead>
-                <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Fit</th><th></th></tr>
+                <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Status</th><th>Fit</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var item in lastBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
@@ -471,11 +487,15 @@
                     <tr class="@GetSetupListRowClass(item.index)">
                         <td>@item.benchmarkRow.Rank</td>
                         <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
-                        <td>@item.benchmarkRow.Model</td>
+                        <td>
+                            <strong>@item.benchmarkRow.Model</strong>
+                            <div class="setup-list-detail benchmark-row-diagnostics">@GetBenchmarkRowDiagnosticsSummary(item.benchmarkRow)</div>
+                        </td>
                         <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.OverallScore.ToString("0.00") : "-")</td>
                         <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.QualityScore.ToString("0.00") : "-")</td>
                         <td>@(item.benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "-")</td>
-                        <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@(item.benchmarkRow.Succeeded ? item.benchmarkRow.Fit.ToString() : (item.benchmarkRow.FailedReason ?? "failed"))</td>
+                        <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkStatusLabel(item.benchmarkRow)</td>
+                        <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkFitLabel(item.benchmarkRow)</td>
                         <td>
                             @if (item.benchmarkRow.Succeeded && CanUseBenchmarkedModel(item.benchmarkRow))
                             {
@@ -524,6 +544,7 @@
     private bool isCheckingOllama;
     private bool isCheckingFoundry;
     private bool isDownloadingFoundryModel;
+    private bool isRemovingFoundryModel;
     private bool isRegisteringFoundryExecutionProviders;
     private bool removeTooLargeFoundryModelsAfterBenchmark = true;
     private string? llmErrorMessage;
@@ -534,6 +555,8 @@
     private string selectedThinkingLevel = "medium";
     private string downloadingFoundryAlias = string.Empty;
     private string foundryModelFilter = string.Empty;
+    private bool isRefreshingLiveFoundrySnapshot;
+    private string? lastLiveFoundryRefreshKey;
 
     private bool CanSaveSessionLlmSettings => !IsModelSelectionBusy
         && GetAvailableSessionModels().Count > 0
@@ -544,6 +567,7 @@
     private bool IsProviderSelectionBusy => isCheckingOllama
         || isCheckingFoundry
         || isDownloadingFoundryModel
+        || isRemovingFoundryModel
         || isRegisteringFoundryExecutionProviders
         || BenchmarkCoordinator.IsRunning;
 
@@ -551,16 +575,20 @@
 
     private bool IsProviderRefreshBusy => IsOllamaSelected ? isCheckingOllama : isCheckingFoundry;
 
-    private bool IsFoundryBusy => isCheckingFoundry || isDownloadingFoundryModel || isRegisteringFoundryExecutionProviders;
+    private bool IsFoundryBusy => isCheckingFoundry || isDownloadingFoundryModel || isRemovingFoundryModel || isRegisteringFoundryExecutionProviders;
 
     private bool HasSelectedModels => GetSelectedActionModels().Count > 0;
 
-    private bool CanSelectVisibleModels => !IsModelSelectionBusy && GetVisibleSelectableModelKeys().Count > 0;
+    private bool CanSelectVisibleModels => !IsModelSelectionBusy && GetVisibleBulkSelectableModelKeys().Count > 0;
 
     private bool CanDownloadSelectedModels => !IsOllamaSelected
         && !IsModelSelectionBusy
         && FoundryOptions.AllowDownloads
         && GetSelectedFoundryDownloadCandidates().Count > 0;
+
+    private bool CanRemoveSelectedModels => !IsOllamaSelected
+        && !IsModelSelectionBusy
+        && GetSelectedFoundryRemovalCandidates().Count > 0;
 
     private bool CanBenchmarkSelectedModels => !IsModelSelectionBusy
         && HasSelectedModels
@@ -786,6 +814,77 @@
         {
             isDownloadingFoundryModel = false;
             downloadingFoundryAlias = string.Empty;
+        }
+    }
+
+    private async Task RemoveSelectedCachedModelsAsync()
+    {
+        if (IsOllamaSelected)
+        {
+            return;
+        }
+
+        var selectedAliases = GetSelectedFoundryRemovalCandidates();
+        if (selectedAliases.Count == 0)
+        {
+            return;
+        }
+
+        llmErrorMessage = null;
+        isRemovingFoundryModel = true;
+        var removedAliases = new List<string>(selectedAliases.Count);
+
+        try
+        {
+            for (var index = 0; index < selectedAliases.Count; index++)
+            {
+                var alias = selectedAliases[index];
+                await Operations.RunAsync(
+                    "Removing cached Foundry models",
+                    $"{alias} ({index + 1}/{selectedAliases.Count})",
+                    () => FoundryCatalogClient.RemoveModelAsync(alias));
+
+                removedAliases.Add(alias);
+            }
+
+            foreach (var alias in removedAliases)
+            {
+                selectedActionModels.Remove(alias);
+            }
+
+            await RefreshFoundrySnapshotAsync();
+            Operations.Success(
+                "Selected cached Foundry models removed.",
+                $"Removed {removedAliases.Count} selected model(s) from the local Foundry cache.");
+        }
+        catch (Exception exception)
+        {
+            if (removedAliases.Count > 0)
+            {
+                foreach (var alias in removedAliases)
+                {
+                    selectedActionModels.Remove(alias);
+                }
+
+                try
+                {
+                    await RefreshFoundrySnapshotAsync();
+                }
+                catch
+                {
+                }
+            }
+
+            llmErrorMessage = exception.Message;
+            Operations.Error(
+                "Selected cached Foundry models could not be removed.",
+                removedAliases.Count == 0
+                    ? exception.Message
+                    : $"Removed {removedAliases.Count} model(s) before the failure. {exception.Message}");
+        }
+        finally
+        {
+            isRemovingFoundryModel = false;
         }
     }
 
@@ -1015,10 +1114,13 @@
             ? GetVisibleOllamaModels()
             : foundryCatalog?.Models.Select(static model => model.Alias).ToArray() ?? Array.Empty<string>();
 
-    private IReadOnlyList<string> GetVisibleSelectableModelKeys()
+    private IReadOnlyList<string> GetVisibleBulkSelectableModelKeys()
         => IsOllamaSelected
             ? GetVisibleOllamaModels()
-            : GetVisibleFoundryModels().Select(static model => model.Alias).ToArray();
+            : GetVisibleFoundryModels()
+                .Where(static model => model.IsTextBenchmarkUsable)
+                .Select(static model => model.Alias)
+                .ToArray();
 
     private IReadOnlyList<string> GetSelectedActionModels()
     {
@@ -1038,6 +1140,18 @@
 
         return GetSelectedActionModels()
             .Where(alias => foundryCatalog.Models.Any(model => model.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && !model.IsCached))
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> GetSelectedFoundryRemovalCandidates()
+    {
+        if (foundryCatalog is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return GetSelectedActionModels()
+            .Where(alias => foundryCatalog.Models.Any(model => model.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase) && model.IsCached))
             .ToArray();
     }
 
@@ -1067,9 +1181,9 @@
         }
     }
 
-    private void SelectAllVisibleModels()
+    private void SelectVisibleUsableModels()
     {
-        foreach (var model in GetVisibleSelectableModelKeys())
+        foreach (var model in GetVisibleBulkSelectableModelKeys())
         {
             selectedActionModels.Add(model);
         }
@@ -1097,9 +1211,23 @@
         }
 
         var downloadCandidates = GetSelectedFoundryDownloadCandidates().Count;
-        return downloadCandidates == 0
-            ? $"Selected models: {selected.Count}. All selected Foundry models are already cached."
-            : $"Selected models: {selected.Count}. {downloadCandidates} selected model(s) will be downloaded before use.";
+        var removalCandidates = GetSelectedFoundryRemovalCandidates().Count;
+        if (downloadCandidates == 0 && removalCandidates == 0)
+        {
+            return $"Selected models: {selected.Count}.";
+        }
+
+        if (downloadCandidates == 0)
+        {
+            return $"Selected models: {selected.Count}. {removalCandidates} selected cached model(s) can be removed from the local cache.";
+        }
+
+        if (removalCandidates == 0)
+        {
+            return $"Selected models: {selected.Count}. {downloadCandidates} selected model(s) will be downloaded before use.";
+        }
+
+        return $"Selected models: {selected.Count}. {downloadCandidates} selected model(s) will be downloaded before use; {removalCandidates} selected cached model(s) can be removed from the local cache.";
     }
 
     private IReadOnlyList<FoundryCatalogModel> GetVisibleFoundryModels()
@@ -1125,16 +1253,28 @@
         => availability.IsModelLoaded(model) ? "Loaded" : "Installed";
 
     private static string GetFoundryModelState(FoundryCatalogModel model)
-        => model.IsLoaded
+    {
+        var availability = model.IsLoaded
             ? "Loaded"
             : model.IsCached
                 ? "Cached"
                 : "Available to download";
 
+        return model.IsTextBenchmarkUsable
+            ? availability
+            : $"{availability}; unusable for text benchmark";
+    }
+
     private static string GetFoundryModelDetail(FoundryCatalogModel model)
-        => string.IsNullOrWhiteSpace(model.Description)
+    {
+        var detail = string.IsNullOrWhiteSpace(model.Description)
             ? $"Model ID: {model.ModelId}"
             : model.Description;
+
+        return model.IsTextBenchmarkUsable || string.IsNullOrWhiteSpace(model.TextBenchmarkUnusableReason)
+            ? detail
+            : $"{detail} Benchmark note: {model.TextBenchmarkUnusableReason}";
+    }
 
     private IReadOnlyList<OperationStatusEntry> GetRecentBenchmarkActivityEntries()
         => Operations.Entries
@@ -1149,6 +1289,17 @@
 
     private string GetBenchmarkLiveDetail(ModelBenchmarkSession liveBenchmark)
         => $"{liveBenchmark.CompletedCount} of {liveBenchmark.TotalCount} complete in {FormatElapsedTime(DateTimeOffset.UtcNow - liveBenchmark.StartedUtc)}. {GetBenchmarkOperationSummary(liveBenchmark)}";
+
+    private string GetBenchmarkHangWarning(ModelBenchmarkSession liveBenchmark)
+    {
+        var lastProgressSummary = liveBenchmark.LastRealProgressUtc is { } lastRealProgressUtc
+            ? $"Last real progress was {FormatElapsedTime(DateTimeOffset.UtcNow - lastRealProgressUtc)} ago."
+            : "Real progress has not been observed recently.";
+
+        return string.IsNullOrWhiteSpace(liveBenchmark.HangDetail)
+            ? $"Monitoring suspected hang. {lastProgressSummary}"
+            : $"Monitoring suspected hang. {liveBenchmark.HangDetail} {lastProgressSummary}";
+    }
 
     private static string GetBenchmarkStageLabel(ModelBenchmarkSession liveBenchmark)
     {
@@ -1235,6 +1386,50 @@
                 : "Foundry cache cleanup is off for this run, so all benchmarked models stay available."
             : "Ollama installs and removals stay outside the app.";
 
+    private string GetBenchmarkDiagnosticsHeadline(ModelBenchmarkSession liveBenchmark)
+    {
+        if (!string.IsNullOrWhiteSpace(liveBenchmark.Diagnostics.AccelerationReadiness))
+        {
+            return $"Acceleration {liveBenchmark.Diagnostics.AccelerationReadiness}";
+        }
+
+        if (liveBenchmark.Provider == LlmProviderKind.Foundry && foundryCatalog is not null)
+        {
+            return $"Acceleration {foundryCatalog.Acceleration.Readiness}";
+        }
+
+        return liveBenchmark.CurrentPhaseStartedUtc is { } phaseStartedUtc
+            ? $"{GetBenchmarkStageLabel(liveBenchmark)} for {FormatElapsedTime(DateTimeOffset.UtcNow - phaseStartedUtc)}"
+            : "Collecting runtime evidence";
+    }
+
+    private string GetBenchmarkDiagnosticsDetail(ModelBenchmarkSession liveBenchmark)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(liveBenchmark.Diagnostics.RuntimePathSummary))
+        {
+            parts.Add(liveBenchmark.Diagnostics.RuntimePathSummary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(liveBenchmark.Diagnostics.AccelerationStatusMessage))
+        {
+            parts.Add(liveBenchmark.Diagnostics.AccelerationStatusMessage);
+        }
+        else if (liveBenchmark.Provider == LlmProviderKind.Foundry && !string.IsNullOrWhiteSpace(foundryCatalog?.Acceleration.StatusMessage))
+        {
+            parts.Add(foundryCatalog!.Acceleration.StatusMessage);
+        }
+
+        if (liveBenchmark.CurrentPhaseStartedUtc is { } phaseStartedUtc)
+        {
+            parts.Add($"{GetBenchmarkStageLabel(liveBenchmark)} has been active for {FormatElapsedTime(DateTimeOffset.UtcNow - phaseStartedUtc)}.");
+        }
+
+        return parts.Count == 0
+            ? "Preparation, warm-up, and runtime-path timings will appear here as the run advances."
+            : string.Join(" ", parts);
+    }
+
     private static string GetBenchmarkLiveResultsHeadline(ModelBenchmarkSession session)
         => $"{session.Results.Count} of {session.TotalCount} model(s) have completed and been ranked so far.";
 
@@ -1268,6 +1463,64 @@
 
     private static string FormatDecodeSpeed(ModelBenchmarkResult result)
         => result.DecodeTokensPerSecond is { } tps ? $"{tps:0.0} tok/s" : "speed n/a";
+
+    private static string GetBenchmarkRowDiagnosticsSummary(ModelBenchmarkResult result)
+    {
+        var diagnostics = result.Diagnostics;
+        var parts = new List<string>();
+
+        if (diagnostics.PreparationDuration is { } preparationDuration)
+        {
+            parts.Add($"prepare {FormatElapsedTime(preparationDuration)}");
+        }
+
+        if (diagnostics.WarmupDuration is { } warmupDuration)
+        {
+            parts.Add($"warm-up {FormatElapsedTime(warmupDuration)}");
+        }
+
+        if (diagnostics.EvaluationDuration is { } evaluationDuration)
+        {
+            parts.Add($"evaluate {FormatElapsedTime(evaluationDuration)}");
+        }
+
+        if (diagnostics.CleanupDuration is { } cleanupDuration)
+        {
+            parts.Add($"cleanup {FormatElapsedTime(cleanupDuration)}");
+        }
+
+        if (diagnostics.FinalizationDuration is { } finalizationDuration)
+        {
+            parts.Add($"finalize {FormatElapsedTime(finalizationDuration)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(diagnostics.AccelerationReadiness))
+        {
+            parts.Add($"acceleration {diagnostics.AccelerationReadiness}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(diagnostics.RuntimePathSummary))
+        {
+            parts.Add(diagnostics.RuntimePathSummary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.FailedReason))
+        {
+            parts.Add(result.FailedReason);
+        }
+
+        return parts.Count == 0
+            ? "Benchmark diagnostics will appear after this model reports progress."
+            : string.Join(" • ", parts);
+    }
+
+    private static string GetBenchmarkStatusLabel(ModelBenchmarkResult result)
+        => result.Succeeded
+            ? "Succeeded"
+            : $"Failed: {result.FailedReason ?? "Unknown failure."}";
+
+    private static string GetBenchmarkFitLabel(ModelBenchmarkResult result)
+        => result.Succeeded ? result.Fit.ToString() : "-";
 
     private static string FormatElapsedTime(TimeSpan elapsed)
         => elapsed.TotalMinutes >= 1
@@ -1427,7 +1680,57 @@
         }
     }
 
-    private void HandleChanged() => _ = InvokeAsync(StateHasChanged);
+    private void HandleChanged() => _ = InvokeAsync(HandleChangedAsync);
+
+    private async Task HandleChangedAsync()
+    {
+        if (ShouldRefreshLiveFoundrySnapshot())
+        {
+            try
+            {
+                isRefreshingLiveFoundrySnapshot = true;
+                lastLiveFoundryRefreshKey = GetLiveFoundryRefreshKey(BenchmarkCoordinator.Current);
+                await RefreshFoundrySnapshotAsync();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                isRefreshingLiveFoundrySnapshot = false;
+            }
+        }
+        else if (BenchmarkCoordinator.Current is not { IsRunning: true, Provider: LlmProviderKind.Foundry })
+        {
+            lastLiveFoundryRefreshKey = null;
+        }
+
+        StateHasChanged();
+    }
+
+    private bool ShouldRefreshLiveFoundrySnapshot()
+    {
+        var currentBenchmark = BenchmarkCoordinator.Current;
+        if (currentBenchmark is not { IsRunning: true, Provider: LlmProviderKind.Foundry })
+        {
+            return false;
+        }
+
+        if (isRefreshingLiveFoundrySnapshot || !string.IsNullOrWhiteSpace(currentBenchmark.Diagnostics.AccelerationReadiness))
+        {
+            return false;
+        }
+
+        var refreshKey = GetLiveFoundryRefreshKey(currentBenchmark);
+        return !string.Equals(lastLiveFoundryRefreshKey, refreshKey, StringComparison.Ordinal);
+    }
+
+    private static string GetLiveFoundryRefreshKey(ModelBenchmarkSession? currentBenchmark)
+        => currentBenchmark is null
+            ? string.Empty
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{currentBenchmark.StartedUtc.UtcTicks}:{currentBenchmark.CurrentModel}:{currentBenchmark.CurrentPhase}");
 
     private void CancelBenchmark()
     {

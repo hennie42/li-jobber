@@ -104,16 +104,22 @@
         }
     }
 
-    private string? GetSidebarThinkingRawText()
+    private static string? GetSidebarThinkingOrResponseText(LlmOperationTelemetry? telemetry)
     {
-        if (!string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingContent)
-            || !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingPreview))
+        if (!string.IsNullOrWhiteSpace(telemetry?.ThinkingContent)
+            || !string.IsNullOrWhiteSpace(telemetry?.ThinkingPreview))
         {
-            return Operations.CurrentLlmTelemetry?.ThinkingContent ?? Operations.CurrentLlmTelemetry?.ThinkingPreview;
+            return telemetry?.ThinkingContent ?? telemetry?.ThinkingPreview;
         }
 
-        return Operations.LastCompletedLlmTelemetry?.ThinkingContent ?? Operations.LastCompletedLlmTelemetry?.ThinkingPreview;
+        return string.IsNullOrWhiteSpace(telemetry?.ResponseContent)
+            ? null
+            : telemetry.ResponseContent;
     }
+
+    private string? GetSidebarThinkingRawText()
+        => GetSidebarThinkingOrResponseText(Operations.CurrentLlmTelemetry)
+            ?? GetSidebarThinkingOrResponseText(Operations.LastCompletedLlmTelemetry);
 
     private bool HasSidebarThinkingText()
         => !string.IsNullOrWhiteSpace(GetSidebarThinkingRawText());
@@ -122,9 +128,19 @@
         => GetSidebarThinkingRawText()
             ?? "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.";
 
+    private LlmOperationTelemetry? GetSidebarActivityTelemetry()
+    {
+        if (Operations.ActiveLlmTelemetry is { } activeTelemetry)
+        {
+            return activeTelemetry;
+        }
+
+        return Operations.IsBusy ? Operations.LastCompletedLlmTelemetry : null;
+    }
+
     private string? GetSidebarActivityRawText()
     {
-        if (Operations.ActiveLlmTelemetry is { } telemetry)
+        if (GetSidebarActivityTelemetry() is { } telemetry)
         {
             return BuildSidebarActivityText(
                 GetSidebarActivityChipText(),
@@ -216,8 +232,7 @@
             return "Standby";
         }
 
-        return !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingContent)
-            || !string.IsNullOrWhiteSpace(Operations.CurrentLlmTelemetry?.ThinkingPreview)
+        return !string.IsNullOrWhiteSpace(GetSidebarThinkingOrResponseText(Operations.CurrentLlmTelemetry))
             ? "Live feed"
             : "Last capture";
     }
@@ -230,6 +245,11 @@
         if (Operations.ActiveLlmTelemetry is not null)
         {
             return "Live model";
+        }
+
+        if (Operations.IsBusy && Operations.LastCompletedLlmTelemetry is not null)
+        {
+            return "Recent model";
         }
 
         if (Operations.IsBusy)
@@ -276,6 +296,11 @@
             return $"Live {telemetryTimestamp:HH:mm:ss}";
         }
 
+        if (Operations.IsBusy && Operations.LastCompletedLlmTelemetry is { Timestamp: var lastTelemetryTimestamp })
+        {
+            return $"Updated {lastTelemetryTimestamp:HH:mm:ss}";
+        }
+
         if (Operations.IsBusy && Operations.BusyStartedAt is { } busyStartedAt)
         {
             return $"Started {busyStartedAt:HH:mm:ss}";
@@ -288,7 +313,7 @@
 
     private string GetSidebarActivityMonitorFooterText()
     {
-        if (Operations.ActiveLlmTelemetry is { Model: { Length: > 0 } model })
+        if (GetSidebarActivityTelemetry() is { Model: { Length: > 0 } model })
         {
             return $"OPS - {model}";
         }

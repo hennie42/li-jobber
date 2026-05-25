@@ -29,6 +29,13 @@ public interface IFoundryCatalogClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Unloads the requested model alias from the active Foundry runtime without removing it from cache.
+    /// </summary>
+    Task UnloadModelAsync(
+        string alias,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes the requested model alias from the local Foundry cache.
     /// </summary>
     Task RemoveModelAsync(

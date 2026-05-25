@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
 using LiCvWriter.Application.Options;
@@ -44,13 +45,24 @@ public sealed class OllamaModelBenchmarkService(
         }
 
         var totalFixtures = ModelBenchmarkFixtures.DefaultSuite.Count;
+        var diagnostics = ModelBenchmarkDiagnostics.Empty;
         ReportProgress(progress, model, ModelBenchmarkRunPhase.Warmup, "Measuring load time and decode speed.", 0, totalFixtures);
 
         var stopwatch = Stopwatch.StartNew();
         OllamaCapacityVerdict verdict;
+        var warmupStopwatch = Stopwatch.StartNew();
         try
         {
-            verdict = await capacityProbe.ProbeAsync(model, cancellationToken);
+            verdict = await capacityProbe.ProbeAsync(
+                model,
+                progress is null ? null : update => ReportWarmupStreamingProgress(progress, model, totalFixtures, update, diagnostics),
+                cancellationToken);
+            warmupStopwatch.Stop();
+            diagnostics = diagnostics with
+            {
+                WarmupDuration = warmupStopwatch.Elapsed,
+                RuntimePathSummary = BuildRuntimePathSummary(verdict)
+            };
         }
         catch (OperationCanceledException)
         {
@@ -59,7 +71,7 @@ public sealed class OllamaModelBenchmarkService(
         catch (Exception exception)
         {
             var failure = ClassifyFailure(exception, "Capacity probe failed");
-            return Failed(model, failure.Reason, stopwatch.Elapsed, notes: failure.Notes);
+            return Failed(model, failure.Reason, stopwatch.Elapsed, notes: failure.Notes, diagnostics: diagnostics with { WarmupDuration = warmupStopwatch.Elapsed });
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -78,6 +90,7 @@ public sealed class OllamaModelBenchmarkService(
 
         IReadOnlyList<ModelBenchmarkFixtureResult> fixtureResults;
         double qualityScore;
+        var evaluationStopwatch = Stopwatch.StartNew();
         try
         {
             var scoredFixtures = new List<ModelBenchmarkFixtureResult>(ModelBenchmarkFixtures.DefaultSuite.Count);
@@ -104,8 +117,10 @@ public sealed class OllamaModelBenchmarkService(
 
                 var invocation = await jsonInvoker.InvokeAsync(
                     fixtureRequest,
-                    parse: static content => content,
-                    progress: null,
+                    parse: static content => ValidateJsonCandidate(content),
+                    progress: progress is null
+                        ? null
+                        : update => ReportFixtureStreamingProgress(progress, model, item.fixture, item.index, totalFixtures, update, diagnostics),
                     cancellationToken);
 
                 var scoredFixture = invocation.Attempts
@@ -132,8 +147,13 @@ public sealed class OllamaModelBenchmarkService(
             qualityScore = totalWeight <= 0.0
                 ? 0.0
                 : fixtureResults.Sum(static result => result.WeightedScore) / totalWeight;
+            evaluationStopwatch.Stop();
+            diagnostics = diagnostics with { EvaluationDuration = evaluationStopwatch.Elapsed };
 
-            ReportProgress(progress, model, ModelBenchmarkRunPhase.Finalizing, "Combining weighted fixture results.", totalFixtures, totalFixtures);
+            var finalizationStopwatch = Stopwatch.StartNew();
+            ReportProgress(progress, model, ModelBenchmarkRunPhase.Finalizing, "Combining weighted fixture results.", totalFixtures, totalFixtures, diagnostics: diagnostics);
+            finalizationStopwatch.Stop();
+            diagnostics = diagnostics with { FinalizationDuration = finalizationStopwatch.Elapsed };
         }
         catch (OperationCanceledException)
         {
@@ -142,7 +162,7 @@ public sealed class OllamaModelBenchmarkService(
         catch (Exception exception)
         {
             var failure = ClassifyFailure(exception, "Quality call failed");
-            return Failed(model, failure.Reason, stopwatch.Elapsed, verdict, failure.Notes);
+            return Failed(model, failure.Reason, stopwatch.Elapsed, verdict, failure.Notes, diagnostics);
         }
 
         stopwatch.Stop();
@@ -160,31 +180,87 @@ public sealed class OllamaModelBenchmarkService(
             TotalDuration: stopwatch.Elapsed,
             Fit: verdict.Fit,
             Notes: verdict.Notes,
-                FailedReason: null,
-                FixtureResults: fixtureResults);
+            FailedReason: null,
+            FixtureResults: fixtureResults)
+        {
+            Diagnostics = diagnostics
+        };
     }
 
-        private static void ReportProgress(
-            Action<ModelBenchmarkProgress>? progress,
-            string model,
-            ModelBenchmarkRunPhase phase,
-            string detail,
-            int completedFixtureCount,
-            int totalFixtureCount,
-            int currentFixtureNumber = 0,
-            ModelBenchmarkFixtureDefinition? fixture = null)
-        {
-            progress?.Invoke(new ModelBenchmarkProgress(
-                Model: model,
-                Phase: phase,
-                Detail: detail,
-                CompletedFixtureCount: completedFixtureCount,
-                TotalFixtureCount: totalFixtureCount,
-                CurrentFixtureNumber: currentFixtureNumber,
-                CurrentFixtureId: fixture?.FixtureId,
-                CurrentFixtureDisplayName: fixture?.DisplayName,
-                CurrentPromptId: fixture?.PromptId));
-        }
+    private static void ReportWarmupStreamingProgress(
+        Action<ModelBenchmarkProgress> progress,
+        string model,
+        int totalFixtures,
+        LlmProgressUpdate update,
+        ModelBenchmarkDiagnostics diagnostics)
+    {
+        var responseLength = update.ResponseContent?.Length ?? 0;
+        var detail = update.Completed
+            ? "Warm-up call completed; decode speed and load signals are being summarized."
+            : $"Warm-up call is still active (stream update {Math.Max(update.Sequence, 1)}; {responseLength} response chars received).";
+
+        progress(new ModelBenchmarkProgress(
+            Model: model,
+            Phase: ModelBenchmarkRunPhase.Warmup,
+            Detail: detail,
+            CompletedFixtureCount: 0,
+            TotalFixtureCount: totalFixtures,
+            LlmTelemetry: update,
+            Diagnostics: diagnostics));
+    }
+
+    private static void ReportFixtureStreamingProgress(
+        Action<ModelBenchmarkProgress> progress,
+        string model,
+        ModelBenchmarkFixtureDefinition fixture,
+        int fixtureIndex,
+        int totalFixtures,
+        LlmProgressUpdate update,
+        ModelBenchmarkDiagnostics diagnostics)
+    {
+        var responseLength = update.ResponseContent?.Length ?? 0;
+        var thinkingLength = update.ThinkingContent?.Length ?? 0;
+        var detail = update.Completed
+            ? $"Structured output stream completed for fixture {fixtureIndex + 1} of {totalFixtures}: {fixture.DisplayName}."
+            : $"Generating fixture {fixtureIndex + 1} of {totalFixtures}: {fixture.DisplayName} (stream update {Math.Max(update.Sequence, 1)}; response {responseLength} chars{(thinkingLength > 0 ? $", thinking {thinkingLength} chars" : string.Empty)}).";
+
+        progress(new ModelBenchmarkProgress(
+            Model: model,
+            Phase: ModelBenchmarkRunPhase.Evaluating,
+            Detail: detail,
+            CompletedFixtureCount: fixtureIndex,
+            TotalFixtureCount: totalFixtures,
+            CurrentFixtureNumber: fixtureIndex + 1,
+            CurrentFixtureId: fixture.FixtureId,
+            CurrentFixtureDisplayName: fixture.DisplayName,
+            CurrentPromptId: fixture.PromptId,
+            LlmTelemetry: update,
+            Diagnostics: diagnostics));
+    }
+
+    private static void ReportProgress(
+        Action<ModelBenchmarkProgress>? progress,
+        string model,
+        ModelBenchmarkRunPhase phase,
+        string detail,
+        int completedFixtureCount,
+        int totalFixtureCount,
+        int currentFixtureNumber = 0,
+        ModelBenchmarkFixtureDefinition? fixture = null,
+        ModelBenchmarkDiagnostics? diagnostics = null)
+    {
+        progress?.Invoke(new ModelBenchmarkProgress(
+            Model: model,
+            Phase: phase,
+            Detail: detail,
+            CompletedFixtureCount: completedFixtureCount,
+            TotalFixtureCount: totalFixtureCount,
+            CurrentFixtureNumber: currentFixtureNumber,
+            CurrentFixtureId: fixture?.FixtureId,
+            CurrentFixtureDisplayName: fixture?.DisplayName,
+            CurrentPromptId: fixture?.PromptId,
+            Diagnostics: diagnostics));
+    }
 
     private static double NormalizeSpeed(double? decodeTokensPerSecond)
     {
@@ -196,12 +272,19 @@ public sealed class OllamaModelBenchmarkService(
         return Math.Clamp(decodeTokensPerSecond.Value / SpeedNormalizationCeilingTokensPerSecond, 0.0, 1.0);
     }
 
+    private static string ValidateJsonCandidate(string content)
+    {
+        using var _ = JsonDocument.Parse(content);
+        return content;
+    }
+
     private static ModelBenchmarkResult Failed(
         string model,
         string reason,
         TimeSpan? totalDuration = null,
         OllamaCapacityVerdict? verdict = null,
-        IReadOnlyList<string>? notes = null)
+        IReadOnlyList<string>? notes = null,
+        ModelBenchmarkDiagnostics? diagnostics = null)
         => new(
             Model: model,
             Rank: 0,
@@ -212,7 +295,19 @@ public sealed class OllamaModelBenchmarkService(
             TotalDuration: totalDuration,
             Fit: verdict?.Fit ?? OllamaCapacityFit.Unknown,
             Notes: CombineNotes(verdict?.Notes, notes),
-            FailedReason: reason);
+            FailedReason: reason)
+        {
+            Diagnostics = diagnostics ?? ModelBenchmarkDiagnostics.Empty
+        };
+
+    private static string BuildRuntimePathSummary(OllamaCapacityVerdict verdict)
+        => verdict switch
+        {
+            { VramBytes: 0, ResidentSizeBytes: > 0 } => "Warm-up executed on CPU only.",
+            { GpuOffloadRatio: >= 1.0 } => "Warm-up reported full GPU residency.",
+            { GpuOffloadRatio: > 0 and < 1.0 } => $"Warm-up reported partial GPU residency ({verdict.GpuOffloadRatio.Value * 100:0}% on GPU).",
+            _ => "Warm-up completed without residency telemetry from the runtime."
+        };
 
     private static (string Reason, IReadOnlyList<string> Notes) ClassifyFailure(Exception exception, string fallbackPrefix)
         => exception is FoundryRuntimeException foundryException

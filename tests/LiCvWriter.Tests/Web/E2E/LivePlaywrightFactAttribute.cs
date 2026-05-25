@@ -2,9 +2,9 @@ namespace LiCvWriter.Tests.Web.E2E;
 
 public sealed class LivePlaywrightFactAttribute : FactAttribute
 {
-    public LivePlaywrightFactAttribute()
+    public LivePlaywrightFactAttribute(int timeoutMilliseconds = 900_000)
     {
-        Timeout = 900_000;
+        Timeout = timeoutMilliseconds;
 
         if (!IsEnabled)
         {

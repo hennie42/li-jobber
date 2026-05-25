@@ -10,4 +10,6 @@ public sealed record FoundryCatalogModel(
     int? FileSizeMb,
     bool IsCached,
     bool IsLoaded,
-    string? Description = null);
+    string? Description = null,
+    bool IsTextBenchmarkUsable = true,
+    string? TextBenchmarkUnusableReason = null);

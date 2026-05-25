@@ -18,6 +18,13 @@ public sealed class ModelBenchmarkCoordinatorTests
         MaxOperationSeconds = 0
     };
 
+    private static readonly ModelBenchmarkHangClockPolicy DefaultHangClockPolicy = ModelBenchmarkHangClockPolicy.Default;
+
+    private static readonly ModelBenchmarkHangClockPolicy FastHangClockPolicy = new(
+        WarningAfter: TimeSpan.FromMilliseconds(120),
+        GracePeriod: TimeSpan.FromMilliseconds(160),
+        PollInterval: TimeSpan.FromMilliseconds(20));
+
     [Fact]
     public async Task StartAsync_RanksMultipleModels_DescendingByOverallScore()
     {
@@ -152,6 +159,187 @@ public sealed class ModelBenchmarkCoordinatorTests
 
         releaseSlowModel.SetResult();
         await runTask;
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenModelStopsMakingProgress_WarnsFailsModelAndContinuesQueue()
+    {
+        var blockedModel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var llmClient = new SelectivelyGatedLlmClient(
+            blockedModel.Task,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "hung" },
+            BuildPerfectResponses("hung"),
+            BuildPerfectResponses("healthy"));
+        var (coordinator, _) = BuildCoordinator(llmClient, hangClockPolicy: FastHangClockPolicy);
+        var warningPublished = new TaskCompletionSource<ModelBenchmarkSession>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { IsRunning: true, CurrentModel: "hung", HangState: ModelBenchmarkHangState.Warning } current)
+            {
+                warningPublished.TrySetResult(current);
+            }
+        };
+
+        var runTask = coordinator.StartAsync(["hung", "healthy"]);
+        var warningSession = await warningPublished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await runTask;
+
+        Assert.Equal(ModelBenchmarkHangState.Warning, warningSession.HangState);
+        Assert.Contains("No benchmark progress detected", warningSession.HangDetail, StringComparison.Ordinal);
+
+        var session = coordinator.Last!;
+        var hungResult = session.Results.Single(result => result.Model == "hung");
+        var healthyResult = session.Results.Single(result => result.Model == "healthy");
+
+        Assert.False(session.IsCancelled);
+        Assert.False(hungResult.Succeeded);
+        Assert.Contains("Benchmark hang detected", hungResult.FailedReason, StringComparison.Ordinal);
+        Assert.True(healthyResult.Succeeded);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenProgressResumesAfterWarning_ClearsWarningAndCompletesModel()
+    {
+        var releaseModel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var llmClient = new SelectivelyGatedLlmClient(
+            releaseModel.Task,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "recovering" },
+            BuildPerfectResponses("recovering"));
+        var (coordinator, _) = BuildCoordinator(llmClient, hangClockPolicy: FastHangClockPolicy);
+        var warningPublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var warningCleared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { IsRunning: true, CurrentModel: "recovering", HangState: ModelBenchmarkHangState.Warning })
+            {
+                warningPublished.TrySetResult();
+            }
+
+            if (warningPublished.Task.IsCompleted
+                && coordinator.Current is { IsRunning: true, CurrentModel: "recovering", HangState: ModelBenchmarkHangState.None, CompletedFixtureCount: > 0 })
+            {
+                warningCleared.TrySetResult();
+            }
+        };
+
+        var runTask = coordinator.StartAsync(["recovering"]);
+        await warningPublished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseModel.SetResult();
+        await warningCleared.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await runTask;
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(ModelBenchmarkHangState.None, coordinator.Last.HangState);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenFoundryDownloadKeepsReportingProgress_DoesNotClassifyRunAsHung()
+    {
+        var foundryCatalogClient = new SlowProgressFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: Array.Empty<string>(), isCached: false),
+            [0.0, 40.0, 80.0, 100.0],
+            TimeSpan.FromMilliseconds(60));
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("phi-foundry"), ["phi-foundry"]);
+        var (coordinator, _) = BuildCoordinator(
+            new ScriptedLlmClient(),
+            foundryBridge,
+            foundryCatalogClient,
+            hangClockPolicy: FastHangClockPolicy);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var session = coordinator.Last!;
+
+        Assert.Single(session.Results);
+        Assert.True(session.Results[0].Succeeded);
+        Assert.Equal(ModelBenchmarkHangState.None, session.HangState);
+        Assert.DoesNotContain(session.Results[0].Notes, note => note.Contains("hang", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenFoundryDownloadExceedsTimeoutBudget_StillBenchmarksAfterDownloadCompletes()
+    {
+        var timedOptions = new OllamaOptions
+        {
+            CapacityWarmupNumPredict = 32,
+            CapacityTooSlowTokensPerSecond = 8.0,
+            CapacityComfortableTokensPerSecond = 25.0,
+            MaxOperationSeconds = 1
+        };
+        var foundryCatalogClient = new SlowProgressFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: Array.Empty<string>(), isCached: false),
+            [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+            TimeSpan.FromMilliseconds(110));
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("phi-foundry"), ["phi-foundry"]);
+        var (coordinator, _) = BuildCoordinator(
+            new ScriptedLlmClient(),
+            foundryBridge,
+            foundryCatalogClient,
+            ollamaOptions: timedOptions,
+            hangClockPolicy: FastHangClockPolicy);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.True(result.Succeeded);
+        Assert.DoesNotContain("Timed out", result.FailedReason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenFixtureStreamsRealInnerProgress_DoesNotClassifyModelAsHung()
+    {
+        var llmClient = new StreamingDelayedLlmClient(
+            completionDelay: TimeSpan.FromMilliseconds(360),
+            progressInterval: TimeSpan.FromMilliseconds(40),
+            BuildPerfectResponses("streaming"));
+        var (coordinator, _) = BuildCoordinator(llmClient, hangClockPolicy: FastHangClockPolicy);
+        var warningObserved = false;
+
+        coordinator.Changed += () =>
+        {
+            if (coordinator.Current is { HangState: ModelBenchmarkHangState.Warning })
+            {
+                warningObserved = true;
+            }
+        };
+
+        await coordinator.StartAsync(["streaming"]);
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.False(warningObserved);
+        Assert.True(result.Succeeded);
+        Assert.Equal(ModelBenchmarkHangState.None, coordinator.Last.HangState);
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenBenchmarkProgressIncludesLlmTelemetry_ForwardsItToOperationStatus()
+    {
+        var llmClient = new TelemetryStreamingLlmClient(BuildPerfectResponses("streaming"));
+        var (coordinator, _, operations) = BuildCoordinatorWithOperations(llmClient);
+
+        await coordinator.StartAsync(["streaming"]);
+
+        var telemetry = operations.LastCompletedLlmTelemetry;
+        Assert.NotNull(telemetry);
+        Assert.Equal("streaming", telemetry!.Model);
+        Assert.Equal(50, telemetry.PromptTokens);
+        Assert.Equal(30, telemetry.CompletionTokens);
+        Assert.Contains("synthetic reasoning", telemetry.ThinkingContent, StringComparison.Ordinal);
+        Assert.Contains("detectedTechnologies", telemetry.ResponseContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -334,7 +522,11 @@ public sealed class ModelBenchmarkCoordinatorTests
             PreferredExecutionProviders = ["cuda"]
         };
 
-        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient, foundryOptions);
+        var (coordinator, _) = BuildCoordinator(
+            new ScriptedLlmClient(),
+            foundryBridge,
+            foundryCatalogClient,
+            foundryOptions: foundryOptions);
 
         await coordinator.StartAsync(
             LlmProviderKind.Foundry,
@@ -348,6 +540,200 @@ public sealed class ModelBenchmarkCoordinatorTests
         Assert.True(registerIndex >= 0, "Expected Foundry execution providers to be registered before benchmark.");
         Assert.True(benchmarkIndex > registerIndex, "Expected provider registration to happen before Foundry generation.");
         Assert.DoesNotContain(coordinator.Last!.Results.Single().Notes, note => note.Contains("Foundry acceleration during benchmark", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_CapturesPreparationAndRuntimeDiagnostics()
+    {
+        var degradedAcceleration = new FoundryAccelerationSnapshot(
+            IsSupported: true,
+            IsEnabled: true,
+            CanManageExecutionProviders: true,
+            StatusMessage: "Foundry Local discovered 1 Windows ML execution provider(s), but none are registered yet.",
+            ExecutionProviders:
+            [
+                new FoundryExecutionProviderInfo("cuda", "CUDA", false)
+            ],
+            CollectedAtUtc: DateTimeOffset.UtcNow);
+        var readyAcceleration = new FoundryAccelerationSnapshot(
+            IsSupported: true,
+            IsEnabled: true,
+            CanManageExecutionProviders: true,
+            StatusMessage: "Foundry Local reports all 1 Windows ML execution provider(s) registered.",
+            ExecutionProviders:
+            [
+                new FoundryExecutionProviderInfo("cuda", "CUDA", true)
+            ],
+            CollectedAtUtc: DateTimeOffset.UtcNow);
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: ["phi-foundry"], isCached: true, acceleration: degradedAcceleration),
+            registeredAcceleration: readyAcceleration);
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("phi-foundry"), ["phi-foundry"]);
+        var foundryOptions = new FoundryOptions
+        {
+            DefaultModelAlias = "phi-foundry",
+            UseWindowsMlAcceleration = true,
+            PreferredExecutionProviders = ["cuda"]
+        };
+        var (coordinator, _) = BuildCoordinator(
+            new ScriptedLlmClient(),
+            foundryBridge,
+            foundryCatalogClient,
+            foundryOptions: foundryOptions);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.NotNull(result.Diagnostics.PreparationDuration);
+        Assert.NotNull(result.Diagnostics.WarmupDuration);
+        Assert.NotNull(result.Diagnostics.EvaluationDuration);
+        Assert.NotNull(result.Diagnostics.CleanupDuration);
+        Assert.Equal(FoundryAccelerationReadiness.Ready.ToString(), result.Diagnostics.AccelerationReadiness);
+        Assert.Contains("CUDA", result.Diagnostics.RuntimePathSummary ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("registered", result.Diagnostics.AccelerationStatusMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_RefreshesWorkspaceAvailabilityBeforeBenchmarkGeneration()
+    {
+        var uncachedSnapshot = CreateFoundrySnapshot(cachedModels: Array.Empty<string>(), isCached: false);
+        var cachedSnapshot = CreateFoundrySnapshot(cachedModels: ["phi-foundry"], isCached: true);
+        WorkspaceSession? workspace = null;
+        var foundryBridge = new ScriptedFoundrySdkBridge(
+            BuildPerfectResponses("phi-foundry"),
+            ["phi-foundry"],
+            onGenerate: (_, _) =>
+            {
+                Assert.NotNull(workspace);
+                Assert.Contains("phi-foundry", workspace!.FoundryAvailability?.AvailableModels ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            });
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            uncachedSnapshot,
+            snapshotAfterDownload: cachedSnapshot);
+
+        var buildResult = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+        var coordinator = buildResult.coordinator;
+        workspace = buildResult.workspace;
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["phi-foundry"],
+            downloadMissingModels: true,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        Assert.Contains("phi-foundry", workspace.FoundryAvailability?.AvailableModels ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_UnloadsCompletedModelBeforeBenchmarkingNextModel()
+    {
+        var callSequence = new List<string>();
+        var foundryBridge = new ScriptedFoundrySdkBridge(
+            [.. BuildPerfectResponses("deepseek-r1-14b"), .. BuildPerfectResponses("deepseek-r1-7b")],
+            ["deepseek-r1-14b", "deepseek-r1-7b"],
+            onGenerate: (model, invocation) =>
+            {
+                callSequence.Add($"generate:{model}:{invocation}");
+            });
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            CreateFoundrySnapshot(cachedModels: ["deepseek-r1-14b", "deepseek-r1-7b"], isCached: true),
+            onUnload: alias => callSequence.Add($"unload:{alias}"));
+        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["deepseek-r1-14b", "deepseek-r1-7b"],
+            downloadMissingModels: false,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var unloadIndex = callSequence.IndexOf("unload:deepseek-r1-14b");
+        var nextModelGenerateIndex = callSequence.FindIndex(entry => entry.StartsWith("generate:deepseek-r1-7b:", StringComparison.Ordinal));
+
+        Assert.True(unloadIndex >= 0, "Expected the completed Foundry model to be unloaded during cleanup.");
+        Assert.True(nextModelGenerateIndex > unloadIndex, "Expected Foundry cleanup to unload the completed model before the next model starts generating.");
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_WhenEarlierModelStillLoaded_UnloadsItBeforeBenchmarkStarts()
+    {
+        var callSequence = new List<string>();
+        var snapshot = CreateFoundrySnapshot(cachedModels: ["deepseek-r1-7b"], isCached: true) with
+        {
+            Availability = CreateFoundrySnapshot(cachedModels: ["deepseek-r1-7b"], isCached: true).Availability with
+            {
+                RunningModels =
+                [
+                    new LlmRunningModel(
+                        "deepseek-r1-14b",
+                        "deepseek-r1-14b",
+                        null,
+                        SizeVramBytes: 4_000_000_000,
+                        SizeBytes: 16_000_000_000,
+                        Provider: LlmProviderKind.Foundry)
+                ]
+            }
+        };
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("deepseek-r1-7b"), ["deepseek-r1-7b"], onGenerate: (model, invocation) => callSequence.Add($"generate:{model}:{invocation}"));
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            snapshot,
+            onUnload: alias => callSequence.Add($"unload:{alias}"));
+        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["deepseek-r1-7b"],
+            downloadMissingModels: false,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var preloadUnloadIndex = callSequence.IndexOf("unload:deepseek-r1-14b");
+        var generateIndex = callSequence.FindIndex(entry => entry.StartsWith("generate:deepseek-r1-7b:", StringComparison.Ordinal));
+
+        Assert.True(preloadUnloadIndex >= 0, "Expected stale Foundry runtime state to be unloaded before the benchmark starts.");
+        Assert.True(generateIndex > preloadUnloadIndex, "Expected the benchmarked model to start only after stale Foundry models were unloaded.");
+    }
+
+    [Fact]
+    public async Task StartAsync_FoundryRun_WhenIsolationUnloadFails_AddsNoteAndContinuesBenchmark()
+    {
+        var snapshot = CreateFoundrySnapshot(cachedModels: ["deepseek-r1-7b"], isCached: true) with
+        {
+            Availability = CreateFoundrySnapshot(cachedModels: ["deepseek-r1-7b"], isCached: true).Availability with
+            {
+                RunningModels =
+                [
+                    new LlmRunningModel(
+                        "deepseek-r1-14b",
+                        "deepseek-r1-14b",
+                        null,
+                        SizeVramBytes: 4_000_000_000,
+                        SizeBytes: 16_000_000_000,
+                        Provider: LlmProviderKind.Foundry)
+                ]
+            }
+        };
+        var foundryBridge = new ScriptedFoundrySdkBridge(BuildPerfectResponses("deepseek-r1-7b"), ["deepseek-r1-7b"]);
+        var foundryCatalogClient = new RecordingFoundryCatalogClient(
+            snapshot,
+            unloadExceptionFactory: alias => alias.Equals("deepseek-r1-14b", StringComparison.OrdinalIgnoreCase)
+                ? new InvalidOperationException("stale unload failed")
+                : null);
+        var (coordinator, _) = BuildCoordinator(new ScriptedLlmClient(), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(
+            LlmProviderKind.Foundry,
+            ["deepseek-r1-7b"],
+            downloadMissingModels: false,
+            removeTooLargeModelsAfterBenchmark: false);
+
+        var result = coordinator.Last!.Results.Single();
+
+        Assert.True(result.Succeeded);
+        Assert.Contains(result.Notes, note => note.Contains("previously loaded model 'deepseek-r1-14b'", StringComparison.Ordinal));
     }
 
     private static FoundryCatalogSnapshot CreateFoundrySnapshot(
@@ -370,12 +756,36 @@ public sealed class ModelBenchmarkCoordinatorTests
         ILlmClient llmClient,
         IFoundrySdkBridge? foundryBridge = null,
         IFoundryCatalogClient? foundryCatalogClient = null,
-        FoundryOptions? foundryOptions = null)
+        OllamaOptions? ollamaOptions = null,
+        FoundryOptions? foundryOptions = null,
+        ModelBenchmarkHangClockPolicy? hangClockPolicy = null)
     {
+        var (coordinator, workspace, _) = BuildCoordinatorWithOperations(
+            llmClient,
+            foundryBridge,
+            foundryCatalogClient,
+            ollamaOptions,
+            foundryOptions,
+            hangClockPolicy);
+
+        return (coordinator, workspace);
+    }
+
+    private static (ModelBenchmarkCoordinator coordinator, WorkspaceSession workspace, OperationStatusService operations) BuildCoordinatorWithOperations(
+        ILlmClient llmClient,
+        IFoundrySdkBridge? foundryBridge = null,
+        IFoundryCatalogClient? foundryCatalogClient = null,
+        OllamaOptions? ollamaOptions = null,
+        FoundryOptions? foundryOptions = null,
+        ModelBenchmarkHangClockPolicy? hangClockPolicy = null)
+    {
+        var resolvedOllamaOptions = ollamaOptions ?? Options;
         var resolvedFoundryOptions = foundryOptions ?? new FoundryOptions();
+        var resolvedHangClockPolicy = hangClockPolicy ?? DefaultHangClockPolicy;
         var services = new ServiceCollection();
-        services.AddSingleton(Options);
+        services.AddSingleton(resolvedOllamaOptions);
         services.AddSingleton(resolvedFoundryOptions);
+        services.AddSingleton(resolvedHangClockPolicy);
         services.AddSingleton(llmClient);
         services.AddSingleton<IFoundrySdkBridge>(foundryBridge ?? new ScriptedFoundrySdkBridge(Array.Empty<LlmResponse>(), Array.Empty<string>()));
         services.AddSingleton<IFoundryCatalogClient>(foundryCatalogClient ?? new ScriptedFoundryCatalogClient(
@@ -391,23 +801,25 @@ public sealed class ModelBenchmarkCoordinatorTests
                 FoundryAccelerationSnapshot.Unsupported("Not available"),
                 DateTimeOffset.UtcNow)));
         services.AddScoped<FoundryLlmClient>();
-        services.AddScoped<OllamaCapacityProbe>(sp => new OllamaCapacityProbe(sp.GetRequiredService<ILlmClient>(), Options));
+        services.AddScoped<OllamaCapacityProbe>(sp => new OllamaCapacityProbe(sp.GetRequiredService<ILlmClient>(), resolvedOllamaOptions));
         services.AddScoped<OllamaModelBenchmarkService>(sp => new OllamaModelBenchmarkService(
             sp.GetRequiredService<OllamaCapacityProbe>(),
             sp.GetRequiredService<ILlmClient>(),
-            Options));
+            resolvedOllamaOptions));
         var provider = services.BuildServiceProvider();
 
-        var workspace = new WorkspaceSession(Options, recoveryStore: null, foundryOptions: resolvedFoundryOptions);
+        var workspace = new WorkspaceSession(resolvedOllamaOptions, recoveryStore: null, foundryOptions: resolvedFoundryOptions);
+        var operations = new OperationStatusService();
         var coordinator = new ModelBenchmarkCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             workspace,
-            new OperationStatusService(),
-            Options,
+            operations,
+            resolvedOllamaOptions,
             resolvedFoundryOptions,
-            TimeProvider.System);
+            TimeProvider.System,
+            resolvedHangClockPolicy);
 
-        return (coordinator, workspace);
+        return (coordinator, workspace, operations);
     }
 
     private static LlmResponse[] BuildPerfectResponses(string model, double evalSeconds = 1.0)
@@ -585,6 +997,9 @@ public sealed class ModelBenchmarkCoordinatorTests
         public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public Task UnloadModelAsync(string alias, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
@@ -625,6 +1040,9 @@ public sealed class ModelBenchmarkCoordinatorTests
         public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task UnloadModelAsync(string alias, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
@@ -632,15 +1050,19 @@ public sealed class ModelBenchmarkCoordinatorTests
     private sealed class RecordingFoundryCatalogClient(
         FoundryCatalogSnapshot snapshot,
         FoundryAccelerationSnapshot? registeredAcceleration = null,
+        FoundryCatalogSnapshot? snapshotAfterDownload = null,
         Action<IReadOnlyList<string>?>? onRegister = null,
         Action<string>? onDownload = null,
+        Action<string>? onUnload = null,
         Action<string>? onRemove = null,
-        Exception? removeException = null) : IFoundryCatalogClient
+        Exception? removeException = null,
+        Func<string, Exception?>? unloadExceptionFactory = null) : IFoundryCatalogClient
     {
+        private FoundryCatalogSnapshot currentSnapshot = snapshot;
         private FoundryAccelerationSnapshot currentAcceleration = snapshot.Acceleration;
 
         public Task<FoundryCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(snapshot with { Acceleration = currentAcceleration, CollectedAtUtc = DateTimeOffset.UtcNow });
+            => Task.FromResult(currentSnapshot with { Acceleration = currentAcceleration, CollectedAtUtc = DateTimeOffset.UtcNow });
 
         public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
         {
@@ -653,7 +1075,37 @@ public sealed class ModelBenchmarkCoordinatorTests
         public Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
         {
             onDownload?.Invoke(alias);
+            currentSnapshot = snapshotAfterDownload ?? currentSnapshot;
             progress?.Invoke(100.0);
+            return Task.CompletedTask;
+        }
+
+        public Task UnloadModelAsync(string alias, CancellationToken cancellationToken = default)
+        {
+            onUnload?.Invoke(alias);
+            var unloadException = unloadExceptionFactory?.Invoke(alias);
+            if (unloadException is not null)
+            {
+                return Task.FromException(unloadException);
+            }
+
+            var runningModels = currentSnapshot.Availability.RunningModels ?? Array.Empty<LlmRunningModel>();
+            currentSnapshot = currentSnapshot with
+            {
+                Availability = currentSnapshot.Availability with
+                {
+                    RunningModels = runningModels
+                        .Where(model => !model.Name.Equals(alias, StringComparison.OrdinalIgnoreCase)
+                            && !model.Model.Equals(alias, StringComparison.OrdinalIgnoreCase))
+                        .ToArray()
+                },
+                Models = currentSnapshot.Models
+                    .Select(model => model.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase)
+                        ? model with { IsLoaded = false }
+                        : model)
+                    .ToArray(),
+                CollectedAtUtc = DateTimeOffset.UtcNow
+            };
             return Task.CompletedTask;
         }
 
@@ -663,6 +1115,157 @@ public sealed class ModelBenchmarkCoordinatorTests
             return removeException is null
                 ? Task.CompletedTask
                 : Task.FromException(removeException);
+        }
+    }
+
+    private sealed class SlowProgressFoundryCatalogClient(
+        FoundryCatalogSnapshot snapshot,
+        IReadOnlyList<double> progressSamples,
+        TimeSpan delayBetweenSamples) : IFoundryCatalogClient
+    {
+        public Task<FoundryCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot);
+
+        public Task<FoundryAccelerationSnapshot> RegisterExecutionProvidersAsync(IReadOnlyList<string>? names = null, Action<string, double>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(snapshot.Acceleration);
+
+        public async Task DownloadModelAsync(string alias, Action<double>? progress = null, CancellationToken cancellationToken = default)
+        {
+            foreach (var sample in progressSamples)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Invoke(sample);
+                await Task.Delay(delayBetweenSamples, cancellationToken);
+            }
+        }
+
+        public Task UnloadModelAsync(string alias, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task RemoveModelAsync(string alias, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class StreamingDelayedLlmClient(
+        TimeSpan completionDelay,
+        TimeSpan progressInterval,
+        params LlmResponse[][] perModelResponses) : ILlmClient
+    {
+        private readonly Dictionary<string, Queue<LlmResponse>> queues = perModelResponses
+            .Where(static batch => batch.Length > 0)
+            .ToDictionary(
+                batch => batch[0].Model,
+                batch => new Queue<LlmResponse>(batch),
+                StringComparer.OrdinalIgnoreCase);
+
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
+                Version: "0.0.0",
+                Model: string.Empty,
+                Installed: true,
+                AvailableModels: Array.Empty<string>(),
+                RunningModels: queues.Keys
+                    .Select(static name => new LlmRunningModel(name, name, null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000))
+                    .ToArray()));
+
+        public async Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!queues.TryGetValue(request.Model, out var queue) || queue.Count == 0)
+            {
+                throw new InvalidOperationException($"No scripted response for model '{request.Model}'.");
+            }
+
+            if (progress is not null)
+            {
+                var startedAt = DateTimeOffset.UtcNow;
+                long sequence = 0;
+                var emittedChars = 0;
+                while (DateTimeOffset.UtcNow - startedAt < completionDelay)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    emittedChars += 24;
+                    progress(new LlmProgressUpdate(
+                        Message: "Generating response",
+                        Detail: $"Synthetic stream update {sequence + 1}.",
+                        Model: request.Model,
+                        Elapsed: DateTimeOffset.UtcNow - startedAt,
+                        Completed: false,
+                        ResponseContent: new string('x', emittedChars),
+                        Sequence: ++sequence));
+                    await Task.Delay(progressInterval, cancellationToken);
+                }
+            }
+
+            return queue.Dequeue();
+        }
+
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+    }
+
+    private sealed class TelemetryStreamingLlmClient(params LlmResponse[][] perModelResponses) : ILlmClient
+    {
+        private readonly Dictionary<string, Queue<LlmResponse>> queues = perModelResponses
+            .Where(static batch => batch.Length > 0)
+            .ToDictionary(
+                batch => batch[0].Model,
+                batch => new Queue<LlmResponse>(batch),
+                StringComparer.OrdinalIgnoreCase);
+
+        public Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new LlmModelAvailability(
+                Version: "0.0.0",
+                Model: string.Empty,
+                Installed: true,
+                AvailableModels: Array.Empty<string>(),
+                RunningModels: queues.Keys
+                    .Select(static name => new LlmRunningModel(name, name, null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000))
+                    .ToArray()));
+
+        public Task<LlmModelInfo?> GetModelInfoAsync(string model, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmModelInfo?>(null);
+
+        public Task<LlmResponse> GenerateAsync(LlmRequest request, Action<LlmProgressUpdate>? progress = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!queues.TryGetValue(request.Model, out var queue) || queue.Count == 0)
+            {
+                throw new InvalidOperationException($"No scripted response for model '{request.Model}'.");
+            }
+
+            var response = queue.Dequeue();
+            var thinkingContent = $"synthetic reasoning for {request.Model}";
+            var partialResponse = response.Content.Length <= 24 ? response.Content : response.Content[..24];
+
+            progress?.Invoke(new LlmProgressUpdate(
+                Message: "Generating response",
+                Detail: "Synthetic stream update 1.",
+                Model: request.Model,
+                Elapsed: TimeSpan.FromMilliseconds(250),
+                Completed: false,
+                PromptTokens: response.PromptTokens,
+                ResponseContent: partialResponse,
+                ThinkingPreview: thinkingContent,
+                ThinkingContent: thinkingContent,
+                Sequence: 1));
+
+            progress?.Invoke(new LlmProgressUpdate(
+                Message: "Generating response",
+                Detail: "Synthetic stream completed.",
+                Model: request.Model,
+                Elapsed: response.Duration,
+                Completed: true,
+                PromptTokens: response.PromptTokens,
+                CompletionTokens: response.CompletionTokens,
+                ResponseContent: response.Content,
+                ThinkingPreview: thinkingContent,
+                ThinkingContent: thinkingContent,
+                Sequence: 2));
+
+            return Task.FromResult(response with { Thinking = thinkingContent });
         }
     }
 }

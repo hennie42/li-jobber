@@ -19,6 +19,10 @@ public interface IFoundrySdkBridge
         Action<double>? progress = null,
         CancellationToken cancellationToken = default);
 
+    Task UnloadModelAsync(
+        string alias,
+        CancellationToken cancellationToken = default);
+
     Task RemoveModelAsync(
         string alias,
         CancellationToken cancellationToken = default);

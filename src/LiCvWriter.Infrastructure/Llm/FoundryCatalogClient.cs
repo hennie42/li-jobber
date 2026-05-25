@@ -23,6 +23,11 @@ public sealed class FoundryCatalogClient(IFoundrySdkBridge bridge) : IFoundryCat
         CancellationToken cancellationToken = default)
         => await bridge.DownloadModelAsync(alias, progress, cancellationToken);
 
+    public async Task UnloadModelAsync(
+        string alias,
+        CancellationToken cancellationToken = default)
+        => await bridge.UnloadModelAsync(alias, cancellationToken);
+
     public async Task RemoveModelAsync(
         string alias,
         CancellationToken cancellationToken = default)

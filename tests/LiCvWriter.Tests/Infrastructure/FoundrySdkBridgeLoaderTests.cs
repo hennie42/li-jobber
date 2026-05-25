@@ -60,6 +60,11 @@ public sealed class FoundrySdkBridgeLoaderTests
             CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task UnloadModelAsync(
+            string alias,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task RemoveModelAsync(
             string alias,
             CancellationToken cancellationToken = default)
