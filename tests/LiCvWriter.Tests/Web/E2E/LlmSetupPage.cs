@@ -28,7 +28,7 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
 
     public ILocator CancelBenchmarkButton => page.GetByRole(AriaRole.Button, new() { Name = "Cancel benchmark" });
 
-    public ILocator BenchmarkSnapshotHeading => page.GetByText("Benchmark snapshot");
+    public ILocator BenchmarkSnapshotHeading => page.GetByText("Benchmark results");
 
     public ILocator ReasoningMonitor => page.Locator(".sidebar-crt-screen").First;
 
@@ -186,6 +186,9 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
                 Timeout = resolvedTimeout
             });
     }
+
+    public async Task<string> GetReasoningMonitorTextAsync()
+        => FlattenWhitespace(await ReasoningMonitor.InnerTextAsync());
 
     public async Task WaitForActivityMonitorTelemetryAsync(string modelAlias, TimeSpan? timeout = null)
     {

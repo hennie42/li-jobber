@@ -17,6 +17,9 @@ namespace LiCvWriter.Infrastructure.Llm;
 /// </summary>
 public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerAccessor, FoundryOptions options) : IFoundrySdkBridge
 {
+    private const int FoundryContentRepetitionMinLength = 240;
+    private const int FoundryThinkingRepetitionMinLength = 120;
+
     public async Task<FoundryCatalogSnapshot> GetCatalogSnapshotAsync(CancellationToken cancellationToken = default)
     {
         var manager = await managerAccessor.GetManagerAsync(cancellationToken);
@@ -518,6 +521,20 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
         await foreach (var chunk in chatClient.CompleteChatStreamingAsync(messages, cancellationToken))
         {
             FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+
+            if (StreamingRepetitionDetector.DetectRepetitionLoop(thinkingBuffer, FoundryThinkingRepetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Foundry thinking output entered a repetition loop after {thinkingBuffer.Length} characters. " +
+                    "The model may need a less reasoning-heavy prompt or a lower thinking setting.");
+            }
+
+            if (StreamingRepetitionDetector.DetectRepetitionLoop(responseBuffer, FoundryContentRepetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Foundry content output entered a repetition loop after {responseBuffer.Length} characters. " +
+                    "The model may need a more constrained prompt or lower temperature.");
+            }
 
             var responseContent = responseBuffer.ToString();
             var thinkingContent = thinkingBuffer.Length == 0 ? null : thinkingBuffer.ToString();

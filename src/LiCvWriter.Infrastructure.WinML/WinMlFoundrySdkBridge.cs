@@ -16,6 +16,8 @@ namespace LiCvWriter.Infrastructure.WinML;
 
 internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySdkBridge, IDisposable
 {
+    private const int FoundryContentRepetitionMinLength = 240;
+    private const int FoundryThinkingRepetitionMinLength = 120;
     private readonly WinMlFoundryLocalManagerAccessor managerAccessor = new(options);
 
     public async Task<FoundryCatalogSnapshot> GetCatalogSnapshotAsync(CancellationToken cancellationToken = default)
@@ -558,6 +560,20 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         await foreach (var chunk in chatClient.CompleteChatStreamingAsync(messages, cancellationToken))
         {
             FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens);
+
+            if (StreamingRepetitionDetector.DetectRepetitionLoop(thinkingBuffer, FoundryThinkingRepetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Foundry thinking output entered a repetition loop after {thinkingBuffer.Length} characters. " +
+                    "The model may need a less reasoning-heavy prompt or a lower thinking setting.");
+            }
+
+            if (StreamingRepetitionDetector.DetectRepetitionLoop(responseBuffer, FoundryContentRepetitionMinLength))
+            {
+                throw new TimeoutException(
+                    $"Foundry content output entered a repetition loop after {responseBuffer.Length} characters. " +
+                    "The model may need a more constrained prompt or lower temperature.");
+            }
 
             var responseContent = responseBuffer.ToString();
             var thinkingContent = thinkingBuffer.Length == 0 ? null : thinkingBuffer.ToString();

@@ -5,6 +5,8 @@ namespace LiCvWriter.Tests.Web.E2E;
 
 public sealed class LlmReasoningMonitorE2ETests(PlaywrightAppFixture fixture) : IClassFixture<PlaywrightAppFixture>
 {
+    private static readonly string[] Phi4Aliases = ["phi-4", "phi-4-reasoning"];
+
     private static readonly string[] PreferredReasoningAliases =
     [
         "phi-4-reasoning",
@@ -53,6 +55,58 @@ public sealed class LlmReasoningMonitorE2ETests(PlaywrightAppFixture fixture) : 
         }
     }
 
+    [LivePlaywrightFact(1_800_000)]
+    public async Task RunSingleFoundryBenchmark_WhenPhi4AliasesAreVisible_DoesNotLeavePathologicalRepetitionInReasoningMonitor()
+    {
+        var probeContext = await fixture.CreateContextAsync(recordVideo: false);
+        try
+        {
+            var probePage = await probeContext.NewPageAsync();
+            var probeSetupPage = new LlmSetupPage(probePage, fixture.BaseUrl);
+
+            await RunWithTimeoutAsync("open llm setup", probeSetupPage.GotoAsync, TimeSpan.FromMinutes(2));
+            await RunWithTimeoutAsync("load foundry catalog", probeSetupPage.SelectFoundryProviderAsync, TimeSpan.FromMinutes(3));
+
+            var visibleAliases = await probeSetupPage.GetVisibleAliasesAsync();
+            var targets = Phi4Aliases.Where(alias => visibleAliases.Contains(alias, StringComparer.OrdinalIgnoreCase)).ToArray();
+            if (targets.Length == 0)
+            {
+                return;
+            }
+
+            foreach (var targetAlias in targets)
+            {
+                var context = await fixture.CreateContextAsync(recordVideo: false);
+                try
+                {
+                    var page = await context.NewPageAsync();
+                    var setupPage = new LlmSetupPage(page, fixture.BaseUrl);
+
+                    await RunWithTimeoutAsync($"open llm setup for {targetAlias}", setupPage.GotoAsync, TimeSpan.FromMinutes(2));
+                    await RunWithTimeoutAsync($"load foundry catalog for {targetAlias}", setupPage.SelectFoundryProviderAsync, TimeSpan.FromMinutes(3));
+                    await RunWithTimeoutAsync($"clear prior model selection for {targetAlias}", setupPage.ClearSelectedModelsAsync, TimeSpan.FromMinutes(1));
+                    await RunWithTimeoutAsync($"select {targetAlias}", () => setupPage.SelectFoundryModelAsync(targetAlias), TimeSpan.FromMinutes(2));
+                    await RunWithTimeoutAsync($"verify single selected model for {targetAlias}", () => setupPage.WaitForSelectedModelCountAsync(1, TimeSpan.FromMinutes(1)), TimeSpan.FromMinutes(2));
+                    await RunWithTimeoutAsync($"start reasoning benchmark for {targetAlias}", setupPage.StartBenchmarkAsync, TimeSpan.FromMinutes(1));
+                    await RunWithTimeoutAsync($"show activity monitor telemetry for {targetAlias}", () => setupPage.WaitForActivityMonitorTelemetryAsync(targetAlias, TimeSpan.FromMinutes(8)), TimeSpan.FromMinutes(9));
+                    await RunWithTimeoutAsync($"show reasoning monitor text for {targetAlias}", () => setupPage.WaitForReasoningMonitorToShowCapturedTextAsync(TimeSpan.FromMinutes(8)), TimeSpan.FromMinutes(9));
+                    await RunWithTimeoutAsync(
+                        $"observe reasoning monitor stability for {targetAlias}",
+                        () => AssertReasoningMonitorStaysStableAsync(page, setupPage, targetAlias),
+                        TimeSpan.FromMinutes(3));
+                }
+                finally
+                {
+                    await context.CloseAsync();
+                }
+            }
+        }
+        finally
+        {
+            await probeContext.CloseAsync();
+        }
+    }
+
     private static string SelectReasoningAlias(IReadOnlyList<string> visibleAliases)
     {
         var preferredMatch = PreferredReasoningAliases.FirstOrDefault(alias => visibleAliases.Contains(alias, StringComparer.OrdinalIgnoreCase));
@@ -85,5 +139,73 @@ public sealed class LlmReasoningMonitorE2ETests(PlaywrightAppFixture fixture) : 
         {
             throw new TimeoutException($"Playwright reasoning-monitor stage '{stage}' exceeded {timeout}.", exception);
         }
+    }
+
+    private async Task AssertReasoningMonitorStaysStableAsync(IPage page, LlmSetupPage setupPage, string targetAlias)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1);
+        string latestReasoningText = string.Empty;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            latestReasoningText = await setupPage.GetReasoningMonitorTextAsync();
+            if (ContainsPathologicalRepetition(latestReasoningText, out var repeatedFragment))
+            {
+                throw new XunitException(
+                    $"Reasoning monitor showed pathological repetition for {targetAlias}. Fragment: '{repeatedFragment}'.{Environment.NewLine}" +
+                    $"Reasoning monitor: {latestReasoningText}{Environment.NewLine}{Environment.NewLine}" +
+                    $"App output:{Environment.NewLine}{fixture.GetRecentOutput()}");
+            }
+
+            await page.WaitForTimeoutAsync(5_000);
+        }
+    }
+
+    private static bool ContainsPathologicalRepetition(string text, out string repeatedFragment)
+    {
+        repeatedFragment = string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var normalized = string.Join(' ', text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries));
+        var tokens = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 8)
+        {
+            return false;
+        }
+
+        for (var phraseLength = 1; phraseLength <= 3; phraseLength++)
+        {
+            for (var start = 0; start <= tokens.Length - phraseLength * 6; start++)
+            {
+                var phrase = string.Join(' ', tokens.Skip(start).Take(phraseLength));
+                if (phrase.All(static character => !char.IsLetterOrDigit(character)))
+                {
+                    continue;
+                }
+
+                var repeats = 1;
+                while (start + (repeats + 1) * phraseLength <= tokens.Length)
+                {
+                    var candidate = string.Join(' ', tokens.Skip(start + repeats * phraseLength).Take(phraseLength));
+                    if (!candidate.Equals(phrase, StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+
+                    repeats++;
+                }
+
+                if (repeats >= 6)
+                {
+                    repeatedFragment = phrase;
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }
