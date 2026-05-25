@@ -120,7 +120,11 @@
                 {
                     <table class="compact-grid setup-list-table">
                         <thead>
-                            <tr><th></th><th>Model</th><th>Status</th></tr>
+                            <tr>
+                                <th></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Name)">@GetModelInventorySortLabel("Model", ModelInventorySortColumn.Name)</button></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Status)">@GetModelInventorySortLabel("Status", ModelInventorySortColumn.Status)</button></th>
+                            </tr>
                         </thead>
                         <tbody>
                             @foreach (var item in visibleOllamaModels.Select((model, index) => new { model, index }))
@@ -224,7 +228,13 @@
                 {
                     <table class="compact-grid setup-list-table">
                         <thead>
-                            <tr><th></th><th>Model</th><th>Alias</th><th>Size (GB)</th><th>Status</th></tr>
+                            <tr>
+                                <th></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Name)">@GetModelInventorySortLabel("Model", ModelInventorySortColumn.Name)</button></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Alias)">@GetModelInventorySortLabel("Alias", ModelInventorySortColumn.Alias)</button></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Size)">@GetModelInventorySortLabel("Size (GB)", ModelInventorySortColumn.Size)</button></th>
+                                <th><button type="button" class="link-button" @onclick="() => SetModelInventorySort(ModelInventorySortColumn.Status)">@GetModelInventorySortLabel("Status", ModelInventorySortColumn.Status)</button></th>
+                            </tr>
                         </thead>
                         <tbody>
                             @foreach (var item in visibleFoundryModels.Select((model, index) => new { model, index }))
@@ -375,67 +385,26 @@
                 </div>
             }
 
-            @if (liveBenchmark.Results.Count > 0)
-            {
-                <section class="details-card benchmark-summary-shell stack-gap">
-                    <div class="benchmark-live-header">
-                        <div>
-                            <div class="field-label">Live results so far</div>
-                            <h3>@GetBenchmarkLiveResultsHeadline(liveBenchmark)</h3>
-                            <p class="muted-text">@GetBenchmarkLiveResultsDetail(liveBenchmark)</p>
-                        </div>
-                        <div class="status-chip status-pending">
-                            Live benchmark: @FormatProviderLabel(liveBenchmark.Provider) - @liveBenchmark.Results.Count of @liveBenchmark.TotalCount model(s) ranked
-                        </div>
-                    </div>
-                </section>
-
-                <table class="compact-grid setup-list-table">
-                    <thead>
-                            <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Status</th><th>Fit</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var item in liveBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
-                        {
-                            <tr class="@GetSetupListRowClass(item.index)">
-                                <td>@item.benchmarkRow.Rank</td>
-                                <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
-                                <td>
-                                    <strong>@item.benchmarkRow.Model</strong>
-                                    <div class="setup-list-detail benchmark-row-diagnostics">@GetBenchmarkRowDiagnosticsSummary(item.benchmarkRow)</div>
-                                </td>
-                                <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.OverallScore.ToString("0.00") : "-")</td>
-                                <td>@(item.benchmarkRow.Succeeded ? item.benchmarkRow.QualityScore.ToString("0.00") : "-")</td>
-                                <td>@(item.benchmarkRow.DecodeTokensPerSecond is { } tps ? tps.ToString("0.0") : "-")</td>
-                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkStatusLabel(item.benchmarkRow)</td>
-                                <td title="@string.Join(" \u2022 ", item.benchmarkRow.Notes)">@GetBenchmarkFitLabel(item.benchmarkRow)</td>
-                                <td>
-                                    @if (item.benchmarkRow.Succeeded && CanUseBenchmarkedModel(item.benchmarkRow))
-                                    {
-                                        <button class="link-button" @onclick="() => UseBenchmarkedModelAsync(item.benchmarkRow)">Use</button>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            }
         </section>
     }
-    else if (BenchmarkCoordinator.Last is { Results.Count: > 0 } lastBenchmark)
+
+    @{
+        var displayedBenchmarkResults = GetBenchmarkResultsForDisplay();
+        var latestBenchmark = BenchmarkCoordinator.Last ?? Workspace.LastBenchmarkSession;
+        var topBenchmarkResult = GetBestBenchmarkResult(Workspace.BenchmarkResultsHistory);
+    }
+
+    @if (displayedBenchmarkResults.Count > 0)
     {
-        var topBenchmarkResult = GetTopBenchmarkResult(lastBenchmark);
         <section class="details-card benchmark-summary-shell stack-gap">
             <div class="benchmark-live-header">
                 <div>
-                    <div class="field-label">Benchmark snapshot</div>
-                    <h3>@GetBenchmarkSummaryHeadline(lastBenchmark)</h3>
-                    <p class="muted-text">@GetBenchmarkSummaryDetail(lastBenchmark)</p>
+                    <div class="field-label">Benchmark results</div>
+                    <h3>@GetBenchmarkHistoryHeadline(displayedBenchmarkResults)</h3>
+                    <p class="muted-text">@GetBenchmarkHistoryDetail(latestBenchmark, displayedBenchmarkResults)</p>
                 </div>
-                <div class="status-chip @(lastBenchmark.IsCancelled ? "status-pending" : "status-ok")">
-                    Last benchmark: @FormatProviderLabel(lastBenchmark.Provider) - @lastBenchmark.Results.Count model(s)
-                    @(lastBenchmark.IsCancelled ? " (cancelled)" : string.Empty)
-                    - completed @lastBenchmark.CompletedUtc?.LocalDateTime.ToString("g")
+                <div class="status-chip @GetBenchmarkHistoryChipClass(latestBenchmark)">
+                    @GetBenchmarkHistoryChipText(latestBenchmark, displayedBenchmarkResults.Count)
                 </div>
             </div>
 
@@ -465,26 +434,36 @@
 
                 <article class="benchmark-stat-card">
                     <span class="benchmark-live-label">Usable results</span>
-                    <strong>@CountSucceededBenchmarks(lastBenchmark)</strong>
+                    <strong>@CountSucceededBenchmarks(displayedBenchmarkResults)</strong>
                     <div class="benchmark-live-detail">models returned benchmark data without a hard failure.</div>
                 </article>
 
                 <article class="benchmark-stat-card">
                     <span class="benchmark-live-label">Cleanup actions</span>
-                    <strong>@CountRemovedBenchmarkedModels(lastBenchmark)</strong>
-                    <div class="benchmark-live-detail">model(s) removed, @CountCleanupWarningBenchmarks(lastBenchmark) warning(s) preserved in notes.</div>
+                    <strong>@CountRemovedBenchmarkedModels(displayedBenchmarkResults)</strong>
+                    <div class="benchmark-live-detail">model(s) removed, @CountCleanupWarningBenchmarks(displayedBenchmarkResults) warning(s) preserved in notes.</div>
                 </article>
             </div>
         </section>
 
         <table class="compact-grid setup-list-table">
             <thead>
-                <tr><th>#</th><th>Provider</th><th>Model</th><th>Overall</th><th>Quality</th><th>Decode tok/s</th><th>Status</th><th>Fit</th><th></th></tr>
+                <tr>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Rank)">@GetBenchmarkResultsSortLabel("#", BenchmarkResultsSortColumn.Rank)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Provider)">@GetBenchmarkResultsSortLabel("Provider", BenchmarkResultsSortColumn.Provider)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Model)">@GetBenchmarkResultsSortLabel("Model", BenchmarkResultsSortColumn.Model)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Overall)">@GetBenchmarkResultsSortLabel("Overall", BenchmarkResultsSortColumn.Overall)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Quality)">@GetBenchmarkResultsSortLabel("Quality", BenchmarkResultsSortColumn.Quality)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.DecodeSpeed)">@GetBenchmarkResultsSortLabel("Decode tok/s", BenchmarkResultsSortColumn.DecodeSpeed)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Status)">@GetBenchmarkResultsSortLabel("Status", BenchmarkResultsSortColumn.Status)</button></th>
+                    <th><button type="button" class="link-button" @onclick="() => SetBenchmarkResultsSort(BenchmarkResultsSortColumn.Fit)">@GetBenchmarkResultsSortLabel("Fit", BenchmarkResultsSortColumn.Fit)</button></th>
+                    <th></th>
+                </tr>
             </thead>
             <tbody>
-                @foreach (var item in lastBenchmark.Results.Select((benchmarkRow, index) => new { benchmarkRow, index }))
+                @foreach (var item in displayedBenchmarkResults.Select((benchmarkRow, index) => new { benchmarkRow, index }))
                 {
-                    <tr class="@GetSetupListRowClass(item.index)">
+                    <tr @key="GetBenchmarkResultKey(item.benchmarkRow)" class="@GetSetupListRowClass(item.index)">
                         <td>@item.benchmarkRow.Rank</td>
                         <td>@FormatProviderLabel(item.benchmarkRow.Provider)</td>
                         <td>
@@ -540,6 +519,26 @@
     private static readonly string[] ThinkingLevels = ["low", "medium", "high"];
     private static readonly LlmProviderKind[] AvailableLlmProviders = [LlmProviderKind.Ollama, LlmProviderKind.Foundry];
 
+    private enum ModelInventorySortColumn
+    {
+        Name,
+        Status,
+        Alias,
+        Size
+    }
+
+    private enum BenchmarkResultsSortColumn
+    {
+        Rank,
+        Provider,
+        Model,
+        Overall,
+        Quality,
+        DecodeSpeed,
+        Status,
+        Fit
+    }
+
     private readonly HashSet<string> selectedActionModels = new(StringComparer.OrdinalIgnoreCase);
     private bool isCheckingOllama;
     private bool isCheckingFoundry;
@@ -557,6 +556,10 @@
     private string foundryModelFilter = string.Empty;
     private bool isRefreshingLiveFoundrySnapshot;
     private string? lastLiveFoundryRefreshKey;
+    private ModelInventorySortColumn modelInventorySortColumn = ModelInventorySortColumn.Name;
+    private bool modelInventorySortAscending = true;
+    private BenchmarkResultsSortColumn benchmarkResultsSortColumn = BenchmarkResultsSortColumn.Rank;
+    private bool benchmarkResultsSortAscending = true;
 
     private bool CanSaveSessionLlmSettings => !IsModelSelectionBusy
         && GetAvailableSessionModels().Count > 0
@@ -1085,10 +1088,25 @@
             ?? Array.Empty<string>();
 
     private IReadOnlyList<string> GetVisibleOllamaModels()
-        => availability?.AvailableModels
-            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
-            .ToArray()
-            ?? Array.Empty<string>();
+    {
+        if (availability is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var ordered = modelInventorySortColumn switch
+        {
+            ModelInventorySortColumn.Status => ApplyDirection(
+                availability.AvailableModels.OrderBy(model => GetOllamaModelState(availability, model), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending),
+            _ => ApplyDirection(
+                availability.AvailableModels.OrderBy(static model => model, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending)
+        };
+
+        return ordered.ToArray();
+    }
 
     private string GetRefreshInventoryButtonLabel()
         => IsOllamaSelected
@@ -1237,17 +1255,128 @@
             return Array.Empty<FoundryCatalogModel>();
         }
 
-        if (string.IsNullOrWhiteSpace(foundryModelFilter))
+        IEnumerable<FoundryCatalogModel> filtered = foundryCatalog.Models;
+        if (!string.IsNullOrWhiteSpace(foundryModelFilter))
         {
-            return foundryCatalog.Models;
+            var filter = foundryModelFilter.Trim();
+            filtered = filtered.Where(model => model.Alias.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || model.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase));
         }
 
-        var filter = foundryModelFilter.Trim();
-        return foundryCatalog.Models
-            .Where(model => model.Alias.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                || model.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        var ordered = modelInventorySortColumn switch
+        {
+            ModelInventorySortColumn.Status => ApplyDirection(
+                filtered.OrderBy(static model => GetFoundryModelState(model), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model.Alias, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending),
+            ModelInventorySortColumn.Alias => ApplyDirection(
+                filtered.OrderBy(static model => model.Alias, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model.DisplayName, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending),
+            ModelInventorySortColumn.Size => ApplyDirection(
+                filtered.OrderBy(static model => model.FileSizeMb ?? double.MaxValue)
+                    .ThenBy(static model => model.DisplayName, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending),
+            _ => ApplyDirection(
+                filtered.OrderBy(static model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static model => model.Alias, StringComparer.OrdinalIgnoreCase),
+                modelInventorySortAscending)
+        };
+
+        return ordered.ToArray();
     }
+
+    private IReadOnlyList<ModelBenchmarkResult> GetBenchmarkResultsForDisplay()
+    {
+        var merged = new Dictionary<string, ModelBenchmarkResult>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var result in Workspace.BenchmarkResultsHistory)
+        {
+            merged[GetBenchmarkResultKey(result)] = result;
+        }
+
+        foreach (var result in BenchmarkCoordinator.Current?.Results ?? Array.Empty<ModelBenchmarkResult>())
+        {
+            merged[GetBenchmarkResultKey(result)] = result;
+        }
+
+        var results = merged.Values.AsEnumerable();
+        var ordered = benchmarkResultsSortColumn switch
+        {
+            BenchmarkResultsSortColumn.Provider => ApplyDirection(
+                results.OrderBy(static result => FormatProviderLabel(result.Provider), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static result => result.Model, StringComparer.OrdinalIgnoreCase),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.Model => ApplyDirection(
+                results.OrderBy(static result => result.Model, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static result => FormatProviderLabel(result.Provider), StringComparer.OrdinalIgnoreCase),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.Overall => ApplyDirection(
+                results.OrderBy(static result => result.Succeeded ? result.OverallScore : double.MinValue)
+                    .ThenBy(static result => result.Rank),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.Quality => ApplyDirection(
+                results.OrderBy(static result => result.Succeeded ? result.QualityScore : double.MinValue)
+                    .ThenBy(static result => result.Rank),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.DecodeSpeed => ApplyDirection(
+                results.OrderBy(static result => result.DecodeTokensPerSecond ?? double.MinValue)
+                    .ThenBy(static result => result.Rank),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.Status => ApplyDirection(
+                results.OrderBy(static result => GetBenchmarkStatusLabel(result), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static result => result.Rank),
+                benchmarkResultsSortAscending),
+            BenchmarkResultsSortColumn.Fit => ApplyDirection(
+                results.OrderBy(static result => result.Succeeded ? result.Fit.ToString() : string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static result => result.Rank),
+                benchmarkResultsSortAscending),
+            _ => ApplyDirection(
+                results.OrderBy(static result => result.Rank)
+                    .ThenBy(static result => FormatProviderLabel(result.Provider), StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static result => result.Model, StringComparer.OrdinalIgnoreCase),
+                benchmarkResultsSortAscending)
+        };
+
+        return ordered.ToArray();
+    }
+
+    private void SetModelInventorySort(ModelInventorySortColumn column)
+    {
+        if (modelInventorySortColumn == column)
+        {
+            modelInventorySortAscending = !modelInventorySortAscending;
+            return;
+        }
+
+        modelInventorySortColumn = column;
+        modelInventorySortAscending = true;
+    }
+
+    private void SetBenchmarkResultsSort(BenchmarkResultsSortColumn column)
+    {
+        if (benchmarkResultsSortColumn == column)
+        {
+            benchmarkResultsSortAscending = !benchmarkResultsSortAscending;
+            return;
+        }
+
+        benchmarkResultsSortColumn = column;
+        benchmarkResultsSortAscending = column is BenchmarkResultsSortColumn.Rank or BenchmarkResultsSortColumn.Provider or BenchmarkResultsSortColumn.Model or BenchmarkResultsSortColumn.Status or BenchmarkResultsSortColumn.Fit;
+    }
+
+    private string GetModelInventorySortLabel(string label, ModelInventorySortColumn column)
+        => label + GetSortSuffix(modelInventorySortColumn == column, modelInventorySortAscending);
+
+    private string GetBenchmarkResultsSortLabel(string label, BenchmarkResultsSortColumn column)
+        => label + GetSortSuffix(benchmarkResultsSortColumn == column, benchmarkResultsSortAscending);
+
+    private static string GetSortSuffix(bool isActive, bool ascending)
+        => !isActive ? string.Empty : ascending ? " ^" : " v";
+
+    private static IEnumerable<T> ApplyDirection<T>(IOrderedEnumerable<T> ordered, bool ascending)
+        => ascending ? ordered : ordered.Reverse();
 
     private static string GetOllamaModelState(LlmModelAvailability availability, string model)
         => availability.IsModelLoaded(model) ? "Loaded" : "Installed";
@@ -1430,36 +1559,51 @@
             : string.Join(" ", parts);
     }
 
-    private static string GetBenchmarkLiveResultsHeadline(ModelBenchmarkSession session)
-        => $"{session.Results.Count} of {session.TotalCount} model(s) have completed and been ranked so far.";
+    private static string GetBenchmarkHistoryHeadline(IReadOnlyList<ModelBenchmarkResult> results)
+        => $"{CountSucceededBenchmarks(results)} of {results.Count} benchmarked model(s) produced usable results.";
 
-    private static string GetBenchmarkLiveResultsDetail(ModelBenchmarkSession session)
-        => $"{CountSucceededBenchmarks(session)} usable result(s) are already visible and rerank after each completed model while the queue continues.";
-
-    private static string GetBenchmarkSummaryHeadline(ModelBenchmarkSession session)
-        => $"{CountSucceededBenchmarks(session)} of {session.Results.Count} model(s) produced usable benchmark results.";
-
-    private string GetBenchmarkSummaryDetail(ModelBenchmarkSession session)
+    private string GetBenchmarkHistoryDetail(ModelBenchmarkSession? latestBenchmark, IReadOnlyList<ModelBenchmarkResult> results)
     {
-        var removed = CountRemovedBenchmarkedModels(session);
-        var warnings = CountCleanupWarningBenchmarks(session);
-        return removed == 0 && warnings == 0
-            ? $"{FormatProviderLabel(session.Provider)} results are ready to compare by quality, speed, and interactive fit."
-            : $"{removed} model(s) were removed after benchmarking and {warnings} cleanup warning(s) were preserved in the notes instead of hiding the result.";
+        var removed = CountRemovedBenchmarkedModels(results);
+        var warnings = CountCleanupWarningBenchmarks(results);
+        var latestProvider = latestBenchmark is null ? null : FormatProviderLabel(latestBenchmark.Provider);
+
+        if (removed == 0 && warnings == 0)
+        {
+            return latestProvider is null
+                ? "Results are ready to compare by quality, speed, and interactive fit across providers."
+                : $"{latestProvider} was the most recent benchmark run. Results stay visible across providers and reruns update the same provider/model row.";
+        }
+
+        return $"{removed} model(s) were removed after benchmarking and {warnings} cleanup warning(s) were preserved in notes while results remained visible across providers.";
     }
 
-    private static int CountSucceededBenchmarks(ModelBenchmarkSession session)
-        => session.Results.Count(static result => result.Succeeded);
+    private static string GetBenchmarkHistoryChipClass(ModelBenchmarkSession? latestBenchmark)
+        => latestBenchmark?.IsCancelled == true ? "status-pending" : "status-ok";
 
-    private static int CountRemovedBenchmarkedModels(ModelBenchmarkSession session)
-        => session.Results.Count(result => result.Notes.Any(static note => note.Contains("Removed from the local Foundry cache after benchmark", StringComparison.OrdinalIgnoreCase)));
+    private string GetBenchmarkHistoryChipText(ModelBenchmarkSession? latestBenchmark, int resultCount)
+    {
+        if (latestBenchmark is null)
+        {
+            return $"Benchmark history: {resultCount} model(s)";
+        }
 
-    private static int CountCleanupWarningBenchmarks(ModelBenchmarkSession session)
-        => session.Results.Count(result => result.Notes.Any(static note => note.Contains("could not be removed from the local Foundry cache", StringComparison.OrdinalIgnoreCase)
+        return $"Last benchmark: {FormatProviderLabel(latestBenchmark.Provider)} - {latestBenchmark.Results.Count} model(s){(latestBenchmark.IsCancelled ? " (cancelled)" : string.Empty)} - completed {latestBenchmark.CompletedUtc?.LocalDateTime.ToString("g")}";
+    }
+
+    private static int CountSucceededBenchmarks(IReadOnlyList<ModelBenchmarkResult> results)
+        => results.Count(static result => result.Succeeded);
+
+    private static int CountRemovedBenchmarkedModels(IReadOnlyList<ModelBenchmarkResult> results)
+        => results.Count(result => result.Notes.Any(static note => note.Contains("Removed from the local Foundry cache after benchmark", StringComparison.OrdinalIgnoreCase)));
+
+    private static int CountCleanupWarningBenchmarks(IReadOnlyList<ModelBenchmarkResult> results)
+        => results.Count(result => result.Notes.Any(static note => note.Contains("could not be removed from the local Foundry cache", StringComparison.OrdinalIgnoreCase)
             || note.Contains("Foundry catalog refresh failed afterward", StringComparison.OrdinalIgnoreCase)));
 
-    private static ModelBenchmarkResult? GetTopBenchmarkResult(ModelBenchmarkSession session)
-        => session.Results.FirstOrDefault(static result => result.Succeeded) ?? session.Results.FirstOrDefault();
+    private static ModelBenchmarkResult? GetBestBenchmarkResult(IReadOnlyList<ModelBenchmarkResult> results)
+        => results.OrderBy(static result => result.Rank).FirstOrDefault(static result => result.Succeeded)
+            ?? results.OrderBy(static result => result.Rank).FirstOrDefault();
 
     private static string FormatDecodeSpeed(ModelBenchmarkResult result)
         => result.DecodeTokensPerSecond is { } tps ? $"{tps:0.0} tok/s" : "speed n/a";
@@ -1518,6 +1662,9 @@
         => result.Succeeded
             ? "Succeeded"
             : $"Failed: {result.FailedReason ?? "Unknown failure."}";
+
+    private static string GetBenchmarkResultKey(ModelBenchmarkResult result)
+        => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{result.Provider}:{result.Model}");
 
     private static string GetBenchmarkFitLabel(ModelBenchmarkResult result)
         => result.Succeeded ? result.Fit.ToString() : "-";

@@ -67,8 +67,12 @@ public sealed class LlmSetupPageTests
         var cut = context.Render<LlmSetupPage>();
         cut.WaitForAssertion(() => Assert.Contains("Remove models classified as too large for interactive use after benchmark.", cut.Markup));
 
-        var modelCheckbox = cut.FindAll("table input[type=checkbox]").First();
-        modelCheckbox.Change(true);
+        var modelCheckbox = cut.FindAll("tbody tr")
+            .Single(row => row.TextContent.Contains("phi-foundry", StringComparison.Ordinal))
+            .QuerySelector("input[type='checkbox']");
+
+        Assert.NotNull(modelCheckbox);
+        modelCheckbox!.Change(true);
 
         var downloadButton = FindButton(cut, "Download selected");
         var removeButton = FindButton(cut, "Remove selected cached");
@@ -285,10 +289,10 @@ public sealed class LlmSetupPageTests
 
         var cut = context.Render<LlmSetupPage>();
 
-        cut.WaitForAssertion(() => Assert.Contains("Live results so far", cut.Markup));
+        cut.WaitForAssertion(() => Assert.Contains("Benchmark results", cut.Markup));
 
         var benchmarkTable = cut.FindAll("table")
-            .Single(table => table.QuerySelectorAll("thead th").First().TextContent.Trim() == "#");
+            .Single(table => table.QuerySelectorAll("thead th button").Any(button => button.TextContent.Trim().StartsWith("#", StringComparison.Ordinal)));
         var rows = benchmarkTable.QuerySelectorAll("tbody tr");
         var cells = rows[0].QuerySelectorAll("td");
 
@@ -347,10 +351,10 @@ public sealed class LlmSetupPageTests
 
         var cut = context.Render<LlmSetupPage>();
 
-        cut.WaitForAssertion(() => Assert.Contains("Benchmark snapshot", cut.Markup));
+        cut.WaitForAssertion(() => Assert.Contains("Benchmark results", cut.Markup));
 
         var benchmarkTable = cut.FindAll("table")
-            .Single(table => table.QuerySelectorAll("thead th").First().TextContent.Trim() == "#");
+            .Single(table => table.QuerySelectorAll("thead th button").Any(button => button.TextContent.Trim().StartsWith("#", StringComparison.Ordinal)));
         var headers = benchmarkTable.QuerySelectorAll("thead th").Select(static header => header.TextContent.Trim()).ToArray();
         var cells = benchmarkTable.QuerySelectorAll("tbody tr").Single().QuerySelectorAll("td");
 

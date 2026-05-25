@@ -18,6 +18,7 @@ public sealed record WorkspaceRecoverySnapshot(
     LinkedInAuthorizationStatus? LinkedInAuthorizationStatus = null,
     IReadOnlyDictionary<string, OllamaCapacityVerdict>? CapacityVerdicts = null,
     ModelBenchmarkSession? LastBenchmarkSession = null,
+    IReadOnlyList<ModelBenchmarkResult>? BenchmarkResultsHistory = null,
     IReadOnlyList<string>? HiddenSuggestionUrls = null,
     IReadOnlyList<SavedSuggestionListState>? SavedSuggestionLists = null);
 

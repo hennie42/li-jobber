@@ -50,6 +50,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private bool hasStartedLlmWork;
     private readonly Dictionary<string, OllamaCapacityVerdict> capacityVerdicts = LoadCapacityVerdicts(recoveryStore);
     private ModelBenchmarkSession? lastBenchmarkSession = LoadLastBenchmarkSession(recoveryStore);
+    private List<ModelBenchmarkResult> benchmarkResultsHistory = LoadBenchmarkResultsHistory(recoveryStore);
 
     public event Action? Changed;
 
@@ -219,12 +220,21 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     }
     public ModelBenchmarkSession? LastBenchmarkSession => Read(() => lastBenchmarkSession);
 
+    /// <summary>
+    /// Gets the persisted benchmark result history across providers.
+    /// </summary>
+    public IReadOnlyList<ModelBenchmarkResult> BenchmarkResultsHistory => Read(() => benchmarkResultsHistory.ToArray());
+
+    /// <summary>
+    /// Stores the latest benchmark session and merges its results into the persisted cross-provider history.
+    /// </summary>
     public void SetLastBenchmarkSession(ModelBenchmarkSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
         lock (gate)
         {
             lastBenchmarkSession = session;
+            benchmarkResultsHistory = MergeBenchmarkResultsHistory(benchmarkResultsHistory, session.Results).ToList();
         }
         NotifyChanged();
     }
@@ -1117,6 +1127,11 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private static ModelBenchmarkSession? LoadLastBenchmarkSession(WorkspaceRecoveryStore? recoveryStore)
         => recoveryStore?.Load()?.LastBenchmarkSession;
 
+    private static List<ModelBenchmarkResult> LoadBenchmarkResultsHistory(WorkspaceRecoveryStore? recoveryStore)
+        => recoveryStore?.Load()?.BenchmarkResultsHistory?
+            .ToList()
+            ?? [];
+
     private static DraftGenerationPreferences LoadDraftGenerationPreferences(WorkspaceRecoveryStore? recoveryStore)
         => NormalizeDraftGenerationPreferences(recoveryStore?.Load()?.DraftGenerationPreferences);
 
@@ -1302,8 +1317,35 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             linkedInAuthorizationStatus,
             capacityVerdicts.Count == 0 ? null : new Dictionary<string, OllamaCapacityVerdict>(capacityVerdicts, StringComparer.OrdinalIgnoreCase),
             lastBenchmarkSession,
+            benchmarkResultsHistory.Count == 0 ? null : benchmarkResultsHistory.ToArray(),
             hiddenSuggestionUrls.Count == 0 ? null : hiddenSuggestionUrls.ToArray(),
             savedSuggestionLists.Count == 0 ? null : savedSuggestionLists.ToArray());
+
+    private static IReadOnlyList<ModelBenchmarkResult> MergeBenchmarkResultsHistory(
+        IEnumerable<ModelBenchmarkResult> existingResults,
+        IEnumerable<ModelBenchmarkResult> incomingResults)
+    {
+        var merged = new Dictionary<(LlmProviderKind Provider, string Model), ModelBenchmarkResult>();
+
+        foreach (var result in existingResults.Concat(incomingResults))
+        {
+            if (string.IsNullOrWhiteSpace(result.Model))
+            {
+                continue;
+            }
+
+            merged[(result.Provider, result.Model)] = result;
+        }
+
+        return merged.Values
+            .OrderByDescending(static result => result.Succeeded)
+            .ThenByDescending(static result => result.OverallScore)
+            .ThenByDescending(static result => result.QualityScore)
+            .ThenBy(static result => result.Provider)
+            .ThenBy(static result => result.Model, StringComparer.OrdinalIgnoreCase)
+            .Select(static (result, index) => result with { Rank = index + 1 })
+            .ToArray();
+    }
 
     private void NotifyChanged()
     {

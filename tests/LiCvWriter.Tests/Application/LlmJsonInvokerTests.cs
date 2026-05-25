@@ -72,6 +72,24 @@ public sealed class LlmJsonInvokerTests
     }
 
     [Fact]
+    public async Task InvokeAsync_UsesExtractedJsonCandidate_ForRepairPrompt()
+    {
+        const string wrapped = "Reasoning... ```json\n{\"name\":\"gamma\",\"score\":99\n``` trailing";
+        var stub = new StubLlmClient(new Queue<string>([
+            wrapped,
+            "{\"name\":\"gamma\",\"score\":99}"
+        ]));
+        var invoker = new LlmJsonInvoker(stub);
+
+        await invoker.InvokeAsync(BuildRequest(), ParseSample);
+
+        Assert.Equal(2, stub.Calls);
+        Assert.Contains("{\"name\":\"gamma\",\"score\":99", stub.Requests[1].Messages[0].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Reasoning...", stub.Requests[1].Messages[0].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("trailing", stub.Requests[1].Messages[0].Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task InvokeAsync_ReturnsNullValue_WhenAllAttemptsFail()
     {
         var stub = new StubLlmClient(new Queue<string>(["nope", "still nope"]));

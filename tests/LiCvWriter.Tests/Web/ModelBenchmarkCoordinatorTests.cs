@@ -396,6 +396,70 @@ public sealed class ModelBenchmarkCoordinatorTests
     }
 
     [Fact]
+    public async Task StartAsync_WhenDifferentProvidersRun_PreservesCombinedBenchmarkHistory()
+    {
+        var foundryResponses = BuildPerfectResponses("phi-foundry");
+        var foundryBridge = new ScriptedFoundrySdkBridge(foundryResponses, ["phi-foundry"]);
+        var foundryCatalogClient = new ScriptedFoundryCatalogClient(
+            new FoundryCatalogSnapshot(
+                new LlmModelAvailability(
+                    Version: "1.0.0",
+                    Model: "phi-foundry",
+                    Installed: true,
+                    AvailableModels: ["phi-foundry"],
+                    RunningModels: Array.Empty<LlmRunningModel>(),
+                    Provider: LlmProviderKind.Foundry),
+                [new FoundryCatalogModel("phi-foundry", "Phi Foundry", "phi-foundry", 1024, true, false)],
+                FoundryAccelerationSnapshot.Unsupported("Not available"),
+                DateTimeOffset.UtcNow));
+        var (coordinator, workspace) = BuildCoordinator(new ScriptedLlmClient(BuildPerfectResponses("ollama-a")), foundryBridge, foundryCatalogClient);
+
+        await coordinator.StartAsync(["ollama-a"]);
+        await coordinator.StartAsync(LlmProviderKind.Foundry, ["phi-foundry"]);
+
+        Assert.Equal(2, workspace.BenchmarkResultsHistory.Count);
+        Assert.Contains(workspace.BenchmarkResultsHistory, result => result.Provider == LlmProviderKind.Ollama && result.Model == "ollama-a");
+        Assert.Contains(workspace.BenchmarkResultsHistory, result => result.Provider == LlmProviderKind.Foundry && result.Model == "phi-foundry");
+    }
+
+    [Fact]
+    public async Task StartAsync_WhenSameProviderAndModelRunAgain_ReplacesExistingHistoryRow()
+    {
+        var (coordinator, workspace) = BuildCoordinator(new ScriptedLlmClient(BuildPerfectResponses("repeat", evalSeconds: 2.0)));
+
+        workspace.SetLastBenchmarkSession(new ModelBenchmarkSession(
+            StartedUtc: DateTimeOffset.UtcNow.AddMinutes(-5),
+            CompletedUtc: DateTimeOffset.UtcNow.AddMinutes(-4),
+            IsRunning: false,
+            IsCancelled: false,
+            CompletedCount: 1,
+            TotalCount: 1,
+            CurrentModel: null,
+            Results:
+            [
+                new ModelBenchmarkResult(
+                    Model: "repeat",
+                    Rank: 1,
+                    OverallScore: 0.25,
+                    QualityScore: 0.20,
+                    DecodeTokensPerSecond: 4.0,
+                    LoadDuration: null,
+                    TotalDuration: TimeSpan.FromSeconds(10),
+                    Fit: OllamaCapacityFit.CpuOnly,
+                    Notes: [],
+                    FailedReason: null,
+                    Provider: LlmProviderKind.Ollama)
+            ]));
+
+        await coordinator.StartAsync(["repeat"]);
+
+        Assert.Single(workspace.BenchmarkResultsHistory);
+        Assert.Equal(LlmProviderKind.Ollama, workspace.BenchmarkResultsHistory[0].Provider);
+        Assert.Equal("repeat", workspace.BenchmarkResultsHistory[0].Model);
+        Assert.NotEqual(0.25, workspace.BenchmarkResultsHistory[0].OverallScore);
+    }
+
+    [Fact]
     public async Task StartAsync_FoundryRun_DownloadsBenchmarksRemovesBeforePublishingResult()
     {
         var callSequence = new List<string>();

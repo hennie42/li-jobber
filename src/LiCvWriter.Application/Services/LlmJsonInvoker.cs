@@ -42,10 +42,12 @@ public sealed class LlmJsonInvoker(ILlmClient llmClient)
         }
 
         // Final attempt: ask the model to reformat its own output.
+        var repairInput = BuildRepairInputCandidate(response.Content, lenient);
+
         var repairRequest = new LlmRequest(
             request.Model,
             RepairSystemPrompt,
-            [new LlmChatMessage("user", BuildRepairPrompt(response.Content, request.SystemPrompt))],
+            [new LlmChatMessage("user", BuildRepairPrompt(repairInput, request.SystemPrompt))],
             UseChatEndpoint: request.UseChatEndpoint,
             Stream: false,
             Think: "low",
@@ -94,6 +96,30 @@ public sealed class LlmJsonInvoker(ILlmClient llmClient)
             : $"Original schema instructions:\n{originalSystemPrompt}\n\n";
 
         return schemaHint + "Previous output to reformat as valid JSON:\n" + previousOutput;
+    }
+
+    private static string BuildRepairInputCandidate(string originalOutput, string lenientCandidate)
+    {
+        if (!string.IsNullOrWhiteSpace(lenientCandidate)
+            && !string.Equals(lenientCandidate, originalOutput, StringComparison.Ordinal))
+        {
+            return lenientCandidate;
+        }
+
+        var trimmed = originalOutput.Trim();
+        var objectStart = trimmed.IndexOf('{');
+        if (objectStart >= 0)
+        {
+            var objectEnd = trimmed.LastIndexOf('}');
+            var candidate = objectEnd > objectStart
+                ? trimmed[objectStart..(objectEnd + 1)]
+                : trimmed[objectStart..];
+
+            var fenceStart = candidate.IndexOf("```", StringComparison.Ordinal);
+            return fenceStart >= 0 ? candidate[..fenceStart].TrimEnd() : candidate;
+        }
+
+        return trimmed;
     }
 
     /// <summary>

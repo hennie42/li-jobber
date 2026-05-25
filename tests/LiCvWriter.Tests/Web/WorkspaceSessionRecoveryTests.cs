@@ -86,4 +86,78 @@ public sealed class WorkspaceSessionRecoveryTests
             try { Directory.Delete(temp, recursive: true); } catch { }
         }
     }
+
+    [Fact]
+    public void BenchmarkResultsHistory_RoundTripsThroughRecoveryStore()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), $"licv-recovery-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var storage = new StorageOptions { WorkingRoot = temp };
+            var store = new WorkspaceRecoveryStore(storage);
+            var ollamaOptions = new OllamaOptions();
+
+            var session = new WorkspaceSession(ollamaOptions, store);
+
+            session.SetLastBenchmarkSession(new ModelBenchmarkSession(
+                StartedUtc: new DateTimeOffset(2026, 4, 22, 10, 0, 0, TimeSpan.Zero),
+                CompletedUtc: new DateTimeOffset(2026, 4, 22, 10, 5, 0, TimeSpan.Zero),
+                IsRunning: false,
+                IsCancelled: false,
+                CompletedCount: 1,
+                TotalCount: 1,
+                CurrentModel: null,
+                Results:
+                [
+                    new ModelBenchmarkResult(
+                        Model: "ollama-a",
+                        Rank: 1,
+                        OverallScore: 0.75,
+                        QualityScore: 0.80,
+                        DecodeTokensPerSecond: 20.0,
+                        LoadDuration: null,
+                        TotalDuration: TimeSpan.FromSeconds(4),
+                        Fit: OllamaCapacityFit.Usable,
+                        Notes: [],
+                        FailedReason: null,
+                        Provider: LlmProviderKind.Ollama)
+                ]));
+
+            session.SetLastBenchmarkSession(new ModelBenchmarkSession(
+                StartedUtc: new DateTimeOffset(2026, 4, 22, 11, 0, 0, TimeSpan.Zero),
+                CompletedUtc: new DateTimeOffset(2026, 4, 22, 11, 5, 0, TimeSpan.Zero),
+                IsRunning: false,
+                IsCancelled: false,
+                CompletedCount: 1,
+                TotalCount: 1,
+                CurrentModel: null,
+                Results:
+                [
+                    new ModelBenchmarkResult(
+                        Model: "foundry-a",
+                        Rank: 1,
+                        OverallScore: 0.88,
+                        QualityScore: 0.86,
+                        DecodeTokensPerSecond: 18.0,
+                        LoadDuration: null,
+                        TotalDuration: TimeSpan.FromSeconds(5),
+                        Fit: OllamaCapacityFit.Comfortable,
+                        Notes: [],
+                        FailedReason: null,
+                        Provider: LlmProviderKind.Foundry)
+                ],
+                Provider: LlmProviderKind.Foundry));
+
+            var rehydrated = new WorkspaceSession(ollamaOptions, store);
+
+            Assert.Equal(2, rehydrated.BenchmarkResultsHistory.Count);
+            Assert.Contains(rehydrated.BenchmarkResultsHistory, result => result.Provider == LlmProviderKind.Ollama && result.Model == "ollama-a");
+            Assert.Contains(rehydrated.BenchmarkResultsHistory, result => result.Provider == LlmProviderKind.Foundry && result.Model == "foundry-a");
+        }
+        finally
+        {
+            try { Directory.Delete(temp, recursive: true); } catch { }
+        }
+    }
 }
