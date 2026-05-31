@@ -10,7 +10,8 @@ namespace LiCvWriter.Infrastructure.LinkedIn;
 public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, LinkedInAuthOptions options, TimeProvider timeProvider)
 {
     private const int VersionFallbackMonths = 36;
-    private static readonly Uri SnapshotEndpoint = new("https://api.linkedin.com/rest/memberSnapshotData?q=criteria");
+    private const int SnapshotPageSize = 10;
+    private static readonly Uri SnapshotEndpointBase = new("https://api.linkedin.com/rest/memberSnapshotData");
     private static readonly IReadOnlyDictionary<string, SnapshotDomainRoute> SupportedDomainRoutes = new Dictionary<string, SnapshotDomainRoute>(StringComparer.OrdinalIgnoreCase)
     {
         ["PROFILE"] = SnapshotDomainRoute.Typed(LinkedInExportFileMap.Profile),
@@ -89,6 +90,7 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
         string accessToken,
         Func<string, CancellationToken, Task<LinkedInExportImportResult>> importExportAsync,
         Action<string>? onProgress = null,
+        IReadOnlyCollection<string>? selectedDomains = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(accessToken))
@@ -104,8 +106,9 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
         try
         {
             var warnings = new List<string>();
-            onProgress?.Invoke("Fetching snapshot pages from LinkedIn API");
-            var domainData = await FetchSnapshotDataAsync(NormalizeAccessToken(accessToken), warnings, onProgress, cancellationToken);
+            var requestedDomains = LinkedInSnapshotDomainOption.NormalizeDomains(selectedDomains);
+            onProgress?.Invoke($"Fetching {requestedDomains.Count} selected LinkedIn snapshot domains");
+            var domainData = await FetchSnapshotDataAsync(NormalizeAccessToken(accessToken), requestedDomains, warnings, onProgress, cancellationToken);
             onProgress?.Invoke("Writing imported domain data");
             WriteMappedCsvFiles(exportRoot, domainData, warnings);
 
@@ -141,82 +144,90 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
 
     private async Task<Dictionary<string, List<Dictionary<string, string>>>> FetchSnapshotDataAsync(
         string accessToken,
+        IReadOnlyList<string> selectedDomains,
         List<string> warnings,
         Action<string>? onProgress,
         CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
-        Uri? nextUri = SnapshotEndpoint;
-        var pageCount = 0;
         var versionCandidates = GetApiVersionCandidates().ToArray();
         var selectedVersionIndex = 0;
         var selectedVersion = versionCandidates[0];
 
-        while (nextUri is not null)
+        foreach (var selectedDomain in selectedDomains)
         {
-            using var request = BuildSnapshotRequest(nextUri, accessToken, selectedVersion);
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            onProgress?.Invoke($"Importing domain: {selectedDomain}");
+            Uri? nextUri = BuildSnapshotDomainUri(selectedDomain, 0);
+            var pageCount = 0;
 
-            if (!response.IsSuccessStatusCode)
+            while (nextUri is not null)
             {
-                if (pageCount == 0
-                    && response.StatusCode == HttpStatusCode.UpgradeRequired
-                    && HasNonexistentVersionError(payload)
-                    && selectedVersionIndex < versionCandidates.Length - 1)
-                {
-                    selectedVersionIndex++;
-                    selectedVersion = versionCandidates[selectedVersionIndex];
-                    continue;
-                }
+                using var request = BuildSnapshotRequest(nextUri, accessToken, selectedVersion);
+                using var response = await httpClient.SendAsync(request, cancellationToken);
+                var payload = await response.Content.ReadAsStringAsync(cancellationToken);
 
-                if (pageCount == 0
-                    && response.StatusCode == HttpStatusCode.UpgradeRequired
-                    && HasNonexistentVersionError(payload))
+                if (!response.IsSuccessStatusCode)
                 {
+                    if (pageCount == 0
+                        && response.StatusCode == HttpStatusCode.UpgradeRequired
+                        && HasNonexistentVersionError(payload)
+                        && selectedVersionIndex < versionCandidates.Length - 1)
+                    {
+                        selectedVersionIndex++;
+                        selectedVersion = versionCandidates[selectedVersionIndex];
+                        continue;
+                    }
+
+                    if (pageCount == 0
+                        && response.StatusCode == HttpStatusCode.UpgradeRequired
+                        && HasNonexistentVersionError(payload))
+                    {
+                        throw new InvalidOperationException(
+                            $"LinkedIn DMA member snapshot request failed because no active API version was found. Attempted Linkedin-Version values: {string.Join(", ", versionCandidates.Take(selectedVersionIndex + 1))}. Raw response: {payload}".Trim());
+                    }
+
+                    if (response.StatusCode == HttpStatusCode.NotFound && payload.Contains("No data found for this memberId", StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+
                     throw new InvalidOperationException(
-                        $"LinkedIn DMA member snapshot request failed because no active API version was found. Attempted Linkedin-Version values: {string.Join(", ", versionCandidates.Take(selectedVersionIndex + 1))}. Raw response: {payload}".Trim());
+                        $"LinkedIn DMA member snapshot request for {selectedDomain} failed with {(int)response.StatusCode} {response.ReasonPhrase}. {payload}".Trim());
                 }
 
-                if (response.StatusCode == HttpStatusCode.NotFound && payload.Contains("No data found for this memberId", StringComparison.OrdinalIgnoreCase))
+                pageCount++;
+                using var document = JsonDocument.Parse(payload);
+                var root = document.RootElement;
+                foreach (var element in EnumerateElements(root))
                 {
-                    break;
+                    var domain = ReadString(element, "snapshotDomain");
+                    if (string.IsNullOrWhiteSpace(domain))
+                    {
+                        warnings.Add($"A LinkedIn DMA snapshot page returned an element without snapshotDomain for requested domain {selectedDomain} on page {pageCount}.");
+                        continue;
+                    }
+
+                    if (!data.TryGetValue(domain, out var records))
+                    {
+                        records = new List<Dictionary<string, string>>();
+                        data[domain] = records;
+                    }
+
+                    foreach (var record in EnumerateSnapshotData(element))
+                    {
+                        records.Add(record);
+                    }
                 }
 
-                throw new InvalidOperationException(
-                    $"LinkedIn DMA member snapshot request failed with {(int)response.StatusCode} {response.ReasonPhrase}. {payload}".Trim());
+                nextUri = ReadNextPageUri(root);
             }
-
-            pageCount++;
-            using var document = JsonDocument.Parse(payload);
-            var root = document.RootElement;
-            foreach (var element in EnumerateElements(root))
-            {
-                var domain = ReadString(element, "snapshotDomain");
-                if (string.IsNullOrWhiteSpace(domain))
-                {
-                    warnings.Add($"A LinkedIn DMA snapshot page returned an element without snapshotDomain on page {pageCount}.");
-                    continue;
-                }
-
-                if (!data.TryGetValue(domain, out var records))
-                {
-                    records = new List<Dictionary<string, string>>();
-                    data[domain] = records;
-                    onProgress?.Invoke($"Importing domain: {domain}");
-                }
-
-                foreach (var record in EnumerateSnapshotData(element))
-                {
-                    records.Add(record);
-                }
-            }
-
-            nextUri = ReadNextPageUri(root);
         }
 
         return data;
     }
+
+    private static Uri BuildSnapshotDomainUri(string domain, int start)
+        => new($"{SnapshotEndpointBase}?q=criteria&domain={Uri.EscapeDataString(domain)}&start={start}&count={SnapshotPageSize}");
 
     private HttpRequestMessage BuildSnapshotRequest(Uri nextUri, string accessToken, string apiVersion)
     {

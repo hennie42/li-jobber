@@ -12,6 +12,7 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
     private IPlaywright? playwright;
     private IBrowser? browser;
     private Process? appProcess;
+    private string? testStorageRoot;
 
     public string RepositoryRoot { get; private set; } = string.Empty;
 
@@ -28,6 +29,8 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
 
         RepositoryRoot = FindRepositoryRoot();
         Directory.CreateDirectory(ArtifactRoot);
+        testStorageRoot = Path.Combine(Path.GetTempPath(), $"licvwriter-playwright-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(testStorageRoot);
 
         var port = GetFreeTcpPort();
         BaseUrl = $"http://127.0.0.1:{port}";
@@ -54,6 +57,11 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
         {
             appProcess.Kill(entireProcessTree: true);
             await appProcess.WaitForExitAsync();
+        }
+
+        if (!string.IsNullOrWhiteSpace(testStorageRoot) && Directory.Exists(testStorageRoot))
+        {
+            Directory.Delete(testStorageRoot, recursive: true);
         }
     }
 
@@ -126,6 +134,9 @@ public sealed class PlaywrightAppFixture : IAsyncLifetime
         processStartInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         processStartInfo.Environment["Playwright__EnableDemoSeed"] = "true";
         processStartInfo.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}";
+        processStartInfo.Environment["Storage__WorkingRoot"] = testStorageRoot;
+        processStartInfo.Environment["Storage__AuditRoot"] = Path.Combine(testStorageRoot!, "Audit");
+        processStartInfo.Environment["Storage__ExportRoot"] = Path.Combine(testStorageRoot!, "Exports");
 
         var process = Process.Start(processStartInfo)
             ?? throw new InvalidOperationException("Failed to start the LI-CV-Writer web app for Playwright.");

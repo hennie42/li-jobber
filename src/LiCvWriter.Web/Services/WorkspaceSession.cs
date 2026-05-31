@@ -40,6 +40,7 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
     private LinkedInImportDiagnosticsSnapshot? linkedInImportDiagnostics = LoadLinkedInImportDiagnostics(recoveryStore);
     private ApplicantDifferentiatorProfile applicantDifferentiatorProfile = LoadApplicantDifferentiatorProfile(recoveryStore);
     private LinkedInAuthorizationStatus linkedInAuthorizationStatus = LoadLinkedInAuthorizationStatus(recoveryStore);
+    private HashSet<string> selectedLinkedInSnapshotDomains = LoadSelectedLinkedInSnapshotDomains(recoveryStore);
     private LlmModelAvailability? ollamaAvailability;
     private LlmModelAvailability? foundryAvailability;
     private LlmProviderKind selectedLlmProvider = LoadSelectedLlmProvider(recoveryStore);
@@ -85,6 +86,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         && IsSelectedProviderReadyUnsafe());
 
     public LinkedInAuthorizationStatus LinkedInAuthorizationStatus => Read(() => linkedInAuthorizationStatus);
+
+    public IReadOnlyList<string> SelectedLinkedInSnapshotDomains => Read(() => selectedLinkedInSnapshotDomains.OrderBy(static domain => domain, StringComparer.OrdinalIgnoreCase).ToArray());
 
     public LlmModelAvailability? OllamaAvailability => Read(() => ollamaAvailability);
 
@@ -659,6 +662,17 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         NotifyChanged();
     }
 
+    public void SetSelectedLinkedInSnapshotDomains(IEnumerable<string> domains)
+    {
+        lock (gate)
+        {
+            selectedLinkedInSnapshotDomains = LinkedInSnapshotDomainOption.NormalizeDomains(domains)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        NotifyChanged();
+    }
+
     public void SetOllamaAvailability(LlmModelAvailability availability)
         => SetLlmAvailability(availability with { Provider = LlmProviderKind.Ollama });
 
@@ -1104,6 +1118,10 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
         => recoveryStore?.Load()?.LinkedInAuthorizationStatus
             ?? new LinkedInAuthorizationStatus(false, "DMA member snapshot not loaded.", null, null, null);
 
+    private static HashSet<string> LoadSelectedLinkedInSnapshotDomains(WorkspaceRecoveryStore? recoveryStore)
+        => LinkedInSnapshotDomainOption.NormalizeDomains(recoveryStore?.Load()?.SelectedLinkedInSnapshotDomains)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     private static LlmProviderKind LoadSelectedLlmProvider(WorkspaceRecoveryStore? recoveryStore)
     {
         var recoveredProvider = recoveryStore?.Load()?.SelectedLlmProvider;
@@ -1319,7 +1337,8 @@ public sealed class WorkspaceSession(OllamaOptions ollamaOptions, WorkspaceRecov
             lastBenchmarkSession,
             benchmarkResultsHistory.Count == 0 ? null : benchmarkResultsHistory.ToArray(),
             hiddenSuggestionUrls.Count == 0 ? null : hiddenSuggestionUrls.ToArray(),
-            savedSuggestionLists.Count == 0 ? null : savedSuggestionLists.ToArray());
+            savedSuggestionLists.Count == 0 ? null : savedSuggestionLists.ToArray(),
+            selectedLinkedInSnapshotDomains.Count == 0 ? null : selectedLinkedInSnapshotDomains.OrderBy(static domain => domain, StringComparer.OrdinalIgnoreCase).ToArray());
 
     private static IReadOnlyList<ModelBenchmarkResult> MergeBenchmarkResultsHistory(
         IEnumerable<ModelBenchmarkResult> existingResults,

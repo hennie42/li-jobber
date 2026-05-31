@@ -48,6 +48,34 @@
         <p class="muted-text">Access token loaded from user secrets.</p>
     }
 
+    <details class="details-card" open>
+        <summary>Snapshot domains (@selectedLinkedInDomains.Count selected)</summary>
+        <p class="muted-text">Choose which LinkedIn DMA domains to retrieve. Selections are saved with this workspace.</p>
+        <div class="button-row">
+            <button type="button" class="secondary-button" @onclick="ResetLinkedInDomainsToDefaults" disabled="@isImportingProfile">Reset to defaults</button>
+        </div>
+        @foreach (var group in DomainGroups)
+        {
+            <div class="profile-entry">
+                <div class="profile-entry-header">
+                    <h4>@GetDomainGroupLabel(group.Key)</h4>
+                </div>
+                <div class="feature-list">
+                    @foreach (var option in group)
+                    {
+                        <label class="checkbox-option">
+                            <input type="checkbox" checked="@selectedLinkedInDomains.Contains(option.Domain)" disabled="@isImportingProfile" @onchange="args => ToggleLinkedInDomain(option.Domain, args)" />
+                            <span>
+                                <strong>@option.Label</strong>
+                                <span class="muted-text">@option.Domain — @option.Description</span>
+                            </span>
+                        </label>
+                    }
+                </div>
+            </div>
+        }
+    </details>
+
     <div class="button-row">
         <button class="primary-button" @onclick="LoadDmaMemberSnapshotAsync" disabled="@isImportingProfile">@(isImportingProfile ? "Importing..." : hasProfile ? "Refresh profile" : "Load LinkedIn profile")</button>
     </div>
@@ -356,12 +384,17 @@
     private string? savedField;
     private CancellationTokenSource? savedFieldCts;
     private string dmaAccessToken = string.Empty;
+    private HashSet<string> selectedLinkedInDomains = new(StringComparer.OrdinalIgnoreCase);
     private LinkedInExportImportResult? result;
 
     private bool hasProfile => Workspace.CandidateProfile is not null;
 
+    private static IEnumerable<IGrouping<LinkedInSnapshotDomainCategory, LinkedInSnapshotDomainOption>> DomainGroups
+        => LinkedInSnapshotDomainOption.All.GroupBy(static option => option.Category);
+
     protected override void OnInitialized()
     {
+        selectedLinkedInDomains = Workspace.SelectedLinkedInSnapshotDomains.ToHashSet(StringComparer.OrdinalIgnoreCase);
         result = Workspace.ImportResult;
 
         if (result is not null)
@@ -413,7 +446,8 @@
                 LinkedInOptions.PortabilityScope,
                 () => ExportImporter.ImportMemberSnapshotAsync(
                     LinkedInOptions.HasAccessToken ? LinkedInOptions.AccessToken : dmaAccessToken,
-                    status => { importProgressStatus = status; _ = InvokeAsync(StateHasChanged); }));
+                    status => { importProgressStatus = status; _ = InvokeAsync(StateHasChanged); },
+                    selectedLinkedInDomains.ToArray()));
 
             result = imported;
             Workspace.SetImportResult(Workspace.ExportPath, imported);
@@ -437,6 +471,38 @@
             importProgressStatus = null;
         }
     }
+
+    private void ToggleLinkedInDomain(string domain, ChangeEventArgs args)
+    {
+        var isChecked = args.Value is bool checkedValue && checkedValue;
+        if (isChecked)
+        {
+            selectedLinkedInDomains.Add(domain);
+        }
+        else
+        {
+            selectedLinkedInDomains.Remove(domain);
+        }
+
+        selectedLinkedInDomains = LinkedInSnapshotDomainOption.NormalizeDomains(selectedLinkedInDomains)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Workspace.SetSelectedLinkedInSnapshotDomains(selectedLinkedInDomains);
+    }
+
+    private void ResetLinkedInDomainsToDefaults()
+    {
+        selectedLinkedInDomains = LinkedInSnapshotDomainOption.DefaultDomains.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Workspace.SetSelectedLinkedInSnapshotDomains(selectedLinkedInDomains);
+    }
+
+    private static string GetDomainGroupLabel(LinkedInSnapshotDomainCategory category)
+        => category switch
+        {
+            LinkedInSnapshotDomainCategory.ProfileBuilder => "Profile builder",
+            LinkedInSnapshotDomainCategory.Enrichment => "Enrichment notes",
+            LinkedInSnapshotDomainCategory.OptionalDiagnostics => "Optional diagnostics",
+            _ => category.ToString()
+        };
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

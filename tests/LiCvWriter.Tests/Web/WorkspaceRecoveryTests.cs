@@ -101,6 +101,31 @@ public sealed class WorkspaceRecoveryTests
     }
 
     [Fact]
+    public void WorkspaceSession_RestoresSelectedLinkedInSnapshotDomains()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");
+
+        try
+        {
+            var store = new WorkspaceRecoveryStore(new StorageOptions { WorkingRoot = root });
+            var session = new WorkspaceSession(new OllamaOptions(), store);
+
+            session.SetSelectedLinkedInSnapshotDomains(["PROFILE", "POSITIONS", "ENDORSEMENTS"]);
+
+            var restoredSession = new WorkspaceSession(new OllamaOptions(), store);
+
+            Assert.Equal(["ENDORSEMENTS", "POSITIONS", "PROFILE"], restoredSession.SelectedLinkedInSnapshotDomains);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void WorkspaceSession_UsesConfiguredLlmDefaultsWhenRecoveryDoesNotContainLlmSettings()
     {
         var root = Path.Combine(Path.GetTempPath(), $"licvwriter-recovery-{Guid.NewGuid():N}");

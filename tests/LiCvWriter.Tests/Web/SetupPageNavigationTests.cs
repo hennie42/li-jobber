@@ -75,6 +75,28 @@ public sealed class SetupPageNavigationTests
         Assert.Contains("Notes", cut.Markup);
     }
 
+    [Fact]
+    public void Render_WhenLinkedInSetupLoads_ShowsDefaultSnapshotDomainSelections()
+    {
+        using var context = new BunitContext();
+        var workspace = new WorkspaceSession(new OllamaOptions());
+
+        context.Services.AddSingleton<ILinkedInExportImporter>(new StubLinkedInExportImporter());
+        context.Services.AddSingleton(new LinkedInAuthOptions());
+        context.Services.AddSingleton(new OperationStatusService());
+        context.Services.AddSingleton(workspace);
+
+        var cut = context.Render<LinkedInSetupPage>();
+        var checkboxes = cut.FindAll("input[type=checkbox]");
+
+        Assert.Contains("Snapshot domains (14 selected)", cut.Markup);
+        Assert.Contains("Profile builder", cut.Markup);
+        Assert.Contains("Enrichment notes", cut.Markup);
+        Assert.Contains("Optional diagnostics", cut.Markup);
+        Assert.Equal(LinkedInSnapshotDomainOption.All.Count, checkboxes.Count);
+        Assert.Equal(LinkedInSnapshotDomainOption.DefaultDomains.Count, checkboxes.Count(static checkbox => checkbox.HasAttribute("checked")));
+    }
+
     private static WorkspaceSession CreateConfiguredWorkspace()
     {
         var workspace = new WorkspaceSession(new OllamaOptions { Model = "configured-model", Think = "medium" });
@@ -109,7 +131,11 @@ public sealed class SetupPageNavigationTests
         public Task<LinkedInExportImportResult> ImportAsync(string exportRootPath, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(string accessToken, Action<string>? onProgress = null, CancellationToken cancellationToken = default)
+        public Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(
+            string accessToken,
+            Action<string>? onProgress = null,
+            IReadOnlyCollection<string>? selectedDomains = null,
+            CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
 }

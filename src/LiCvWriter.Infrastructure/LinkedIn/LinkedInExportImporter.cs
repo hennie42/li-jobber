@@ -105,9 +105,13 @@ public sealed class LinkedInExportImporter(
             "Local LinkedIn export");
     }
 
-    public async Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(string accessToken, Action<string>? onProgress = null, CancellationToken cancellationToken = default)
+    public async Task<LinkedInExportImportResult> ImportMemberSnapshotAsync(
+        string accessToken,
+        Action<string>? onProgress = null,
+        IReadOnlyCollection<string>? selectedDomains = null,
+        CancellationToken cancellationToken = default)
     {
-        var result = await memberSnapshotImporter.ImportAsync(accessToken, ImportAsync, onProgress, cancellationToken);
+        var result = await memberSnapshotImporter.ImportAsync(accessToken, ImportAsync, onProgress, selectedDomains, cancellationToken);
         Console.WriteLine(LinkedInImportDiagnosticsFormatter.BuildExperienceConsoleOutput(result.Profile));
         return result;
     }

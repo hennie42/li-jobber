@@ -146,7 +146,7 @@ public sealed class LinkedInExportImporterTests
         }, TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("Bearer dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("Bearer dma-token", selectedDomains: ["PROFILE"]);
 
         Assert.Equal("Alex Taylor", result.Profile.Name.FullName);
         Assert.Equal("Consultant", result.Profile.Headline);
@@ -209,7 +209,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["RECOMMENDATIONS"]);
 
         var recommendation = Assert.Single(result.Profile.Recommendations);
         Assert.Equal("Jordan Morgan", recommendation.Author.FullName);
@@ -260,7 +260,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["RECOMMENDATIONS"]);
 
         Assert.Empty(result.Profile.Recommendations);
         Assert.Contains(result.Warnings, static warning => warning.Contains("not marked as incoming/received", StringComparison.OrdinalIgnoreCase));
@@ -313,7 +313,7 @@ public sealed class LinkedInExportImporterTests
         }, TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["PROFILE"]);
 
         Assert.Equal("Alex Taylor", result.Profile.Name.FullName);
         Assert.Equal(2, requests.Count);
@@ -368,7 +368,7 @@ public sealed class LinkedInExportImporterTests
             var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
             var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-            await importer.ImportMemberSnapshotAsync("dma-token");
+            await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["PROFILE"]);
 
             var output = writer.ToString();
             Assert.Contains("LinkedIn DMA Imported Experience", output, StringComparison.Ordinal);
@@ -463,7 +463,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["PROFILE"]);
         var evidenceCatalog = new CandidateEvidenceService().BuildCatalog(result.Profile);
 
         Assert.Equal("Alex Taylor", result.Profile.Name.FullName);
@@ -524,7 +524,7 @@ public sealed class LinkedInExportImporterTests
         var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
         var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
 
-        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+        var result = await importer.ImportMemberSnapshotAsync("dma-token", selectedDomains: ["PROFILE"]);
 
         Assert.Equal("Alex Taylor", result.Profile.Name.FullName);
         Assert.Equal("Consultant", result.Profile.Headline);

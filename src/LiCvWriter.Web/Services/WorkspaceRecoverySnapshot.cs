@@ -20,7 +20,8 @@ public sealed record WorkspaceRecoverySnapshot(
     ModelBenchmarkSession? LastBenchmarkSession = null,
     IReadOnlyList<ModelBenchmarkResult>? BenchmarkResultsHistory = null,
     IReadOnlyList<string>? HiddenSuggestionUrls = null,
-    IReadOnlyList<SavedSuggestionListState>? SavedSuggestionLists = null);
+    IReadOnlyList<SavedSuggestionListState>? SavedSuggestionLists = null,
+    IReadOnlyList<string>? SelectedLinkedInSnapshotDomains = null);
 
 public sealed record DraftGenerationPreferences
 {
