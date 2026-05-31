@@ -12,3 +12,4 @@ outputs/
 *.sln.docstates
 LI-export/
 .playwright-mcp/
+test-results*

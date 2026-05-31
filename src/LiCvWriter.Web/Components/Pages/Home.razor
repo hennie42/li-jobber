@@ -4,7 +4,7 @@
 
 <PageTitle>Start / Overview</PageTitle>
 
-<header class="card-panel setup-header">
+<header class="card-panel setup-header dashboard-hero">
     <div class="setup-header-row">
         <div>
             <div class="field-label">Start</div>
@@ -34,8 +34,8 @@
     </div>
 </header>
 
-<section class="content-grid setup-grid">
-    <section class="card-panel stack-gap">
+<section class="content-grid setup-grid dashboard-card-grid">
+    <section class="card-panel stack-gap dashboard-station-card">
         <div class="field-label">LLM</div>
         <h3>Selection and related work</h3>
         <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
@@ -62,7 +62,7 @@
         </div>
     </section>
 
-    <section class="card-panel stack-gap">
+    <section class="card-panel stack-gap dashboard-station-card">
         <div class="field-label">LinkedIn</div>
         <h3>Profile import and review</h3>
         <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
@@ -83,7 +83,7 @@
         </div>
     </section>
 
-    <section class="card-panel stack-gap">
+    <section class="card-panel stack-gap dashboard-station-card">
         <div class="field-label">Differentiators</div>
         <h3>Personal positioning</h3>
         <div class="status-chip @(Workspace.ApplicantDifferentiatorProfile.HasContent ? "status-ok" : "status-pending")">
@@ -110,7 +110,7 @@
     </section>
 </section>
 
-<section class="card-panel stack-gap">
+<section class="card-panel stack-gap job-ledger-panel">
     <div class="hero-row">
         <div>
             <div class="field-label">Jobs</div>
@@ -136,7 +136,7 @@
     }
     else
     {
-        <table class="compact-grid">
+        <table class="compact-grid ledger-table">
             <thead>
                 <tr><th>Jobset</th><th>Status</th><th>Fit</th><th>Subtasks</th><th></th></tr>
             </thead>

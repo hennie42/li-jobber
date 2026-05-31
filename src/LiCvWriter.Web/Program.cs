@@ -169,6 +169,23 @@ app.MapGet("/api/health/foundry/acceleration", async (IFoundryCatalogClient cata
     return Results.Ok(result.Acceleration);
 });
 
+app.MapGet("/api/files/exported", (string? path, WorkspaceSession workspace) =>
+{
+    var requestedPath = NormalizeExportDownloadPath(path);
+    if (requestedPath is null || !IsKnownExportedFile(workspace, requestedPath))
+    {
+        return Results.NotFound();
+    }
+
+    var fullPath = Path.GetFullPath(requestedPath);
+    if (!File.Exists(fullPath))
+    {
+        return Results.NotFound();
+    }
+
+    return Results.File(fullPath, "application/octet-stream", Path.GetFileName(fullPath));
+});
+
 app.MapPost("/api/benchmarks/model-queue", (StartModelBenchmarkRequest request, ModelBenchmarkCoordinator coordinator) =>
 {
     try
@@ -354,52 +371,118 @@ static Uri NormalizeApiBase(string baseUrl)
     return new Uri(normalized, UriKind.Absolute);
 }
 
+static bool IsKnownExportedFile(WorkspaceSession workspace, string requestedPath)
+{
+    string requestedFullPath;
+    try
+    {
+        requestedFullPath = Path.GetFullPath(requestedPath.Trim());
+    }
+    catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        return false;
+    }
+
+    return workspace.JobSets
+        .SelectMany(static jobSet => jobSet.Exports)
+        .Any(export => IsSamePath(export.FilePath, requestedFullPath));
+}
+
+static string? NormalizeExportDownloadPath(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return null;
+    }
+
+    var normalized = path.Trim();
+    if (OperatingSystem.IsWindows() && normalized.EndsWith("?", StringComparison.Ordinal))
+    {
+        normalized = normalized.TrimEnd('?');
+    }
+
+    return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+}
+
+static bool IsSamePath(string? candidatePath, string requestedFullPath)
+{
+    if (string.IsNullOrWhiteSpace(candidatePath))
+    {
+        return false;
+    }
+
+    try
+    {
+        return string.Equals(Path.GetFullPath(candidatePath.Trim()), requestedFullPath, StringComparison.OrdinalIgnoreCase);
+    }
+    catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        return false;
+    }
+}
+
 static void RegisterHostLifetimeDiagnostics(WebApplication app, ILogger logger)
 {
     var lifetime = app.Lifetime;
     var processId = Environment.ProcessId;
 
     lifetime.ApplicationStarted.Register(() =>
-        logger.LogInformation("Application started. ProcessId={ProcessId} Environment={EnvironmentName} ContentRoot={ContentRoot}",
+        TryLogHostLifetime(() => logger.LogInformation("Application started. ProcessId={ProcessId} Environment={EnvironmentName} ContentRoot={ContentRoot}",
             processId,
             app.Environment.EnvironmentName,
-            app.Environment.ContentRootPath));
+            app.Environment.ContentRootPath)));
 
     lifetime.ApplicationStopping.Register(() =>
-        logger.LogWarning("Application stopping. ProcessId={ProcessId}", processId));
+        TryLogHostLifetime(() => logger.LogWarning("Application stopping. ProcessId={ProcessId}", processId)));
 
     lifetime.ApplicationStopped.Register(() =>
-        logger.LogWarning("Application stopped. ProcessId={ProcessId}", processId));
+        TryLogHostLifetime(() => logger.LogWarning("Application stopped. ProcessId={ProcessId}", processId)));
 
     AppDomain.CurrentDomain.ProcessExit += (_, _) =>
-        logger.LogWarning("Process exit raised. ProcessId={ProcessId}", processId);
+        TryLogHostLifetime(() => logger.LogWarning("Process exit raised. ProcessId={ProcessId}", processId));
 
     AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
     {
         if (eventArgs.ExceptionObject is Exception exception)
         {
-            logger.LogCritical(exception,
+            TryLogHostLifetime(() => logger.LogCritical(exception,
                 "Unhandled exception reached AppDomain. ProcessId={ProcessId} IsTerminating={IsTerminating}",
                 processId,
-                eventArgs.IsTerminating);
+                eventArgs.IsTerminating));
             return;
         }
 
-        logger.LogCritical(
+        TryLogHostLifetime(() => logger.LogCritical(
             "Unhandled non-exception object reached AppDomain. ProcessId={ProcessId} IsTerminating={IsTerminating} PayloadType={PayloadType}",
             processId,
             eventArgs.IsTerminating,
-            eventArgs.ExceptionObject?.GetType().FullName ?? "<null>");
+            eventArgs.ExceptionObject?.GetType().FullName ?? "<null>"));
     };
 
     TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
     {
-        logger.LogError(eventArgs.Exception,
+        TryLogHostLifetime(() => logger.LogError(eventArgs.Exception,
             "Unobserved task exception captured. ProcessId={ProcessId}",
-            processId);
+            processId));
         eventArgs.SetObserved();
     };
 }
+
+static void TryLogHostLifetime(Action logAction)
+{
+    try
+    {
+        logAction();
+    }
+    catch (Exception exception) when (IsDisposedLoggingException(exception))
+    {
+    }
+}
+
+static bool IsDisposedLoggingException(Exception exception)
+    => exception is ObjectDisposedException
+        || exception is AggregateException aggregateException
+        && aggregateException.Flatten().InnerExceptions.Any(IsDisposedLoggingException);
 
 static void TryEnableStaticWebAssets(WebApplicationBuilder builder)
 {

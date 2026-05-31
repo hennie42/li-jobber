@@ -160,6 +160,113 @@ public sealed class LinkedInExportImporterTests
     }
 
     [Fact]
+    public async Task ImportMemberSnapshotAsync_WhenRecommendationsDomainIncludesGivenRows_ImportsOnlyReceivedRecommendations()
+    {
+        using var httpClient = new HttpClient(new StubMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {
+                    "paging": { "start": 0, "count": 10, "links": [], "total": 1 },
+                    "elements": [
+                        {
+                            "snapshotDomain": "PROFILE",
+                            "snapshotData": [
+                                {
+                                    "First Name": "Alex",
+                                    "Last Name": "Taylor",
+                                    "Headline": "Consultant"
+                                }
+                            ]
+                        },
+                        {
+                            "snapshotDomain": "RECOMMENDATIONS",
+                            "snapshotData": [
+                                {
+                                    "First Name": "Jordan",
+                                    "Last Name": "Morgan",
+                                    "Recommendation Type": "RECEIVED",
+                                    "Company": "Example Advisory",
+                                    "Job Title": "Managing Director",
+                                    "Text": "Alex brings grounded architecture judgment.",
+                                    "Creation Date": "03/29/26"
+                                },
+                                {
+                                    "First Name": "Alex",
+                                    "Last Name": "Taylor",
+                                    "Recommendation Type": "GIVEN",
+                                    "Company": "Partner Studio",
+                                    "Job Title": "Principal Consultant",
+                                    "Text": "Jordan is an excellent collaborator.",
+                                    "Creation Date": "03/30/26"
+                                }
+                            ]
+                        }
+                    ]
+                }
+                """)
+        }));
+
+        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
+        var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
+
+        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+
+        var recommendation = Assert.Single(result.Profile.Recommendations);
+        Assert.Equal("Jordan Morgan", recommendation.Author.FullName);
+        Assert.Equal("Example Advisory", recommendation.Company);
+        Assert.Equal("Managing Director", recommendation.JobTitle);
+        Assert.Equal("Alex brings grounded architecture judgment.", recommendation.Text);
+        Assert.Contains("Recommendations_Received.csv", result.Inspection.DiscoveredFiles);
+    }
+
+    [Fact]
+    public async Task ImportMemberSnapshotAsync_WhenRecommendationsDomainLacksReceivedMarker_IgnoresSnapshotRecommendations()
+    {
+        using var httpClient = new HttpClient(new StubMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {
+                    "paging": { "start": 0, "count": 10, "links": [], "total": 1 },
+                    "elements": [
+                        {
+                            "snapshotDomain": "PROFILE",
+                            "snapshotData": [
+                                {
+                                    "First Name": "Alex",
+                                    "Last Name": "Taylor",
+                                    "Headline": "Consultant"
+                                }
+                            ]
+                        },
+                        {
+                            "snapshotDomain": "RECOMMENDATIONS",
+                            "snapshotData": [
+                                {
+                                    "Company": "Partner Studio",
+                                    "Creation Date": "03/30/26",
+                                    "First Name": "Jordan",
+                                    "Job Title": "Principal Consultant",
+                                    "Last Name": "Morgan",
+                                    "Status": "",
+                                    "Text": "Jordan is an excellent collaborator."
+                                }
+                            ]
+                        }
+                    ]
+                }
+                """)
+        }));
+
+        var snapshotImporter = new LinkedInMemberSnapshotImporter(httpClient, new LinkedInAuthOptions(), TimeProvider.System);
+        var importer = new LinkedInExportImporter(new SimpleCsvParser(), new LinkedInPartialDateParser(), snapshotImporter);
+
+        var result = await importer.ImportMemberSnapshotAsync("dma-token");
+
+        Assert.Empty(result.Profile.Recommendations);
+        Assert.Contains(result.Warnings, static warning => warning.Contains("not marked as incoming/received", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ImportMemberSnapshotAsync_WhenConfiguredVersionIsInactive_RetriesWithRecentMonthlyVersion()
     {
         var requests = new List<HttpRequestMessage>();

@@ -2,6 +2,8 @@ namespace LiCvWriter.Infrastructure.LinkedIn;
 
 public static class LinkedInExportFileMap
 {
+    internal const string SnapshotDomainColumn = "_LiCvWriter Snapshot Domain";
+
     public const string Profile = "Profile.csv";
     public const string Positions = "Positions.csv";
     public const string Education = "Education.csv";

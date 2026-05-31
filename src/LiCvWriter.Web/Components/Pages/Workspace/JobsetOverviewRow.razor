@@ -3,7 +3,7 @@
 
 <div class="overview-row">
     <div class="overview-row-topline">
-        <label class="checkbox-row" title="Select this job set for the batch run">
+        <label class="checkbox-row overview-row-selector" title="Select this job set for the batch run">
             <input type="checkbox" checked="@JobSet.IsSelectedForBatch" @onchange="HandleBatchSelectionChanged" />
             <span>Select</span>
         </label>
@@ -58,7 +58,7 @@
             {
                 @if (!string.IsNullOrWhiteSpace(export.FilePath))
                 {
-                    <a class="meta-chip meta-chip-link" href="@LocalFileLinkBuilder.BuildFileUri(export.FilePath)" target="_blank" rel="noopener">@FormatDocumentKind(export.Kind): @Path.GetFileName(export.FilePath)</a>
+                    <a class="meta-chip meta-chip-link" href="@LocalFileLinkBuilder.BuildExportDownloadUri(export.FilePath)">@FormatDocumentKind(export.Kind): @Path.GetFileName(export.FilePath)</a>
                 }
                 else
                 {

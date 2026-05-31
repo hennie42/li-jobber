@@ -12,21 +12,7 @@
             </section>
 
             <section class="sidebar-panel sidebar-monitor-panel">
-                <div class="field-label">Reasoning Monitor</div>
-                <div class="crt-monitor sidebar-crt-monitor">
-                    <div class="crt-monitor-bezel sidebar-crt-bezel">
-                        <div class="crt-monitor-header">
-                            <span class="crt-monitor-led" aria-hidden="true"></span>
-                            <div class="crt-monitor-badge">@GetSidebarMonitorBadgeText()</div>
-                        </div>
-                        <pre class="crt-monitor-screen sidebar-crt-screen @(HasSidebarThinkingText() ? null : "crt-monitor-screen-placeholder")" @ref="reasoningMonitorScreen">@GetSidebarThinkingText()</pre>
-                        <div class="crt-monitor-footer">
-                            <span class="crt-monitor-model-label">HN - Model 101010</span>
-                            <span class="crt-monitor-vent" aria-hidden="true"></span>
-                        </div>
-                    </div>
-                </div>
-                <div class="field-label sidebar-monitor-label-secondary">Activity Monitor</div>
+                <div class="field-label">Activity Monitor</div>
                 <div class="crt-monitor sidebar-crt-monitor sidebar-crt-monitor-activity">
                     <div class="crt-monitor-bezel sidebar-crt-bezel">
                         <div class="crt-monitor-header">
@@ -36,6 +22,20 @@
                         <pre class="crt-monitor-screen sidebar-crt-screen sidebar-crt-screen-activity @(HasSidebarActivityText() ? null : "crt-monitor-screen-placeholder")" @ref="activityMonitorScreen">@GetSidebarActivityMonitorText()</pre>
                         <div class="crt-monitor-footer">
                             <span class="crt-monitor-model-label">@GetSidebarActivityMonitorFooterText()</span>
+                            <span class="crt-monitor-vent" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="field-label sidebar-monitor-label-secondary">Reasoning Monitor</div>
+                <div class="crt-monitor sidebar-crt-monitor">
+                    <div class="crt-monitor-bezel sidebar-crt-bezel">
+                        <div class="crt-monitor-header">
+                            <span class="crt-monitor-led" aria-hidden="true"></span>
+                            <div class="crt-monitor-badge">@GetSidebarMonitorBadgeText()</div>
+                        </div>
+                        <pre class="crt-monitor-screen sidebar-crt-screen @(HasSidebarThinkingText() ? null : "crt-monitor-screen-placeholder")" @ref="reasoningMonitorScreen">@GetSidebarThinkingText()</pre>
+                        <div class="crt-monitor-footer">
+                            <span class="crt-monitor-model-label">HN - Model 101010</span>
                             <span class="crt-monitor-vent" aria-hidden="true"></span>
                         </div>
                     </div>

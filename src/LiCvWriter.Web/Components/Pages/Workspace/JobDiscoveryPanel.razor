@@ -11,7 +11,7 @@
 @inject OperationStatusService Operations
 @inject WorkspaceSession Workspace
 
-<section class="stack-gap">
+<section class="stack-gap discovery-workbench">
     <div class="hero-row">
         <div>
             <p class="muted-text">Build a configurable public search from the loaded profile before turning good matches into Job sets.</p>
@@ -102,7 +102,7 @@
                 <div class="field-label">Suggested jobs</div>
                 @foreach (var suggestion in suggestions)
                 {
-                    <article class="details-card stack-gap">
+                    <article class="details-card stack-gap discovery-suggestion-card">
                         <div class="hero-row">
                             <div>
                                 <h4>@suggestion.Suggestion.Title</h4>

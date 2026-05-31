@@ -8,7 +8,7 @@
 
 <PageTitle>Setup / LinkedIn</PageTitle>
 
-<section class="card-panel setup-header">
+<section class="card-panel setup-header setup-hero setup-hero-linkedin">
     <div class="setup-header-row">
         <div>
             <div class="field-label">Setup</div>
@@ -22,7 +22,7 @@
     </div>
 </section>
 
-<section class="card-panel stack-gap">
+<section class="card-panel stack-gap setup-workbench-card setup-workbench-card-linkedin">
     <div class="field-label">LinkedIn DMA import</div>
     <div class="status-chip @(Workspace.LinkedInAuthorizationStatus.IsAuthorized ? "status-ok" : "status-pending")">
         @Workspace.LinkedInAuthorizationStatus.Message
@@ -75,7 +75,7 @@
 
 @if (Workspace.CandidateProfile is not null)
 {
-    <section class="card-panel stack-gap">
+    <section class="card-panel stack-gap setup-workbench-card profile-review-card">
         <div>
             <div class="field-label">Imported profile</div>
             <h3>@Workspace.CandidateProfile.Name.FullName</h3>

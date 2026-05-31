@@ -320,7 +320,7 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
                 continue;
             }
 
-            WriteCsv(Path.Combine(exportRoot, route.FileName), pair.Value);
+            WriteCsv(Path.Combine(exportRoot, route.FileName), AddSnapshotDomainMarker(pair.Key, pair.Value));
             writtenFiles.Add(route.FileName);
         }
 
@@ -365,6 +365,17 @@ public sealed class LinkedInMemberSnapshotImporter(HttpClient httpClient, Linked
         route = default!;
         return false;
     }
+
+    private static IReadOnlyList<Dictionary<string, string>> AddSnapshotDomainMarker(
+        string domain,
+        IReadOnlyList<Dictionary<string, string>> records)
+        => records.Select(record =>
+            {
+                var copy = new Dictionary<string, string>(record, StringComparer.OrdinalIgnoreCase);
+                copy[LinkedInExportFileMap.SnapshotDomainColumn] = domain;
+                return copy;
+            })
+            .ToArray();
 
     private static IEnumerable<JsonElement> EnumerateElements(JsonElement root)
     {

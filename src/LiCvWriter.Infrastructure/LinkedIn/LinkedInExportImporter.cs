@@ -61,6 +61,12 @@ public sealed class LinkedInExportImporter(
             warnings.Add("Profile.csv did not contain a profile row.");
         }
 
+        var skippedSnapshotRecommendations = CountSkippedSnapshotRecommendations(recommendationsRecordSet);
+        if (skippedSnapshotRecommendations > 0)
+        {
+            warnings.Add($"LinkedIn DMA snapshot returned {skippedSnapshotRecommendations} recommendation rows that were not marked as incoming/received; they were not imported as received recommendations.");
+        }
+
         var profile = new CandidateProfile
         {
             Name = new PersonName(
@@ -174,14 +180,17 @@ public sealed class LinkedInExportImporter(
 
     private IReadOnlyList<RecommendationEntry> MapRecommendations(CsvRecordSet? recordSet)
         => recordSet?.Records
-            .Where(record => string.Equals(Get(record, "Status"), "VISIBLE", StringComparison.OrdinalIgnoreCase))
+            .Where(static record => IsReceivedRecommendation(record))
+            .Where(static record => IsImportableRecommendationStatus(GetFirst(record, "Status", "Visibility", "Recommendation Status")))
             .Select(record => new RecommendationEntry(
-                new PersonName(Get(record, "First Name"), Get(record, "Last Name")),
-                NullIfWhiteSpace(Get(record, "Company")),
-                NullIfWhiteSpace(Get(record, "Job Title")),
-                Get(record, "Text"),
-                Get(record, "Status"),
-                dateParser.Parse(Get(record, "Creation Date"))))
+                new PersonName(
+                    GetFirst(record, "First Name", "Recommender First Name", "From First Name"),
+                    GetFirst(record, "Last Name", "Recommender Last Name", "From Last Name")),
+                NullIfWhiteSpace(GetFirst(record, "Company", "Recommender Company", "Company Name")),
+                NullIfWhiteSpace(GetFirst(record, "Job Title", "Title", "Recommender Title")),
+                GetFirst(record, "Text", "Recommendation", "Recommendation Text", "Content", "Message"),
+                GetFirst(record, "Status", "Visibility", "Recommendation Status"),
+                dateParser.Parse(GetFirst(record, "Creation Date", "Created On", "Created At", "Date"))))
             .Where(static record => !string.IsNullOrWhiteSpace(record.Text))
             .ToArray()
            ?? Array.Empty<RecommendationEntry>();
@@ -314,6 +323,85 @@ public sealed class LinkedInExportImporter(
 
     private static string Get(IReadOnlyDictionary<string, string>? record, string key)
         => record is not null && record.TryGetValue(key, out var value) ? value.Trim() : string.Empty;
+
+    private static string GetFirst(IReadOnlyDictionary<string, string>? record, params string[] keys)
+        => keys.Select(key => Get(record, key)).FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static bool IsReceivedRecommendation(IReadOnlyDictionary<string, string> record)
+    {
+        var direction = ReadRecommendationDirection(record);
+        if (direction is not null)
+        {
+            return direction.Value;
+        }
+
+        return !IsSnapshotRecommendation(record);
+    }
+
+    private static bool? ReadRecommendationDirection(IReadOnlyDictionary<string, string> record)
+    {
+        var directionFields = new[]
+        {
+            "Direction",
+            "Recommendation Direction",
+            "Recommendation Type",
+            "Recommendation Category",
+            "Type",
+            "Category",
+            "Relationship",
+            "Status",
+            "Visibility",
+            "Recommendation Status"
+        };
+
+        foreach (var field in directionFields)
+        {
+            var value = Get(record, field);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (ContainsAny(value, "RECEIVED", "INCOMING", "RECEIVER"))
+            {
+                return true;
+            }
+
+            if (ContainsAny(value, "GIVEN", "SENT", "OUTGOING", "AUTHOR", "AUTHORED", "WRITTEN", "PROVIDED"))
+            {
+                return false;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsSnapshotRecommendation(IReadOnlyDictionary<string, string> record)
+    {
+        var snapshotDomain = Get(record, LinkedInExportFileMap.SnapshotDomainColumn);
+        return snapshotDomain.Equals("RECOMMENDATIONS", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int CountSkippedSnapshotRecommendations(CsvRecordSet? recordSet)
+        => recordSet?.Records.Count(static record => IsSnapshotRecommendation(record) && !IsReceivedRecommendation(record)) ?? 0;
+
+    private static bool IsImportableRecommendationStatus(string status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return true;
+        }
+
+        var normalized = status.Trim();
+        return !normalized.Equals("HIDDEN", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Equals("PRIVATE", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Equals("DELETED", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Equals("REMOVED", StringComparison.OrdinalIgnoreCase)
+            && !normalized.Equals("NOT_VISIBLE", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsAny(string value, params string[] tokens)
+        => tokens.Any(token => value.Contains(token, StringComparison.OrdinalIgnoreCase));
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;

@@ -11,7 +11,7 @@
 
 <PageTitle>Setup / LLM</PageTitle>
 
-<section class="card-panel setup-header">
+<section class="card-panel setup-header setup-hero setup-hero-llm">
     <div class="setup-header-row">
         <div>
             <div class="field-label">Setup</div>
@@ -25,7 +25,7 @@
     </div>
 </section>
 
-<section class="card-panel stack-gap">
+<section class="card-panel stack-gap setup-workbench-card setup-workbench-card-llm">
     <div class="field-label">Local LLM setup</div>
     <div class="status-chip @(Workspace.IsLlmReady ? "status-ok" : "status-pending")">
         @GetStep1StatusMessage()
@@ -54,7 +54,6 @@
     </select>
 
     <section class="details-card stack-gap">
-        <div class="field-label">Session model</div>
         @if (availableSessionModels.Count > 0)
         {
             <label class="field-label" for="sessionModel">Session model</label>
@@ -223,6 +222,19 @@
                     <input type="checkbox" @bind="showAllFoundryModels" @bind:after="ReconcileSelectedActionModels" disabled="@IsModelSelectionBusy" />
                     <span>Show all models</span>
                 </label>
+
+                @if (!showAllFoundryModels && GetHiddenFoundryBenchmarkExclusionNotes() is { Count: > 0 } hiddenBenchmarkExclusions)
+                {
+                    <div class="message warning foundry-exclusion-note">
+                        <strong>@GetHiddenFoundryBenchmarkExclusionHeading(hiddenBenchmarkExclusions.Count)</strong>
+                        <ul class="feature-list compact-list">
+                            @foreach (var exclusion in hiddenBenchmarkExclusions)
+                            {
+                                <li>@exclusion</li>
+                            }
+                        </ul>
+                    </div>
+                }
 
                 @if (visibleFoundryModels.Count == 0)
                 {
@@ -1298,6 +1310,36 @@
 
         return ordered.ToArray();
     }
+
+    private IReadOnlyList<string> GetHiddenFoundryBenchmarkExclusionNotes()
+    {
+        if (foundryCatalog is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        IEnumerable<FoundryCatalogModel> filtered = foundryCatalog.Models;
+        if (!string.IsNullOrWhiteSpace(foundryModelFilter))
+        {
+            var filter = foundryModelFilter.Trim();
+            filtered = filtered.Where(model => model.Alias.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || model.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return filtered
+            .Where(static model => !model.IsTextBenchmarkUsable)
+            .OrderBy(static model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static model => model.Alias, StringComparer.OrdinalIgnoreCase)
+            .Select(static model => string.IsNullOrWhiteSpace(model.TextBenchmarkUnusableReason)
+                ? $"{model.DisplayName}: {GetFoundryModelState(model)}."
+                : $"{model.DisplayName}: {model.TextBenchmarkUnusableReason} {GetFoundryModelState(model)}.")
+            .ToArray();
+    }
+
+    private static string GetHiddenFoundryBenchmarkExclusionHeading(int count)
+        => count == 1
+            ? "1 catalog model hidden from batch actions."
+            : $"{count} catalog models hidden from batch actions.";
 
     private IReadOnlyList<ModelBenchmarkResult> GetBenchmarkResultsForDisplay()
     {

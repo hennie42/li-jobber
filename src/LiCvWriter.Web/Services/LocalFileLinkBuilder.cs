@@ -50,6 +50,16 @@ public static class LocalFileLinkBuilder
         return string.IsNullOrWhiteSpace(folder) ? "#" : BuildFileUri(folder);
     }
 
+    public static string BuildExportDownloadUri(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return "#";
+        }
+
+        return $"/api/files/exported?path={Uri.EscapeDataString(filePath.Trim())}";
+    }
+
     private static bool TryBuildWindowsDriveUri(string path, out string uri)
     {
         uri = string.Empty;

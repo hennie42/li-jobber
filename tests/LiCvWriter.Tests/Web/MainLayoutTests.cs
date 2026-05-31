@@ -94,7 +94,9 @@ public sealed class MainLayoutTests
 
         cut.WaitForAssertion(() =>
         {
-            var reasoningMonitor = cut.Find(".sidebar-crt-screen").TextContent;
+            var reasoningMonitor = cut.FindAll(".sidebar-crt-screen")
+                .Single(element => !element.ClassList.Contains("sidebar-crt-screen-activity"))
+                .TextContent;
 
             Assert.DoesNotContain(
                 "No reasoning text captured yet. Run a streamed LLM operation to light up this monitor.",

@@ -27,4 +27,12 @@ public sealed class LocalFileLinkBuilderTests
 
         Assert.Equal("#", uri);
     }
+
+    [Fact]
+    public void BuildExportDownloadUri_WindowsPath_ReturnsEncodedAppRoute()
+    {
+        var uri = LocalFileLinkBuilder.BuildExportDownloadUri(@"C:\Exports\Job One\cover letter.docx");
+
+        Assert.Equal("/api/files/exported?path=C%3A%5CExports%5CJob%20One%5Ccover%20letter.docx", uri);
+    }
 }
