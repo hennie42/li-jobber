@@ -54,6 +54,18 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
         });
     }
 
+    public async Task SelectOllamaProviderAsync()
+    {
+        await ProviderSelect.SelectOptionAsync("Ollama");
+        await Expect(page.GetByText("Ollama model installation and removal stay outside the app", new PageGetByTextOptions
+        {
+            Exact = false
+        })).ToBeVisibleAsync(new LocatorAssertionsToBeVisibleOptions
+        {
+            Timeout = 120_000
+        });
+    }
+
     public async Task FilterFoundryCatalogAsync(string filter)
     {
         await FoundryModelFilter.FillAsync(filter);
@@ -78,10 +90,16 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
     }
 
     public async Task SelectFoundryModelAsync(string alias)
+        => await SelectCatalogModelAsync(alias);
+
+    public async Task SelectOllamaModelAsync(string model)
+        => await SelectCatalogModelAsync(model);
+
+    private async Task SelectCatalogModelAsync(string modelName)
     {
         var row = CatalogRows.Filter(new LocatorFilterOptions
         {
-            HasText = alias
+            HasText = modelName
         }).First;
         var checkbox = row.Locator("input[type='checkbox']");
 
@@ -363,6 +381,18 @@ public sealed class LlmSetupPage(IPage page, string baseUrl)
             .Where(static alias => !string.IsNullOrWhiteSpace(alias))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static alias => alias, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> GetVisibleOllamaModelsAsync()
+    {
+        var modelCells = CatalogRows.Locator("td:nth-child(2)");
+        var models = await modelCells.AllInnerTextsAsync();
+        return models
+            .Select(static model => model.Trim())
+            .Where(static model => !string.IsNullOrWhiteSpace(model))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static model => model, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 

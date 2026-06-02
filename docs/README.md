@@ -12,6 +12,7 @@ This folder is where the wiring diagrams, prompt inventories, design notes, and 
 - [llm-cv-chunking-design.md](llm-cv-chunking-design.md) — outline-first CV generation design and planned evolution of the CV pipeline
 - [playwright-demo.html](https://hennie42.github.io/li-jobber/playwright-demo.html) — browser-playable full-app Playwright E2E demo video
 - [playwright-job-workbench-demo.md](playwright-job-workbench-demo.md) — generated screenshots, transcript, tracked WebM link, and Playwright artifact validation notes
+- [playwright-benchmark-demo.md](playwright-benchmark-demo.md) — Ollama plus Foundry Local benchmark demo assets, transcript, tracked media outputs, and regeneration notes
 
 ## Read This If You Want To...
 
@@ -24,12 +25,13 @@ This folder is where the wiring diagrams, prompt inventories, design notes, and 
 | Follow planned CV-generation improvements | [llm-cv-chunking-design.md](llm-cv-chunking-design.md) |
 | Watch the full app E2E demo | [playwright-demo.html](https://hennie42.github.io/li-jobber/playwright-demo.html) |
 | Review generated demo screenshots and validation notes | [playwright-job-workbench-demo.md](playwright-job-workbench-demo.md) |
+| Review the dual-provider benchmark demo and media outputs | [playwright-benchmark-demo.md](playwright-benchmark-demo.md) |
 
 ## Contributor Notes
 
 - Start with [details.md](details.md) if you are changing behavior rather than just wording.
 - If you change prompt behavior, update both [llm-prompt-inventory.md](llm-prompt-inventory.md) and [llm-local-prompt-evals.md](llm-local-prompt-evals.md).
-- Live Playwright E2E tests are opt-in. Install browsers, start Ollama, then set `LICVWRITER_RUN_PLAYWRIGHT_E2E=1` before running the E2E subset. Set `LICVWRITER_PLAYWRIGHT_WRITE_DEMO=1` to regenerate the guided screenshots, local WebM copy, and Playwright trace; set `LICVWRITER_PLAYWRIGHT_WRITE_FULL_DEMO=1` to regenerate the full-app video and copy it into the tracked docs asset. The demo validators check WebM headers, size thresholds, markdown links, screenshots, and trace contents.
+- Live Playwright E2E tests are opt-in. Install browsers, start Ollama, then set `LICVWRITER_RUN_PLAYWRIGHT_E2E=1` before running the E2E subset. Set `LICVWRITER_PLAYWRIGHT_WRITE_DEMO=1` to regenerate the guided screenshots, local WebM copy, and Playwright trace; set `LICVWRITER_PLAYWRIGHT_WRITE_FULL_DEMO=1` to regenerate the full-app video and copy it into the tracked docs asset; set `LICVWRITER_PLAYWRIGHT_WRITE_BENCHMARK_DEMO=1` to regenerate the benchmark-specific WebM under `docs/assets/playwright-benchmark-demo/`. The demo validators check WebM headers, size thresholds, markdown links, screenshots, and trace contents.
 - Before pushing, run `pwsh .\scripts\Verify-GitHubPushSafety.ps1` from the repo root.
 
 ## Short Version

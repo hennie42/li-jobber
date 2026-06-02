@@ -331,7 +331,7 @@ if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Playwri
         }
 
         var availability = await llmClient.VerifyModelAvailabilityAsync(cancellationToken);
-        if (!availability.Installed || availability.AvailableModels.Count == 0)
+        if (availability.AvailableModels.Count == 0)
         {
             return Results.BadRequest("Ollama is reachable, but no installed model is available for the Playwright demo seed.");
         }
@@ -513,7 +513,7 @@ static void TryEnableStaticWebAssets(WebApplicationBuilder builder)
 static string SelectDemoModel(LlmModelAvailability availability, string configuredModel)
 {
     var configuredMatch = availability.AvailableModels.FirstOrDefault(model => model.Equals(configuredModel, StringComparison.OrdinalIgnoreCase));
-    return configuredMatch ?? availability.Model ?? availability.AvailableModels[0];
+    return configuredMatch ?? availability.AvailableModels[0];
 }
 
 static bool IsFullPlaywrightDemo(HttpContext httpContext)

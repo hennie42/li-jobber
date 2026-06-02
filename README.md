@@ -19,6 +19,8 @@ Watch the [full Playwright E2E demo](https://hennie42.github.io/li-jobber/playwr
 
 The player source lives at [docs/playwright-demo.html](docs/playwright-demo.html). GitHub Pages should be enabled from the `docs/` folder for browser playback from the online repo.
 
+For the latest local-LLM benchmark walkthrough, see [docs/playwright-benchmark-demo.md](docs/playwright-benchmark-demo.md). That recorded demo covers one Ollama model and one Foundry Local model on the shared Setup / LLM benchmark surface, includes the finished Foundry results state, and ships with tracked WebM plus silent LinkedIn-ready MP4 exports.
+
 ## Why It Exists
 
 Applying for jobs is repetitive.
@@ -57,6 +59,7 @@ dotnet run --project .\src\LiCvWriter.Web\LiCvWriter.Web.csproj
 - .NET 10 SDK
 - Ollama running at `http://localhost:11434`
 - at least one local Ollama model
+- Foundry Local installed if you want to run the dual-provider benchmark demo
 - a LinkedIn DMA portability token with `r_dma_portability_self_serve`, or a LinkedIn CSV export
 
 ## Where The Technical Details Live
