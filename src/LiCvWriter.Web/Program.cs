@@ -70,32 +70,7 @@ builder.Services.AddSingleton<IDocumentExportService, TemplateBasedDocumentExpor
 builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
 
 builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
-builder.Services.AddHttpClient<OllamaClient>(client =>
-{
-    client.BaseAddress = NormalizeApiBase(ollamaOptions.BaseUrl);
-    client.Timeout = Timeout.InfiniteTimeSpan;
-});
-builder.Services.AddSingleton<FoundryLocalManagerAccessor>();
-builder.Services.AddSingleton<DefaultFoundrySdkBridge>();
-builder.Services.AddSingleton<IFoundrySdkBridge>(provider =>
-    FoundrySdkBridgeLoader.Create(
-        provider.GetRequiredService<FoundryOptions>(),
-        provider.GetRequiredService<ILoggerFactory>(),
-        provider.GetRequiredService<DefaultFoundrySdkBridge>()));
-builder.Services.AddSingleton<FoundryCatalogClient>();
-builder.Services.AddSingleton<PlaywrightFoundryCatalogClient>();
-builder.Services.AddSingleton<IFoundryCatalogClient>(provider =>
-    provider.GetRequiredService<PlaywrightFoundryCatalogClient>());
-builder.Services.AddScoped<FoundryLlmClient>();
-builder.Services.AddScoped<WorkspaceLlmClient>();
-builder.Services.AddScoped<PromptCapturingLlmClient>(provider =>
-    new PromptCapturingLlmClient(provider.GetRequiredService<WorkspaceLlmClient>()));
-builder.Services.AddScoped<ILlmClient>(provider =>
-    provider.GetRequiredService<PromptCapturingLlmClient>());
-builder.Services.AddScoped<OllamaCapacityProbe>();
-builder.Services.AddScoped<OllamaModelBenchmarkService>();
-builder.Services.AddSingleton<FoundryBenchmarkLifecycleService>();
-builder.Services.AddSingleton<ModelBenchmarkCoordinator>();
+builder.Services.AddLiCvWriterLlmServices(ollamaOptions);
 
 builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(client =>
 {
@@ -360,17 +335,6 @@ app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode();
 
 app.Run();
-
-static Uri NormalizeApiBase(string baseUrl)
-{
-    var normalized = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:11434/api/" : baseUrl.Trim();
-    if (!normalized.EndsWith('/'))
-    {
-        normalized += "/";
-    }
-
-    return new Uri(normalized, UriKind.Absolute);
-}
 
 static bool IsKnownExportedFile(WorkspaceSession workspace, string requestedPath)
 {

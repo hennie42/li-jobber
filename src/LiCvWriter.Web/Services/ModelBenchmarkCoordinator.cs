@@ -581,59 +581,7 @@ public sealed class ModelBenchmarkCoordinator(
         return result;
     }
 
-    private static IReadOnlyList<string> GetLoadedFoundryAliases(FoundryCatalogSnapshot snapshot)
-        => snapshot.Models
-            .Where(static model => model.IsLoaded)
-            .Select(static model => model.Alias)
-            .Concat((snapshot.Availability.RunningModels ?? Array.Empty<LlmRunningModel>()).Select(static model => model.Name))
-            .Where(static alias => !string.IsNullOrWhiteSpace(alias))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-    private static ModelBenchmarkResult ApplyFoundryAccelerationNotes(ModelBenchmarkResult result, FoundryAccelerationSnapshot acceleration)
-        => (acceleration.Readiness == FoundryAccelerationReadiness.Ready
-            ? result
-            : AppendBenchmarkNote(result, $"Foundry acceleration during benchmark: {acceleration.GuidanceMessage}")) with
-        {
-            Diagnostics = MergeDiagnostics(
-                result.Diagnostics,
-                CreateFoundryPreparationDiagnostics(acceleration))
-        };
-
-    private static ModelBenchmarkDiagnostics CreateFoundryPreparationDiagnostics(
-        FoundryAccelerationSnapshot acceleration,
-        TimeSpan? preparationDuration = null)
-        => ModelBenchmarkDiagnostics.Empty with
-        {
-            PreparationDuration = preparationDuration,
-            AccelerationReadiness = acceleration.Readiness.ToString(),
-            AccelerationStatusMessage = acceleration.StatusMessage,
-            RuntimePathSummary = BuildFoundryRuntimePathSummary(acceleration)
-        };
-
-    private static string BuildFoundryRuntimePathSummary(FoundryAccelerationSnapshot acceleration)
-    {
-        if (!acceleration.IsSupported)
-        {
-            return "Foundry Local did not expose Windows ML acceleration details for this runtime.";
-        }
-
-        var registeredProviders = acceleration.ExecutionProviders
-            .Where(static provider => provider.IsRegistered)
-            .Select(static provider => provider.DisplayName)
-            .ToArray();
-
-        if (registeredProviders.Length > 0)
-        {
-            return $"Registered execution providers: {string.Join(", ", registeredProviders)}.";
-        }
-
-        return acceleration.ExecutionProviders.Count > 0
-            ? "Execution providers were discovered, but none are confirmed registered yet."
-            : "Foundry did not report any execution providers for this runtime.";
-    }
-
-    private static ModelBenchmarkDiagnostics MergeDiagnostics(
+    internal static ModelBenchmarkDiagnostics MergeDiagnostics(
         ModelBenchmarkDiagnostics? baseline,
         ModelBenchmarkDiagnostics? incoming)
     {
@@ -655,20 +603,6 @@ public sealed class ModelBenchmarkCoordinator(
             RuntimePathSummary = incoming.RuntimePathSummary ?? current.RuntimePathSummary
         };
     }
-
-    private static bool ShouldRegisterFoundryAcceleration(FoundryAccelerationSnapshot acceleration)
-        => acceleration.Readiness is FoundryAccelerationReadiness.NeedsRegistration or FoundryAccelerationReadiness.PartiallyReady;
-
-    private sealed record FoundryPreparationResult(FoundryCatalogSnapshot Snapshot, IReadOnlyList<string> Notes);
-
-    private sealed record FoundryIsolationResult(FoundryCatalogSnapshot Snapshot, IReadOnlyList<string> Notes);
-
-    private IReadOnlyList<string> GetPreferredExecutionProviders()
-        => foundryOptions.PreferredExecutionProviders
-            .Where(static providerName => !string.IsNullOrWhiteSpace(providerName))
-            .Select(static providerName => providerName.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
 
     private static bool ShouldRemoveFoundryModelAfterBenchmark(ModelBenchmarkResult result)
         => result.Fit == OllamaCapacityFit.TooLargeForInteractive;
