@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text.Json;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
@@ -72,25 +71,7 @@ builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
 builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
 builder.Services.AddLiCvWriterLlmServices(ollamaOptions);
 
-builder.Services.AddHttpClient<IJobResearchService, HttpJobResearchService>(client =>
-{
-    client.Timeout = TimeSpan.FromMinutes(1);
-})
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
-    });
-
-builder.Services.AddHttpClient<IJobDiscoveryService, HttpJobDiscoveryService>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(30);
-})
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
-    });
+builder.Services.AddLiCvWriterJobHttpServices();
 
 var app = builder.Build();
 var lifetimeLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LiCvWriter.Web.HostLifetime");
