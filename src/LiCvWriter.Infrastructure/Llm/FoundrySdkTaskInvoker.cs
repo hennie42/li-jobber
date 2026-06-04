@@ -1,9 +1,19 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace LiCvWriter.Infrastructure.Foundry;
 
 internal static class FoundrySdkTaskInvoker
 {
+    private static readonly ConcurrentDictionary<MethodCacheKey, TaskMethodResolution> taskMethodCache = new();
+    private static readonly ConcurrentDictionary<MethodCacheKey, MethodResolution> publicInstanceMethodCache = new();
+
+    public static MethodInfo? GetOptionalPublicInstanceMethod(object target, string methodName)
+        => publicInstanceMethodCache.GetOrAdd(
+            new MethodCacheKey(target.GetType(), methodName),
+            static key => new MethodResolution(key.TargetType.GetMethod(key.MethodName, BindingFlags.Instance | BindingFlags.Public)))
+            .Method;
+
     public static async Task InvokeOptionalAsync(object target, string methodName, CancellationToken cancellationToken)
     {
         var invocation = ResolveTaskInvocation(target, methodName, cancellationToken);
@@ -42,7 +52,22 @@ internal static class FoundrySdkTaskInvoker
 
     private static TaskInvocation? ResolveTaskInvocation(object target, string methodName, CancellationToken cancellationToken)
     {
-        foreach (var method in target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
+        var resolution = taskMethodCache.GetOrAdd(
+            new MethodCacheKey(target.GetType(), methodName),
+            static key => ResolveTaskMethod(key.TargetType, key.MethodName));
+
+        return resolution.ParameterKind switch
+        {
+            TaskMethodParameterKind.None when resolution.Method is not null => new TaskInvocation(resolution.Method, []),
+            TaskMethodParameterKind.CancellationToken when resolution.Method is not null => new TaskInvocation(resolution.Method, [cancellationToken]),
+            TaskMethodParameterKind.NullableCancellationToken when resolution.Method is not null => new TaskInvocation(resolution.Method, [(CancellationToken?)cancellationToken]),
+            _ => null
+        };
+    }
+
+    private static TaskMethodResolution ResolveTaskMethod(Type targetType, string methodName)
+    {
+        foreach (var method in targetType.GetMethods(BindingFlags.Instance | BindingFlags.Public))
         {
             if (!string.Equals(method.Name, methodName, StringComparison.Ordinal))
             {
@@ -52,34 +77,51 @@ internal static class FoundrySdkTaskInvoker
             var parameters = method.GetParameters();
             if (parameters.Length == 0)
             {
-                return new TaskInvocation(method, []);
+                return new TaskMethodResolution(method, TaskMethodParameterKind.None);
             }
 
-            if (parameters.Length == 1 && TryBuildCancellationTokenArgument(parameters[0].ParameterType, cancellationToken, out var argument))
+            if (parameters.Length == 1 && TryGetCancellationTokenParameterKind(parameters[0].ParameterType, out var parameterKind))
             {
-                return new TaskInvocation(method, [argument]);
+                return new TaskMethodResolution(method, parameterKind);
             }
         }
 
-        return null;
+        return TaskMethodResolution.Missing;
     }
 
-    private static bool TryBuildCancellationTokenArgument(Type parameterType, CancellationToken cancellationToken, out object? argument)
+    private static bool TryGetCancellationTokenParameterKind(Type parameterType, out TaskMethodParameterKind parameterKind)
     {
         if (parameterType == typeof(CancellationToken))
         {
-            argument = cancellationToken;
+            parameterKind = TaskMethodParameterKind.CancellationToken;
             return true;
         }
 
         if (parameterType == typeof(CancellationToken?))
         {
-            argument = (CancellationToken?)cancellationToken;
+            parameterKind = TaskMethodParameterKind.NullableCancellationToken;
             return true;
         }
 
-        argument = null;
+        parameterKind = TaskMethodParameterKind.Missing;
         return false;
+    }
+
+    private readonly record struct MethodCacheKey(Type TargetType, string MethodName);
+
+    private sealed record MethodResolution(MethodInfo? Method);
+
+    private sealed record TaskMethodResolution(MethodInfo? Method, TaskMethodParameterKind ParameterKind)
+    {
+        public static TaskMethodResolution Missing { get; } = new(null, TaskMethodParameterKind.Missing);
+    }
+
+    private enum TaskMethodParameterKind
+    {
+        Missing,
+        None,
+        CancellationToken,
+        NullableCancellationToken
     }
 
     private sealed record TaskInvocation(MethodInfo Method, object?[] Arguments);

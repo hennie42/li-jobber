@@ -253,7 +253,7 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
             return FoundryAccelerationSnapshot.Disabled("Windows ML acceleration is disabled in configuration.");
         }
 
-        var discoverMethod = manager.GetType().GetMethod("DiscoverEps", BindingFlags.Instance | BindingFlags.Public);
+        var discoverMethod = FoundrySdkTaskInvoker.GetOptionalPublicInstanceMethod(manager, "DiscoverEps");
         if (discoverMethod is null)
         {
             return FoundryAccelerationSnapshot.Unavailable("This Foundry SDK build does not expose execution-provider discovery APIs.");

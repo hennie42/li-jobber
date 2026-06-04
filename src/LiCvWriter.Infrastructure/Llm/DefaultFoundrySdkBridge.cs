@@ -268,7 +268,7 @@ public sealed class DefaultFoundrySdkBridge(FoundryLocalManagerAccessor managerA
             return FoundryAccelerationSnapshot.Unsupported("Windows ML acceleration is only available on Windows.");
         }
 
-        var discoverMethod = manager.GetType().GetMethod("DiscoverEps", BindingFlags.Instance | BindingFlags.Public);
+        var discoverMethod = FoundrySdkTaskInvoker.GetOptionalPublicInstanceMethod(manager, "DiscoverEps");
         if (discoverMethod is null)
         {
             return FoundryAccelerationSnapshot.Unavailable("This Foundry SDK build does not expose execution-provider discovery APIs.");
