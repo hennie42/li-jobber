@@ -40,33 +40,8 @@ builder.Services.AddSingleton(storageOptions);
 builder.Services.AddSingleton(ModelBenchmarkHangClockPolicy.Default);
 builder.Services.AddSingleton(TimeProvider.System);
 
-builder.Services.AddSingleton<SimpleCsvParser>();
-builder.Services.AddSingleton<LinkedInPartialDateParser>();
-builder.Services.AddSingleton<CandidateProfileMergeService>();
-builder.Services.AddSingleton<JobDiscoveryProfileLightService>();
-builder.Services.AddSingleton<JobDiscoverySearchPlanService>();
-builder.Services.AddScoped<JobDiscoverySuggestionService>();
 var defaultSelectedEvidenceCount = builder.Configuration.GetValue("Evidence:DefaultSelectedCount", 30);
-
-builder.Services.AddSingleton<CandidateEvidenceService>();
-builder.Services.AddSingleton<JobFitAnalysisService>();
-builder.Services.AddSingleton(provider =>
-    new EvidenceSelectionService(provider.GetRequiredService<CandidateEvidenceService>(), defaultSelectedEvidenceCount));
-builder.Services.AddSingleton<WorkspaceRecoveryStore>();
-builder.Services.AddSingleton<OperationStatusService>();
-builder.Services.AddSingleton<LlmOperationBroker>();
-builder.Services.AddScoped<LlmTechnologyGapAnalysisService>();
-builder.Services.AddScoped<LlmFitEnhancementService>();
-builder.Services.AddScoped<InsightsDiscoveryApplicantDifferentiatorDraftingService>();
-builder.Services.AddSingleton<WorkspaceSession>();
-builder.Services.AddScoped<JobFitWorkspaceRefreshService>();
-builder.Services.AddSingleton<ILinkedInExportImporter, LinkedInExportImporter>();
-builder.Services.AddSingleton<IInsightsDiscoveryPdfImporter, InsightsDiscoveryPdfImporter>();
-builder.Services.AddSingleton<IAuditStore, LocalMarkdownAuditStore>();
-builder.Services.AddSingleton<IDocumentRenderer, MarkdownDocumentRenderer>();
-builder.Services.AddSingleton<CvQualityValidator>();
-builder.Services.AddSingleton<IDocumentExportService, TemplateBasedDocumentExportService>();
-builder.Services.AddScoped<IDraftGenerationService, DraftGenerationService>();
+builder.Services.AddLiCvWriterWorkspaceServices(defaultSelectedEvidenceCount);
 
 builder.Services.AddHttpClient<LinkedInMemberSnapshotImporter>();
 builder.Services.AddLiCvWriterLlmServices(ollamaOptions);
