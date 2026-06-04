@@ -916,12 +916,17 @@ public sealed class ModelBenchmarkCoordinatorTests
 
         var workspace = new WorkspaceSession(resolvedOllamaOptions, recoveryStore: null, foundryOptions: resolvedFoundryOptions);
         var operations = new OperationStatusService();
+        var foundryLifecycle = new FoundryBenchmarkLifecycleService(
+            workspace,
+            operations,
+            resolvedFoundryOptions,
+            TimeProvider.System);
         var coordinator = new ModelBenchmarkCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             workspace,
             operations,
             resolvedOllamaOptions,
-            resolvedFoundryOptions,
+            foundryLifecycle,
             TimeProvider.System,
             resolvedHangClockPolicy);
 

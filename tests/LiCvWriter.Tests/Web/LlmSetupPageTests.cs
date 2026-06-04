@@ -529,13 +529,14 @@ public sealed class LlmSetupPageTests
         services.AddSingleton(new OperationStatusService());
         services.AddSingleton(workspace);
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<FoundryBenchmarkLifecycleService>();
         services.AddSingleton(sp => new OllamaCapacityProbe(sp.GetRequiredService<ILlmClient>(), sp.GetRequiredService<OllamaOptions>()));
         services.AddSingleton(sp => new ModelBenchmarkCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<WorkspaceSession>(),
             sp.GetRequiredService<OperationStatusService>(),
             sp.GetRequiredService<OllamaOptions>(),
-            sp.GetRequiredService<FoundryOptions>(),
+            sp.GetRequiredService<FoundryBenchmarkLifecycleService>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<ModelBenchmarkHangClockPolicy>()));
     }

@@ -20,7 +20,7 @@ public sealed class ModelBenchmarkCoordinator(
     WorkspaceSession workspace,
     OperationStatusService operations,
     OllamaOptions ollamaOptions,
-    FoundryOptions foundryOptions,
+    FoundryBenchmarkLifecycleService foundryLifecycle,
     TimeProvider timeProvider,
     ModelBenchmarkHangClockPolicy hangClockPolicy)
 {
@@ -162,11 +162,9 @@ public sealed class ModelBenchmarkCoordinator(
                 if (provider == LlmProviderKind.Foundry)
                 {
                     var preparationStopwatch = Stopwatch.StartNew();
-                    var foundryPreparation = await EnsureFoundryModelReadyAsync(
+                    var foundryPreparation = await foundryLifecycle.PrepareAsync(
                         scope.ServiceProvider,
                         model,
-                        index,
-                        models.Count,
                         downloadMissingModels,
                         progress => ReportLiveProgress(model, index, models.Count, results.ToArray(), progress, hangClock),
                         modelLifetimeToken);
@@ -175,7 +173,7 @@ public sealed class ModelBenchmarkCoordinator(
                     foundryPreparationNotes = foundryPreparation.Notes;
                     modelDiagnostics = MergeDiagnostics(
                         modelDiagnostics,
-                        CreateFoundryPreparationDiagnostics(foundryAcceleration, preparationStopwatch.Elapsed));
+                        FoundryBenchmarkLifecycleService.CreatePreparationDiagnostics(foundryAcceleration, preparationStopwatch.Elapsed));
                 }
 
                 var benchmarkService = ResolveBenchmarkService(scope.ServiceProvider, provider);
@@ -198,7 +196,7 @@ public sealed class ModelBenchmarkCoordinator(
 
                 if (foundryAcceleration is not null)
                 {
-                    result = ApplyFoundryAccelerationNotes(result, foundryAcceleration);
+                    result = FoundryBenchmarkLifecycleService.ApplyAccelerationNotes(result, foundryAcceleration);
                 }
 
                 if (provider == LlmProviderKind.Foundry)
@@ -218,7 +216,7 @@ public sealed class ModelBenchmarkCoordinator(
                         hangClock);
 
                     var cleanupStopwatch = Stopwatch.StartNew();
-                    result = await FinalizeFoundryBenchmarkResultAsync(
+                    result = await foundryLifecycle.FinalizeAsync(
                         scope.ServiceProvider,
                         model,
                         result,
@@ -564,338 +562,6 @@ public sealed class ModelBenchmarkCoordinator(
         var foundryClient = serviceProvider.GetRequiredService<FoundryLlmClient>();
         var capacityProbe = new OllamaCapacityProbe(foundryClient, ollamaOptions);
         return new OllamaModelBenchmarkService(capacityProbe, foundryClient, ollamaOptions);
-    }
-
-    /// <summary>
-    /// Prepares a Foundry benchmark model from a clean runtime snapshot so earlier runs do not contaminate the next score.
-    /// </summary>
-    private async Task<FoundryPreparationResult> EnsureFoundryModelReadyAsync(
-        IServiceProvider serviceProvider,
-        string model,
-        int index,
-        int totalCount,
-        bool downloadMissingModels,
-        Action<ModelBenchmarkProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
-        var snapshot = await RefreshFoundrySnapshotAsync(catalogClient, cancellationToken);
-        var isolation = await EnsureFoundryBenchmarkIsolationAsync(catalogClient, model, snapshot, progress, cancellationToken);
-        snapshot = isolation.Snapshot;
-        var currentDiagnostics = CreateFoundryPreparationDiagnostics(snapshot.Acceleration);
-        snapshot = await EnsureFoundryAccelerationReadyAsync(catalogClient, model, index, totalCount, snapshot, progress, cancellationToken);
-        currentDiagnostics = CreateFoundryPreparationDiagnostics(snapshot.Acceleration);
-
-        if (snapshot.Availability.AvailableModels.Any(alias => alias.Equals(model, StringComparison.OrdinalIgnoreCase)))
-        {
-            progress?.Invoke(new ModelBenchmarkProgress(
-                Model: model,
-                Phase: ModelBenchmarkRunPhase.Preparing,
-                Detail: "Model is already cached locally; benchmark warm-up will start next.",
-                CompletedFixtureCount: 0,
-                TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-                Diagnostics: currentDiagnostics));
-            return new FoundryPreparationResult(snapshot, isolation.Notes);
-        }
-
-        if (!downloadMissingModels)
-        {
-            throw new InvalidOperationException($"The Foundry model '{model}' is not cached locally. Download it first or run benchmark with download enabled.");
-        }
-
-        progress?.Invoke(new ModelBenchmarkProgress(
-            Model: model,
-            Phase: ModelBenchmarkRunPhase.Preparing,
-            Detail: "Downloading model before benchmark.",
-            CompletedFixtureCount: 0,
-            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-            Diagnostics: currentDiagnostics));
-
-        await catalogClient.DownloadModelAsync(
-            model,
-            downloadPercent => progress?.Invoke(new ModelBenchmarkProgress(
-                Model: model,
-                Phase: ModelBenchmarkRunPhase.Preparing,
-                Detail: FoundryProgressFormatter.FormatDetail("Downloading model before benchmark", downloadPercent),
-                CompletedFixtureCount: 0,
-                TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-                Diagnostics: currentDiagnostics)),
-            cancellationToken);
-
-        var refreshedSnapshot = await RefreshFoundrySnapshotAsync(catalogClient, cancellationToken);
-        return new FoundryPreparationResult(refreshedSnapshot, isolation.Notes);
-    }
-
-    /// <summary>
-    /// Unloads any models that the Foundry runtime still reports as loaded before the next benchmark starts.
-    /// </summary>
-    private async Task<FoundryIsolationResult> EnsureFoundryBenchmarkIsolationAsync(
-        IFoundryCatalogClient catalogClient,
-        string currentModel,
-        FoundryCatalogSnapshot snapshot,
-        Action<ModelBenchmarkProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        var notes = new List<string>();
-        snapshot = await UnloadFoundryAliasesAsync(
-            catalogClient,
-            currentModel,
-            snapshot,
-            GetLoadedFoundryAliases(snapshot),
-            progress,
-            notes,
-            isRetry: false,
-            cancellationToken);
-
-        var remainingAliases = GetLoadedFoundryAliases(snapshot);
-        if (remainingAliases.Count == 0)
-        {
-            return new FoundryIsolationResult(snapshot, notes);
-        }
-
-        progress?.Invoke(new ModelBenchmarkProgress(
-            Model: currentModel,
-            Phase: ModelBenchmarkRunPhase.Preparing,
-            Detail: "Foundry still reports loaded models after cleanup; retrying targeted unload before benchmark.",
-            CompletedFixtureCount: 0,
-            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-            Diagnostics: CreateFoundryPreparationDiagnostics(snapshot.Acceleration)));
-
-        snapshot = await UnloadFoundryAliasesAsync(
-            catalogClient,
-            currentModel,
-            snapshot,
-            remainingAliases,
-            progress,
-            notes,
-            isRetry: true,
-            cancellationToken);
-
-        remainingAliases = GetLoadedFoundryAliases(snapshot);
-        if (remainingAliases.Count > 0)
-        {
-            notes.Add($"Foundry still reported loaded models before benchmarking {currentModel}: {string.Join(", ", remainingAliases)}. Benchmarking continued without an engine reset.");
-        }
-
-        return new FoundryIsolationResult(snapshot, notes);
-    }
-
-    /// <summary>
-    /// Attempts to unload the provided aliases and records non-fatal isolation issues as benchmark notes.
-    /// </summary>
-    private async Task<FoundryCatalogSnapshot> UnloadFoundryAliasesAsync(
-        IFoundryCatalogClient catalogClient,
-        string currentModel,
-        FoundryCatalogSnapshot snapshot,
-        IReadOnlyList<string> aliases,
-        Action<ModelBenchmarkProgress>? progress,
-        ICollection<string> notes,
-        bool isRetry,
-        CancellationToken cancellationToken)
-    {
-        if (aliases.Count == 0)
-        {
-            return snapshot;
-        }
-
-        foreach (var alias in aliases)
-        {
-            progress?.Invoke(new ModelBenchmarkProgress(
-                Model: currentModel,
-                Phase: ModelBenchmarkRunPhase.Preparing,
-                Detail: isRetry
-                    ? $"Retrying unload for previously loaded Foundry model '{alias}' before benchmark."
-                    : $"Unloading previously loaded Foundry model '{alias}' before benchmark.",
-                CompletedFixtureCount: 0,
-                TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-                Diagnostics: CreateFoundryPreparationDiagnostics(snapshot.Acceleration)));
-
-            try
-            {
-                await catalogClient.UnloadModelAsync(alias, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                operations.Error($"Could not unload previously loaded Foundry model {alias} before benchmarking {currentModel}.", exception.Message);
-                notes.Add($"Foundry benchmark isolation could not unload previously loaded model '{alias}' before benchmarking {currentModel}: {exception.Message}");
-            }
-        }
-
-        return await RefreshFoundrySnapshotAsync(catalogClient, cancellationToken);
-    }
-
-    private async Task<FoundryCatalogSnapshot> EnsureFoundryAccelerationReadyAsync(
-        IFoundryCatalogClient catalogClient,
-        string model,
-        int index,
-        int totalCount,
-        FoundryCatalogSnapshot snapshot,
-        Action<ModelBenchmarkProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        if (!ShouldRegisterFoundryAcceleration(snapshot.Acceleration))
-        {
-            return snapshot;
-        }
-
-        progress?.Invoke(new ModelBenchmarkProgress(
-            Model: model,
-            Phase: ModelBenchmarkRunPhase.Preparing,
-            Detail: "Registering Windows ML execution providers before benchmark.",
-            CompletedFixtureCount: 0,
-            TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-            Diagnostics: CreateFoundryPreparationDiagnostics(snapshot.Acceleration)));
-
-        try
-        {
-            var preferredExecutionProviders = GetPreferredExecutionProviders();
-            var acceleration = await catalogClient.RegisterExecutionProvidersAsync(
-                preferredExecutionProviders.Count == 0 ? null : preferredExecutionProviders,
-                (providerName, registrationPercent) => progress?.Invoke(new ModelBenchmarkProgress(
-                    Model: model,
-                    Phase: ModelBenchmarkRunPhase.Preparing,
-                    Detail: FoundryProgressFormatter.FormatDetail(
-                        string.IsNullOrWhiteSpace(providerName)
-                            ? "Registering Windows ML execution providers"
-                            : $"Registering Windows ML provider '{providerName}'",
-                        registrationPercent),
-                    CompletedFixtureCount: 0,
-                    TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-                    Diagnostics: CreateFoundryPreparationDiagnostics(snapshot.Acceleration))),
-                cancellationToken);
-
-            progress?.Invoke(new ModelBenchmarkProgress(
-                Model: model,
-                Phase: ModelBenchmarkRunPhase.Preparing,
-                Detail: "Windows ML execution providers are ready for Foundry benchmark preparation.",
-                CompletedFixtureCount: 0,
-                TotalFixtureCount: ModelBenchmarkFixtures.DefaultSuite.Count,
-                Diagnostics: CreateFoundryPreparationDiagnostics(acceleration)));
-
-            return snapshot with
-            {
-                Acceleration = acceleration,
-                CollectedAtUtc = timeProvider.GetUtcNow()
-            };
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            operations.Error($"Could not register Windows ML execution providers before benchmarking {model}.", exception.Message);
-            return snapshot with
-            {
-                Acceleration = FoundryAccelerationSnapshot.Unavailable($"Execution-provider registration failed before benchmark: {exception.Message}"),
-                CollectedAtUtc = timeProvider.GetUtcNow()
-            };
-        }
-    }
-
-    private async Task RemoveFoundryModelAsync(IServiceProvider serviceProvider, string model, CancellationToken cancellationToken)
-    {
-        operations.UpdateCurrent($"Removing {model}", "Removing non-fitting model from the local Foundry cache…");
-        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
-        await catalogClient.RemoveModelAsync(model, cancellationToken);
-    }
-
-    private async Task UnloadFoundryModelAsync(IServiceProvider serviceProvider, string model, CancellationToken cancellationToken)
-    {
-        operations.UpdateCurrent($"Unloading {model}", "Releasing the benchmarked Foundry model from the active runtime…");
-        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
-        await catalogClient.UnloadModelAsync(model, cancellationToken);
-    }
-
-    private async Task<ModelBenchmarkResult> FinalizeFoundryBenchmarkResultAsync(
-        IServiceProvider serviceProvider,
-        string model,
-        ModelBenchmarkResult result,
-        bool removeTooLargeModelsAfterBenchmark,
-        CancellationToken cancellationToken)
-    {
-        var finalizedResult = result;
-        var removedFromCache = false;
-
-        if (removeTooLargeModelsAfterBenchmark && ShouldRemoveFoundryModelAfterBenchmark(result))
-        {
-            try
-            {
-                await RemoveFoundryModelAsync(serviceProvider, model, cancellationToken);
-                removedFromCache = true;
-                finalizedResult = AppendBenchmarkNote(
-                    finalizedResult,
-                    "Removed from the local Foundry cache after benchmark because it was classified as too large for interactive use.");
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                operations.Error($"Could not remove Foundry model {model} after benchmark.", exception.Message);
-                finalizedResult = AppendBenchmarkNote(
-                    finalizedResult,
-                    $"Benchmark completed, but the model could not be removed from the local Foundry cache: {exception.Message}");
-            }
-        }
-
-        if (!removedFromCache)
-        {
-            try
-            {
-                await UnloadFoundryModelAsync(serviceProvider, model, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                operations.Error($"Could not unload Foundry model {model} after benchmark.", exception.Message);
-                finalizedResult = AppendBenchmarkNote(
-                    finalizedResult,
-                    $"Benchmark completed, but the model could not be unloaded from the active Foundry runtime: {exception.Message}");
-            }
-        }
-
-        try
-        {
-            await RefreshFoundryAvailabilityAsync(serviceProvider, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            operations.Error("Could not refresh Foundry catalog after benchmark.", exception.Message);
-            finalizedResult = AppendBenchmarkNote(
-                finalizedResult,
-                $"Benchmark completed, but the Foundry catalog refresh failed afterward: {exception.Message}");
-        }
-
-        return finalizedResult;
-    }
-
-    private async Task RefreshFoundryAvailabilityAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken)
-    {
-        var catalogClient = serviceProvider.GetRequiredService<IFoundryCatalogClient>();
-        var snapshot = await RefreshFoundrySnapshotAsync(catalogClient, cancellationToken);
-        workspace.SetFoundryAvailability(snapshot.Availability);
-    }
-
-    private async Task<FoundryCatalogSnapshot> RefreshFoundrySnapshotAsync(
-        IFoundryCatalogClient catalogClient,
-        CancellationToken cancellationToken)
-    {
-        var snapshot = await catalogClient.GetSnapshotAsync(cancellationToken);
-        workspace.SetFoundryAvailability(snapshot.Availability);
-        return snapshot;
     }
 
     private static ModelBenchmarkResult AppendBenchmarkNote(ModelBenchmarkResult result, string note)
