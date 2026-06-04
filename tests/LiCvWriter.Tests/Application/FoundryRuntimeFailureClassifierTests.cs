@@ -5,6 +5,9 @@ namespace LiCvWriter.Tests.Application;
 
 public sealed class FoundryRuntimeFailureClassifierTests
 {
+    private const string ModelCacheRoot = "test-model-cache";
+    private const string LogsRoot = "test-foundry-logs";
+
     [Fact]
     public void TryCreateException_TensorRtDeserializeMessage_ReturnsRetriableLoadFailure()
     {
@@ -14,15 +17,15 @@ public sealed class FoundryRuntimeFailureClassifierTests
         var classified = FoundryRuntimeFailureClassifier.TryCreateException(
             exception,
             retryAttempted: true,
-            modelCacheRoot: @"C:\Users\henri\.LI-CV-Writer\cache\models",
-            logsRoot: @"C:\Users\henri\.LI-CV-Writer\logs");
+            modelCacheRoot: ModelCacheRoot,
+            logsRoot: LogsRoot);
 
         Assert.NotNull(classified);
         Assert.Equal(FoundryRuntimeFailureKind.TensorRtEngineLoad, classified!.FailureKind);
         Assert.Equal("Foundry TensorRT engine load failed after a runtime reset retry.", classified.Message);
         Assert.True(FoundryRuntimeFailureClassifier.IsRetriableModelLoadFailure(exception));
         Assert.Contains(classified.Notes, static note => note.Contains("resetting the in-process Foundry runtime", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(classified.Notes, static note => note.Contains(@"C:\Users\henri\.LI-CV-Writer\cache\models", StringComparison.Ordinal));
+        Assert.Contains(classified.Notes, static note => note.Contains(ModelCacheRoot, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -34,7 +37,7 @@ public sealed class FoundryRuntimeFailureClassifierTests
         var classified = FoundryRuntimeFailureClassifier.TryCreateException(
             exception,
             retryAttempted: false,
-            logsRoot: @"C:\Users\henri\.LI-CV-Writer\logs");
+            logsRoot: LogsRoot);
 
         Assert.NotNull(classified);
         Assert.Equal(FoundryRuntimeFailureKind.TensorRtGpuOutOfMemory, classified!.FailureKind);

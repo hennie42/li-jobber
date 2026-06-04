@@ -207,6 +207,7 @@ public sealed class OllamaModelBenchmarkServiceTests
     [Fact]
     public async Task RunSingleAsync_FoundryRuntimeFailure_UsesClassifiedReasonAndNotes()
     {
+        const string modelCacheRoot = "test-model-cache";
         var llmClient = new ScriptedLlmClient([
             new LlmResponse("m:test", "ready", null, true, 4, 64, TimeSpan.FromSeconds(1.0),
                 LoadDuration: TimeSpan.Zero,
@@ -219,7 +220,7 @@ public sealed class OllamaModelBenchmarkServiceTests
                 FoundryRuntimeFailureKind.TensorRtEngineLoad,
                 "Foundry TensorRT engine load failed after a runtime reset retry.",
                 retryAttempted: true,
-                [@"If this keeps recurring, stop the app and reset the affected Foundry model variant under 'C:\Users\henri\.LI-CV-Writer\cache\models'."])
+                [$"If this keeps recurring, stop the app and reset the affected Foundry model variant under '{modelCacheRoot}'."])
         };
         llmClient.Running = new LlmRunningModel("m:test", "m:test", null, SizeVramBytes: 4_000_000_000, SizeBytes: 4_000_000_000);
 
@@ -230,7 +231,7 @@ public sealed class OllamaModelBenchmarkServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("Foundry TensorRT engine load failed after a runtime reset retry.", result.FailedReason);
-        Assert.Contains(result.Notes, static note => note.Contains(@"C:\Users\henri\.LI-CV-Writer\cache\models", StringComparison.Ordinal));
+        Assert.Contains(result.Notes, static note => note.Contains(modelCacheRoot, StringComparison.Ordinal));
         Assert.Equal(OllamaCapacityFit.Comfortable, result.Fit);
     }
 

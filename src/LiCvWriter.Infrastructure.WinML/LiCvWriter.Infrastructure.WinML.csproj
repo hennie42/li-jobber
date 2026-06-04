@@ -14,7 +14,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\LiCvWriter.Infrastructure\Llm\FoundryCatalogMetadataReader.cs" Link="Llm\FoundryCatalogMetadataReader.cs" />
+    <Compile Include="..\LiCvWriter.Infrastructure\Llm\FoundryCatalogSnapshotCache.cs" Link="Llm\FoundryCatalogSnapshotCache.cs" />
     <Compile Include="..\LiCvWriter.Infrastructure\Llm\FoundryOpenAiResponseMapper.cs" Link="Llm\FoundryOpenAiResponseMapper.cs" />
+    <Compile Include="..\LiCvWriter.Infrastructure\Llm\FoundrySdkTaskInvoker.cs" Link="Llm\FoundrySdkTaskInvoker.cs" />
+    <Compile Include="..\LiCvWriter.Infrastructure\Llm\FoundryStreamingCompletionRunner.cs" Link="Llm\FoundryStreamingCompletionRunner.cs" />
   </ItemGroup>
 
   <ItemGroup>

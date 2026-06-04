@@ -2,7 +2,6 @@ using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
-using System.Text;
 using Betalgo.Ranul.OpenAI.ObjectModels.RequestModels;
 using LiCvWriter.Application.Abstractions;
 using LiCvWriter.Application.Models;
@@ -16,11 +15,14 @@ namespace LiCvWriter.Infrastructure.WinML;
 
 internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySdkBridge, IDisposable
 {
-    private const int FoundryContentRepetitionMinLength = 240;
-    private const int FoundryThinkingRepetitionMinLength = 120;
+    private static readonly TimeSpan CatalogSnapshotCacheDuration = TimeSpan.FromSeconds(10);
+    private readonly FoundryCatalogSnapshotCache catalogSnapshotCache = new(CatalogSnapshotCacheDuration);
     private readonly WinMlFoundryLocalManagerAccessor managerAccessor = new(options);
 
     public async Task<FoundryCatalogSnapshot> GetCatalogSnapshotAsync(CancellationToken cancellationToken = default)
+        => await catalogSnapshotCache.GetOrCreateAsync(GetFreshCatalogSnapshotAsync, cancellationToken);
+
+    private async Task<FoundryCatalogSnapshot> GetFreshCatalogSnapshotAsync(CancellationToken cancellationToken)
     {
         var manager = await managerAccessor.GetManagerAsync(cancellationToken);
         var catalog = await manager.GetCatalogAsync();
@@ -42,12 +44,12 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
             .Select(model =>
             {
                 var displayName = string.IsNullOrWhiteSpace(model.Info.DisplayName) ? model.Alias : model.Info.DisplayName;
-                var description = ReadModelDescription(model.Info);
+                var description = FoundryCatalogMetadataReader.ReadModelDescription(model.Info);
                 var suitability = FoundryTextBenchmarkSuitabilityEvaluator.Evaluate(
                     model.Alias,
                     displayName,
                     description,
-                    ReadModelMetadata(model.Info));
+                    FoundryCatalogMetadataReader.ReadModelMetadata(model.Info));
 
                 return new FoundryCatalogModel(
                     model.Alias,
@@ -112,6 +114,7 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
             await manager.DownloadAndRegisterEpsAsync(requestedNames, progress, cancellation);
         }
 
+        catalogSnapshotCache.Invalidate();
         return BuildAccelerationSnapshot(manager);
     }
 
@@ -137,6 +140,7 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
 
         Action<float>? rawProgress = progress is null ? null : value => progress(value);
         await model.DownloadAsync(rawProgress);
+        catalogSnapshotCache.Invalidate();
     }
 
     public async Task RemoveModelAsync(
@@ -153,8 +157,9 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         var model = await catalog.GetModelAsync(alias.Trim())
             ?? throw new InvalidOperationException($"The Foundry model '{alias}' was not found in the local catalog.");
 
-        await InvokeOptionalTaskAsync(model, "UnloadAsync", cancellationToken);
-        await InvokeRequiredTaskAsync(model, "RemoveFromCacheAsync", cancellationToken);
+        await FoundrySdkTaskInvoker.InvokeOptionalAsync(model, "UnloadAsync", cancellationToken);
+        await FoundrySdkTaskInvoker.InvokeRequiredAsync(model, "RemoveFromCacheAsync", cancellationToken);
+        catalogSnapshotCache.Invalidate();
     }
 
     public async Task UnloadModelAsync(
@@ -171,7 +176,8 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         var model = await catalog.GetModelAsync(alias.Trim())
             ?? throw new InvalidOperationException($"The Foundry model '{alias}' was not found in the local catalog.");
 
-        await InvokeOptionalTaskAsync(model, "UnloadAsync", cancellationToken);
+        await FoundrySdkTaskInvoker.InvokeOptionalAsync(model, "UnloadAsync", cancellationToken);
+        catalogSnapshotCache.Invalidate();
     }
 
     public async Task<LlmModelAvailability> VerifyModelAvailabilityAsync(CancellationToken cancellationToken = default)
@@ -210,8 +216,8 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         var modelAlias = ResolveModelAlias(request.Model);
         try
         {
-            await EnsureModelAvailabilityAsync(modelAlias, cancellationToken);
-            return await ExecuteGenerateAsync(modelAlias, request, progress, cancellationToken);
+            var snapshot = await EnsureModelAvailabilityAsync(modelAlias, cancellationToken);
+            return await ExecuteGenerateAsync(modelAlias, snapshot, request, progress, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -240,91 +246,6 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
     private static string GetSdkVersion()
         => typeof(FoundryLocalManager).Assembly.GetName().Version?.ToString() ?? string.Empty;
 
-    private static async Task InvokeOptionalTaskAsync(object target, string methodName, CancellationToken cancellationToken)
-    {
-        var invocation = ResolveTaskInvocation(target, methodName, cancellationToken);
-        if (invocation is null)
-        {
-            return;
-        }
-
-        try
-        {
-            if (invocation.Method.Invoke(target, invocation.Arguments) is Task task)
-            {
-                await task;
-            }
-        }
-        catch (TargetInvocationException exception) when (exception.InnerException is not null)
-        {
-            throw exception.InnerException;
-        }
-    }
-
-    private static async Task InvokeRequiredTaskAsync(object target, string methodName, CancellationToken cancellationToken)
-    {
-        var invocation = ResolveTaskInvocation(target, methodName, cancellationToken)
-            ?? throw new InvalidOperationException($"This Foundry SDK build does not expose '{methodName}'.");
-
-        try
-        {
-            if (invocation.Method.Invoke(target, invocation.Arguments) is not Task task)
-            {
-                throw new InvalidOperationException($"Foundry SDK method '{methodName}' did not return a Task.");
-            }
-
-            await task;
-        }
-        catch (TargetInvocationException exception) when (exception.InnerException is not null)
-        {
-            throw exception.InnerException;
-        }
-    }
-
-    private static TaskInvocation? ResolveTaskInvocation(object target, string methodName, CancellationToken cancellationToken)
-    {
-        foreach (var method in target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public))
-        {
-            if (!string.Equals(method.Name, methodName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var parameters = method.GetParameters();
-            if (parameters.Length == 0)
-            {
-                return new TaskInvocation(method, []);
-            }
-
-            if (parameters.Length == 1 && TryBuildCancellationTokenArgument(parameters[0].ParameterType, cancellationToken, out var argument))
-            {
-                return new TaskInvocation(method, [argument]);
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TryBuildCancellationTokenArgument(Type parameterType, CancellationToken cancellationToken, out object? argument)
-    {
-        if (parameterType == typeof(CancellationToken))
-        {
-            argument = cancellationToken;
-            return true;
-        }
-
-        if (parameterType == typeof(CancellationToken?))
-        {
-            argument = (CancellationToken?)cancellationToken;
-            return true;
-        }
-
-        argument = null;
-        return false;
-    }
-
-    private sealed record TaskInvocation(MethodInfo Method, object?[] Arguments);
-
     private FoundryAccelerationSnapshot BuildAccelerationSnapshot(FoundryLocalManager manager)
     {
         if (!options.UseWindowsMlAcceleration)
@@ -340,7 +261,7 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
 
         try
         {
-            var executionProviders = MapExecutionProviders(discoverMethod.Invoke(manager, null) as IEnumerable);
+            var executionProviders = FoundryCatalogMetadataReader.MapExecutionProviders(discoverMethod.Invoke(manager, null) as IEnumerable);
             var registeredCount = executionProviders.Count(static executionProvider => executionProvider.IsRegistered);
             var discoveredCount = executionProviders.Count;
             var statusMessage = discoveredCount switch
@@ -376,100 +297,6 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
             .ToArray();
     }
 
-    private static IReadOnlyList<FoundryExecutionProviderInfo> MapExecutionProviders(IEnumerable? rawExecutionProviders)
-    {
-        if (rawExecutionProviders is null)
-        {
-            return [];
-        }
-
-        var executionProviders = new List<FoundryExecutionProviderInfo>();
-        foreach (var rawExecutionProvider in rawExecutionProviders)
-        {
-            if (rawExecutionProvider is null)
-            {
-                continue;
-            }
-
-            var executionProviderType = rawExecutionProvider.GetType();
-            var name = ReadStringProperty(executionProviderType, rawExecutionProvider, "Name");
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                continue;
-            }
-
-            var displayName = ReadStringProperty(executionProviderType, rawExecutionProvider, "DisplayName");
-            executionProviders.Add(new FoundryExecutionProviderInfo(
-                name,
-                string.IsNullOrWhiteSpace(displayName) ? name : displayName,
-                ReadBooleanProperty(executionProviderType, rawExecutionProvider, "IsRegistered")));
-        }
-
-        return executionProviders
-            .OrderByDescending(static executionProvider => executionProvider.IsRegistered)
-            .ThenBy(static executionProvider => executionProvider.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static bool ReadBooleanProperty(Type type, object instance, string propertyName)
-        => type.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)?.GetValue(instance) as bool? ?? false;
-
-    private static string ReadStringProperty(Type type, object instance, string propertyName)
-        => type.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)?.GetValue(instance)?.ToString() ?? string.Empty;
-
-    private static string? ReadModelDescription(object modelInfo)
-    {
-        var type = modelInfo.GetType();
-        foreach (var propertyName in new[] { "Description", "Summary", "ShortDescription" })
-        {
-            var value = ReadStringProperty(type, modelInfo, propertyName);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-        }
-
-        return null;
-    }
-
-    private static IReadOnlyList<string> ReadModelMetadata(object modelInfo)
-    {
-        var type = modelInfo.GetType();
-        var metadata = new List<string>();
-
-        foreach (var propertyName in new[] { "Task", "Tasks", "Modality", "Modalities", "Capability", "Capabilities" })
-        {
-            metadata.AddRange(ReadPropertyValues(type, modelInfo, propertyName));
-        }
-
-        return metadata;
-    }
-
-    private static IReadOnlyList<string> ReadPropertyValues(Type type, object instance, string propertyName)
-    {
-        var property = type.GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
-        if (property is null)
-        {
-            return Array.Empty<string>();
-        }
-
-        var value = property.GetValue(instance);
-        return value switch
-        {
-            null => Array.Empty<string>(),
-            string text when !string.IsNullOrWhiteSpace(text) => [text.Trim()],
-            IEnumerable sequence when value is not string => sequence
-                .Cast<object?>()
-                .Select(static item => item?.ToString())
-                .Where(static item => !string.IsNullOrWhiteSpace(item))
-                .Select(static item => item!.Trim())
-                .ToArray(),
-            _ => value.ToString() is { } text && !string.IsNullOrWhiteSpace(text)
-                ? [text.Trim()]
-                : Array.Empty<string>()
-        };
-    }
-
     private static ChatMessage[] BuildMessages(LlmRequest request)
     {
         var messages = new List<ChatMessage>();
@@ -491,17 +318,20 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         return messages.ToArray();
     }
 
-    private async Task EnsureModelAvailabilityAsync(string modelAlias, CancellationToken cancellationToken)
+    private async Task<FoundryCatalogSnapshot> EnsureModelAvailabilityAsync(string modelAlias, CancellationToken cancellationToken)
     {
-        var availability = await VerifyModelAvailabilityAsync(cancellationToken);
-        if (!availability.AvailableModels.Any(model => model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)))
+        var snapshot = await GetCatalogSnapshotAsync(cancellationToken);
+        if (!snapshot.Availability.AvailableModels.Any(model => model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException($"The Foundry model '{modelAlias}' is not downloaded. Download it from Start / Setup before using it.");
         }
+
+        return snapshot;
     }
 
     private async Task<LlmResponse> ExecuteGenerateAsync(
         string modelAlias,
+        FoundryCatalogSnapshot snapshot,
         LlmRequest request,
         Action<LlmProgressUpdate>? progress,
         CancellationToken cancellationToken)
@@ -511,9 +341,10 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
         var model = await catalog.GetModelAsync(modelAlias)
             ?? throw new InvalidOperationException($"The Foundry model '{modelAlias}' was not found in the local catalog.");
 
-        if (options.AutoLoadSelectedModel)
+        if (options.AutoLoadSelectedModel && !IsModelLoaded(snapshot, modelAlias))
         {
             await model.LoadAsync();
+            catalogSnapshotCache.Invalidate();
         }
 
         var chatClient = await model.GetChatClientAsync();
@@ -524,7 +355,7 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
 
         if (request.Stream || progress is not null)
         {
-            return await CompleteStreamingAsync(chatClient, modelAlias, messages, progress, stopwatch, captureThinking, cancellationToken);
+            return await FoundryStreamingCompletionRunner.CompleteAsync(chatClient, modelAlias, messages, progress, stopwatch, captureThinking, cancellationToken);
         }
 
         var response = await chatClient.CompleteChatAsync(messages);
@@ -544,83 +375,11 @@ internal sealed class WinMlFoundrySdkBridge(FoundryOptions options) : IFoundrySd
             managerAccessor.GetResolvedLogsDirectory(),
             additionalNotes);
 
-    private static async Task<LlmResponse> CompleteStreamingAsync(
-        OpenAIChatClient chatClient,
-        string modelAlias,
-        IReadOnlyList<ChatMessage> messages,
-        Action<LlmProgressUpdate>? progress,
-        Stopwatch stopwatch,
-        bool captureThinking,
-        CancellationToken cancellationToken)
-    {
-        var responseBuffer = new StringBuilder();
-        var thinkingBuffer = new StringBuilder();
-        long? promptTokens = null;
-        long? completionTokens = null;
-        long sequence = 0;
-
-        await foreach (var chunk in chatClient.CompleteChatStreamingAsync(messages, cancellationToken))
-        {
-            FoundryOpenAiResponseMapper.MergeStreamingChunk(chunk, responseBuffer, thinkingBuffer, ref promptTokens, ref completionTokens, captureThinking);
-
-            if (captureThinking && StreamingRepetitionDetector.DetectRepetitionLoop(thinkingBuffer, FoundryThinkingRepetitionMinLength))
-            {
-                throw new TimeoutException(
-                    $"Foundry thinking output entered a repetition loop after {thinkingBuffer.Length} characters. " +
-                    "The model may need a less reasoning-heavy prompt or a lower thinking setting.");
-            }
-
-            if (StreamingRepetitionDetector.DetectRepetitionLoop(responseBuffer, FoundryContentRepetitionMinLength))
-            {
-                throw new TimeoutException(
-                    $"Foundry content output entered a repetition loop after {responseBuffer.Length} characters. " +
-                    "The model may need a more constrained prompt or lower temperature.");
-            }
-
-            var responseContent = responseBuffer.ToString();
-            var thinkingContent = captureThinking && thinkingBuffer.Length > 0 ? thinkingBuffer.ToString() : null;
-
-            progress?.Invoke(new LlmProgressUpdate(
-                "Generating response",
-                null,
-                modelAlias,
-                stopwatch.Elapsed,
-                Completed: false,
-                PromptTokens: promptTokens,
-                CompletionTokens: completionTokens,
-                ThinkingPreview: FoundryOpenAiResponseMapper.BuildThinkingPreview(thinkingContent),
-                ResponseContent: responseContent,
-                ThinkingContent: thinkingContent,
-                Sequence: ++sequence));
-        }
-
-        stopwatch.Stop();
-        var finalResponseContent = responseBuffer.ToString();
-        var finalThinkingContent = captureThinking && thinkingBuffer.Length > 0 ? thinkingBuffer.ToString() : null;
-
-        progress?.Invoke(new LlmProgressUpdate(
-            "Generating response",
-            "Foundry Local completed the response.",
-            modelAlias,
-            stopwatch.Elapsed,
-            Completed: true,
-            PromptTokens: promptTokens,
-            CompletionTokens: completionTokens,
-            ThinkingPreview: FoundryOpenAiResponseMapper.BuildThinkingPreview(finalThinkingContent),
-            ResponseContent: finalResponseContent,
-            ThinkingContent: finalThinkingContent,
-            Sequence: ++sequence));
-
-        return new LlmResponse(
-            modelAlias,
-            finalResponseContent,
-            finalThinkingContent,
-            Completed: true,
-            PromptTokens: promptTokens,
-            CompletionTokens: completionTokens,
-            Duration: stopwatch.Elapsed,
-            EvalDuration: completionTokens is > 0 ? stopwatch.Elapsed : null);
-    }
+    private static bool IsModelLoaded(FoundryCatalogSnapshot snapshot, string modelAlias)
+        => snapshot.Models.Any(model => model.IsLoaded && model.Alias.Equals(modelAlias, StringComparison.OrdinalIgnoreCase))
+           || snapshot.Availability.EffectiveRunningModels.Any(model =>
+               model.Name.Equals(modelAlias, StringComparison.OrdinalIgnoreCase)
+               || model.Model.Equals(modelAlias, StringComparison.OrdinalIgnoreCase));
 
     private string ResolveModelAlias(string requestedModel)
         => string.IsNullOrWhiteSpace(requestedModel) ? options.DefaultModelAlias : requestedModel.Trim();

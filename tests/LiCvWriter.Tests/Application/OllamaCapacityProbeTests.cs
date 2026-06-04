@@ -126,11 +126,12 @@ public sealed class OllamaCapacityProbeTests
     [Fact]
     public async Task ProbeAsync_FoundryRuntimeFailure_ReturnsUnknownWithClassifiedHeadline()
     {
+        const string modelCacheRoot = "test-model-cache";
         var foundryException = new FoundryRuntimeException(
             FoundryRuntimeFailureKind.TensorRtEngineLoad,
             "Foundry TensorRT engine load failed after a runtime reset retry.",
             retryAttempted: true,
-            [@"If this keeps recurring, stop the app and reset the affected Foundry model variant under 'C:\Users\henri\.LI-CV-Writer\cache\models'."]);
+            [$"If this keeps recurring, stop the app and reset the affected Foundry model variant under '{modelCacheRoot}'."]);
 
         var probe = new OllamaCapacityProbe(new ThrowingWarmupLlmClient(foundryException), DefaultOptions);
 
@@ -138,7 +139,7 @@ public sealed class OllamaCapacityProbeTests
 
         Assert.Equal(OllamaCapacityFit.Unknown, verdict.Fit);
         Assert.Equal(foundryException.Message, verdict.Headline);
-        Assert.Contains(verdict.Notes, static note => note.Contains(@"C:\Users\henri\.LI-CV-Writer\cache\models", StringComparison.Ordinal));
+        Assert.Contains(verdict.Notes, static note => note.Contains(modelCacheRoot, StringComparison.Ordinal));
     }
 
     private static LlmResponse CreateWarmup(long? evalTokens, double? evalSeconds, double? loadSeconds = null)

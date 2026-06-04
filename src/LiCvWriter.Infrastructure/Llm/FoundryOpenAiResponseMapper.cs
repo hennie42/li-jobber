@@ -172,19 +172,57 @@ internal static class FoundryOpenAiResponseMapper
             return;
         }
 
-        var existing = aggregate.ToString();
-        if (incoming.Equals(existing, StringComparison.Ordinal) || existing.StartsWith(incoming, StringComparison.Ordinal))
+        if (ContentEquals(aggregate, incoming) || StartsWith(aggregate, incoming))
         {
             return;
         }
 
-        if (incoming.StartsWith(existing, StringComparison.Ordinal))
+        if (StartsWith(incoming, aggregate))
         {
-            aggregate.Append(incoming.AsSpan(existing.Length));
+            aggregate.Append(incoming.AsSpan(aggregate.Length));
             return;
         }
 
         aggregate.Append(incoming);
+    }
+
+    private static bool ContentEquals(StringBuilder aggregate, string incoming)
+        => aggregate.Length == incoming.Length && StartsWith(aggregate, incoming);
+
+    private static bool StartsWith(StringBuilder aggregate, string incoming)
+    {
+        if (aggregate.Length < incoming.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < incoming.Length; index++)
+        {
+            if (aggregate[index] != incoming[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool StartsWith(string incoming, StringBuilder aggregate)
+    {
+        if (incoming.Length < aggregate.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < aggregate.Length; index++)
+        {
+            if (incoming[index] != aggregate[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsStructuredJsonResponse(LlmResponseFormat? responseFormat)
