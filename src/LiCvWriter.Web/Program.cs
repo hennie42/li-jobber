@@ -83,23 +83,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/api/health/ollama", async (OllamaClient client, CancellationToken cancellationToken) =>
-{
-    var result = await client.VerifyModelAvailabilityAsync(cancellationToken);
-    return Results.Ok(result);
-});
-
-app.MapGet("/api/health/foundry", async (IFoundryCatalogClient catalogClient, CancellationToken cancellationToken) =>
-{
-    var result = await catalogClient.GetSnapshotAsync(cancellationToken);
-    return Results.Ok(result.Availability);
-});
-
-app.MapGet("/api/health/foundry/acceleration", async (IFoundryCatalogClient catalogClient, CancellationToken cancellationToken) =>
-{
-    var result = await catalogClient.GetSnapshotAsync(cancellationToken);
-    return Results.Ok(result.Acceleration);
-});
+app.MapLiCvWriterHealthEndpoints();
 
 app.MapGet("/api/files/exported", (string? path, WorkspaceSession workspace) =>
 {
