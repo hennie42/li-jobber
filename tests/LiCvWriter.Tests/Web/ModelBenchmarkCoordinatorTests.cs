@@ -921,6 +921,10 @@ public sealed class ModelBenchmarkCoordinatorTests
             operations,
             resolvedFoundryOptions,
             TimeProvider.System);
+        var hangMonitor = new ModelBenchmarkHangMonitor(
+            resolvedHangClockPolicy,
+            TimeProvider.System,
+            operations);
         var coordinator = new ModelBenchmarkCoordinator(
             provider.GetRequiredService<IServiceScopeFactory>(),
             workspace,
@@ -928,7 +932,7 @@ public sealed class ModelBenchmarkCoordinatorTests
             resolvedOllamaOptions,
             foundryLifecycle,
             TimeProvider.System,
-            resolvedHangClockPolicy);
+            hangMonitor);
 
         return (coordinator, workspace, operations);
     }

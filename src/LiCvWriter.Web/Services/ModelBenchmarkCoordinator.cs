@@ -22,7 +22,7 @@ public sealed class ModelBenchmarkCoordinator(
     OllamaOptions ollamaOptions,
     FoundryBenchmarkLifecycleService foundryLifecycle,
     TimeProvider timeProvider,
-    ModelBenchmarkHangClockPolicy hangClockPolicy)
+    ModelBenchmarkHangMonitor hangMonitor)
 {
     private readonly object gate = new();
     private ModelBenchmarkSession? current;
@@ -127,7 +127,7 @@ public sealed class ModelBenchmarkCoordinator(
             cancellationToken.ThrowIfCancellationRequested();
 
             var model = models[index];
-            var hangClock = new ModelHangClockState(hangClockPolicy, timeProvider.GetUtcNow());
+            var hangClock = hangMonitor.CreateClock();
             ReportLiveProgress(
                 model,
                 index,
@@ -148,11 +148,12 @@ public sealed class ModelBenchmarkCoordinator(
             using var modelLifetimeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, hangTerminationCts.Token);
             using var monitorStopCts = new CancellationTokenSource();
             var modelLifetimeToken = modelLifetimeCts.Token;
-            var hangMonitorTask = MonitorModelHangAsync(
+            var hangMonitorTask = hangMonitor.MonitorAsync(
                 model,
                 results.ToArray(),
                 hangClock,
                 hangTerminationCts,
+                UpdateHangState,
                 monitorStopCts.Token);
 
             try
@@ -421,38 +422,6 @@ public sealed class ModelBenchmarkCoordinator(
     }
 
     /// <summary>
-    /// Monitors the active model slot for missing benchmark progress and escalates from warning to cancellation.
-    /// </summary>
-    private async Task MonitorModelHangAsync(
-        string model,
-        IReadOnlyList<ModelBenchmarkResult> partialResults,
-        ModelHangClockState hangClock,
-        CancellationTokenSource hangTerminationCts,
-        CancellationToken cancellationToken)
-    {
-        using var timer = new PeriodicTimer(hangClockPolicy.PollInterval, timeProvider);
-
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-        {
-            var now = timeProvider.GetUtcNow();
-            if (hangClock.TryEnterWarning(now))
-            {
-                UpdateHangState(model, partialResults, hangClock, now);
-                operations.Info($"Monitoring suspected benchmark hang: {model}", hangClock.HangDetail);
-            }
-
-            if (!hangClock.ShouldTerminate(now))
-            {
-                continue;
-            }
-
-            UpdateHangState(model, partialResults, hangClock, now);
-            hangTerminationCts.Cancel();
-            break;
-        }
-    }
-
-    /// <summary>
     /// Updates the live session with warning-state information without counting it as worker progress.
     /// </summary>
     private void UpdateHangState(
@@ -623,123 +592,4 @@ public sealed class ModelBenchmarkCoordinator(
         return ordered;
     }
 
-    private sealed class ModelHangClockState
-    {
-        private readonly object gate = new();
-        private readonly ModelBenchmarkHangClockPolicy policy;
-        private BenchmarkProgressSignature? lastSignature;
-        private ModelBenchmarkRunPhase currentPhase;
-        private string? currentFixtureDisplayName;
-        private int currentFixtureNumber;
-
-        public ModelHangClockState(ModelBenchmarkHangClockPolicy policy, DateTimeOffset startedAt)
-        {
-            this.policy = policy;
-            currentPhase = ModelBenchmarkRunPhase.Preparing;
-            LastRealProgressUtc = startedAt;
-        }
-
-        public DateTimeOffset LastRealProgressUtc { get; private set; }
-
-        public ModelBenchmarkHangState HangState { get; private set; }
-
-        public string? HangDetail { get; private set; }
-
-        public DateTimeOffset? WarningStartedUtc { get; private set; }
-
-        public DateTimeOffset? DeadlineUtc { get; private set; }
-
-        public void RecordRealProgress(ModelBenchmarkProgress progress, DateTimeOffset now)
-        {
-            lock (gate)
-            {
-                var nextSignature = new BenchmarkProgressSignature(
-                    progress.Phase,
-                    progress.CompletedFixtureCount,
-                    progress.CurrentFixtureNumber,
-                    progress.CurrentFixtureId,
-                    progress.Detail);
-
-                if (lastSignature == nextSignature)
-                {
-                    return;
-                }
-
-                lastSignature = nextSignature;
-                currentPhase = progress.Phase;
-                currentFixtureDisplayName = progress.CurrentFixtureDisplayName;
-                currentFixtureNumber = progress.CurrentFixtureNumber;
-                LastRealProgressUtc = now;
-                HangState = ModelBenchmarkHangState.None;
-                HangDetail = null;
-                WarningStartedUtc = null;
-                DeadlineUtc = null;
-            }
-        }
-
-        public bool TryEnterWarning(DateTimeOffset now)
-        {
-            lock (gate)
-            {
-                var warningAfter = policy.GetWarningAfter(currentPhase);
-                if (HangState == ModelBenchmarkHangState.Warning || (now - LastRealProgressUtc) < warningAfter)
-                {
-                    return false;
-                }
-
-                HangState = ModelBenchmarkHangState.Warning;
-                WarningStartedUtc = now;
-                DeadlineUtc = now + policy.GetGracePeriod(currentPhase);
-                HangDetail = BuildHangDetail(now, prefix: "No benchmark progress detected");
-                return true;
-            }
-        }
-
-        public bool ShouldTerminate(DateTimeOffset now)
-        {
-            lock (gate)
-            {
-                return HangState == ModelBenchmarkHangState.Warning
-                    && DeadlineUtc is { } deadline
-                    && now >= deadline;
-            }
-        }
-
-        public string BuildFailureReason(DateTimeOffset now)
-        {
-            lock (gate)
-            {
-                return BuildHangDetail(now, prefix: "Benchmark hang detected");
-            }
-        }
-
-        private string BuildHangDetail(DateTimeOffset now, string prefix)
-        {
-            var phaseLabel = currentPhase switch
-            {
-                ModelBenchmarkRunPhase.Preparing => "while preparing the current model",
-                ModelBenchmarkRunPhase.Warmup => "during warm-up",
-                ModelBenchmarkRunPhase.Evaluating => currentFixtureNumber > 0 && !string.IsNullOrWhiteSpace(currentFixtureDisplayName)
-                    ? $"during fixture {currentFixtureNumber}: {currentFixtureDisplayName}"
-                    : "during evaluation",
-                ModelBenchmarkRunPhase.Cleanup => "during cleanup",
-                ModelBenchmarkRunPhase.Finalizing => "during finalization",
-                _ => "during the current benchmark phase"
-            };
-
-            return $"{prefix} for {FormatInactivity(now - LastRealProgressUtc)} {phaseLabel}. If the stall continues, the queue will move on.";
-        }
-
-        private static string FormatInactivity(TimeSpan inactivity)
-            => inactivity.TotalMinutes >= 1
-                ? $"{Math.Ceiling(inactivity.TotalMinutes):0} minute(s)"
-                : $"{Math.Ceiling(Math.Max(inactivity.TotalSeconds, 1)):0} second(s)";
-    }
-
-    private sealed record BenchmarkProgressSignature(
-        ModelBenchmarkRunPhase Phase,
-        int CompletedFixtureCount,
-        int CurrentFixtureNumber,
-        string? CurrentFixtureId,
-        string Detail);
 }

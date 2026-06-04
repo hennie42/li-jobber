@@ -38,6 +38,7 @@ internal static class LlmServiceCollectionExtensions
         services.AddScoped<OllamaCapacityProbe>();
         services.AddScoped<OllamaModelBenchmarkService>();
         services.AddSingleton<FoundryBenchmarkLifecycleService>();
+        services.AddSingleton<ModelBenchmarkHangMonitor>();
         services.AddSingleton<ModelBenchmarkCoordinator>();
 
         return services;

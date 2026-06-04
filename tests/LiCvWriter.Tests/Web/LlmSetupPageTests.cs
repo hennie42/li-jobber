@@ -530,6 +530,7 @@ public sealed class LlmSetupPageTests
         services.AddSingleton(workspace);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<FoundryBenchmarkLifecycleService>();
+        services.AddSingleton<ModelBenchmarkHangMonitor>();
         services.AddSingleton(sp => new OllamaCapacityProbe(sp.GetRequiredService<ILlmClient>(), sp.GetRequiredService<OllamaOptions>()));
         services.AddSingleton(sp => new ModelBenchmarkCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
@@ -538,7 +539,7 @@ public sealed class LlmSetupPageTests
             sp.GetRequiredService<OllamaOptions>(),
             sp.GetRequiredService<FoundryBenchmarkLifecycleService>(),
             sp.GetRequiredService<TimeProvider>(),
-            sp.GetRequiredService<ModelBenchmarkHangClockPolicy>()));
+            sp.GetRequiredService<ModelBenchmarkHangMonitor>()));
     }
 
     private static IElement FindButton(IRenderedComponent<LlmSetupPage> cut, string label)
