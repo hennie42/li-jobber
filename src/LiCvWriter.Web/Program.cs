@@ -102,40 +102,7 @@ app.MapGet("/api/files/exported", (string? path, WorkspaceSession workspace) =>
     return Results.File(fullPath, "application/octet-stream", Path.GetFileName(fullPath));
 });
 
-app.MapPost("/api/benchmarks/model-queue", (StartModelBenchmarkRequest request, ModelBenchmarkCoordinator coordinator) =>
-{
-    try
-    {
-        _ = coordinator.StartAsync(
-            request.Provider,
-            request.Models,
-            request.DownloadMissingModels,
-            request.RemoveTooLargeModelsAfterBenchmark);
-
-        return Results.Accepted("/api/benchmarks/model-queue", coordinator.Current ?? coordinator.Last);
-    }
-    catch (InvalidOperationException exception)
-    {
-        return Results.BadRequest(exception.Message);
-    }
-});
-
-app.MapGet("/api/benchmarks/model-queue", (ModelBenchmarkCoordinator coordinator) =>
-{
-    var session = coordinator.Current ?? coordinator.Last;
-    return session is null ? Results.NotFound() : Results.Ok(session);
-});
-
-app.MapPost("/api/benchmarks/model-queue/cancel", (ModelBenchmarkCoordinator coordinator) =>
-{
-    if (!coordinator.IsRunning)
-    {
-        return Results.NotFound();
-    }
-
-    coordinator.Cancel();
-    return Results.Accepted("/api/benchmarks/model-queue", coordinator.Current ?? coordinator.Last);
-});
+app.MapLiCvWriterBenchmarkEndpoints();
 
 app.MapPost("/api/llm/operations/generate-drafts", (StartDraftGenerationOperationRequest request, LlmOperationBroker broker) =>
 {
